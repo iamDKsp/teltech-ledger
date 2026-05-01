@@ -1,0 +1,113 @@
+Contexto da Tarefa:
+Aja como um Engenheiro de Front-end Sênior especialista em React, Tailwind CSS e UI/UX. Preciso que você desenvolva a interface de um aplicativo SaaS de gestão de projetos (estilo Kanban/Jira), baseando-se estritamente nas especificações abaixo. O design é exclusivamente em Dark Mode.
+
+1. Design System e Paleta de Cores (Dark Mode)
+Fundo Principal (Canvas/Board): Cinza escuro fosco (ex: #121212 ou #18181B).
+
+Fundo da Sidebar e Header: Cinza escuro ligeiramente mais claro para diferenciar do fundo do board (ex: #1E1E1E ou #27272A).
+
+Fundo dos Cards: Cinza intermediário, destacando-se sobre o board (ex: #2D2D30 ou #3F3F46).
+
+Tipografia: Fonte Sans-serif moderna e limpa (Inter, Roboto ou San Francisco). Textos primários em branco/cinza claro, textos secundários (datas, estimativas) em cinza médio (muted).
+
+Cores de Destaque (Tags e UI):
+
+Roxo vibrante (ativo/Doing, botões de pause, sublinhados de abas ativas).
+
+Verde esmeralda (ícones de status de sucesso, badges de projetos favoritos).
+
+Azul claro, Amarelo/Laranja, Rosa, Cinza claro (usados para as tags (Labels) das tarefas).
+
+Vermelho suave (para tarefas atrasadas ou que excederam o tempo estimado na coluna "Review").
+
+2. Estrutura de Layout (Grid/Flexbox)
+A tela é dividida em três áreas principais: Sidebar Esquerda (fixa), Header Superior (fixo) e a Área Principal do Board (rolagem horizontal e vertical).
+
+3. Componente: Sidebar (Barra Lateral Esquerda)
+Logo/Brand: No topo esquerdo, texto "brandux" em branco com um ícone de "A" estilizado (ou triângulo) à esquerda e um ícone de menu hambúrguer ou colapso à direita.
+
+Menu de Navegação Principal: Lista vertical de links com ícone + texto: Home, Dashboard, Projects, My Tasks, Members, Goals, Settings.
+
+Seção "Favorite" (Sanfonada):
+
+Projetos favoritados: "StrataScratch" (ativo, com fundo levemente destacado e ícone verde) e "AlertSec" (ícone azul).
+
+Botão de opções (três pontos) ao passar o mouse.
+
+Seção "Projects" (Sanfonada):
+
+Header da seção com ícones de "+" (adicionar) e "^" (colapsar).
+
+Lista de projetos com ícones/logos coloridos em miniatura seguidos do nome: Apvision, AlertSec, Bomani Cold Buzz, Danyon, JB Consulting, My Choice Software, StrataScratch, Wake Up Coffee.
+
+Link no rodapé: "Show All Projects v".
+
+4. Componente: Header Superior
+Informações do Projeto (Esquerda):
+
+Ícone do projeto atual ("StrataScratch").
+
+Título "StrataScratch" com um chevron para baixo (dropdown).
+
+Ícones de ação: "!" (informação) e "Estrela" (favoritar).
+
+Badge de Status: Fundo verde escuro, ícone de check verde claro com o texto "According to plan".
+
+Informações da Equipe (Direita):
+
+Cluster de Avatares: Sobreposição de 5 pequenas fotos redondas de membros da equipe.
+
+Botão de perfil/busca na extrema direita.
+
+Menu de Abas (Tabs):
+
+Localizado logo abaixo do título do projeto.
+
+Opções: Overview, List, Boards (ativo, cor branca e sublinhado grosso na cor roxa), Chronology, Calendar, Members, Channels, Files. Textos inativos em cinza.
+
+5. Componente: Main Area - Kanban Board
+O board possui colunas dispostas horizontalmente. O título de cada coluna contém o Nome, a Quantidade de Tarefas e ícones de "+" e "..." (opções).
+
+Estrutura das Colunas:
+
+Untitled (4 Tasks)
+
+To Do (8 Tasks)
+
+Doing (14 Tasks)
+
+Review (2 Tasks)
+
+Done (Visível parcialmente)
+
+6. Componente: Anatomia do Card de Tarefa (Task Card)
+Cada card possui os seguintes elementos de cima para baixo, organizados de forma fluida:
+
+Imagem de Capa (Opcional): Alguns cards possuem um thumbnail ou mockup na parte superior.
+
+Tags (Labels): Pequenos retângulos arredondados (ex: UX/UI (roxo), Marketing (amarelo), No billing (cinza), QA (azul)). Elas ficam alinhadas à esquerda.
+
+Data de Entrega (Opcional): Alinhado à direita na mesma linha das tags (ex: "3 Jun").
+
+Título da Tarefa: Texto em branco, peso médio (ex: "StrataScratch - Behance Presentation").
+
+Rodapé do Card (Linha 1 - Ações):
+
+Esquerda: Cluster de avatares dos responsáveis (1 a 4 fotos sobrepostas). Às vezes há um botão tracejado circular para "adicionar responsável".
+
+Direita: Ícones de interação: Clip (anexos com contador), Balão de fala (comentários com contador), Botão de Play circular com um timer "00:00". Em cards ativos (coluna Doing), o botão muda para Pause (cor roxa) e o tempo corre (ex: "16:32 h"). Na coluna Review, o play pode ficar vermelho.
+
+Rodapé do Card (Linha 2 - Progresso):
+
+Esquerda: Barra de progresso linear (grossa). O fundo é cinza escuro. O preenchimento varia conforme a coluna: roxa (em andamento), vermelha (estourou o tempo), ou cinza escuro vazio.
+
+Direita: Tempo estimado (ex: "Est: 8:00 h" ou "Est: 30:00 h").
+
+Estados Especiais do Card:
+
+Hover/Drag state: O card ganha um sombreamento extra (drop shadow forte) ou leve opacidade quando está sendo arrastado (visível no card "StrataScratch - New Pricing Page" flutuando entre as colunas).
+
+Ícones substitutos: O botão de play/tempo em algumas colunas (como Untitled) é substituído por um ícone de Calendário circular.
+
+Instruções Finais para o Dev AI:
+Gere o código modularizando o máximo possível: Sidebar, TopNav, Board, Column e TaskCard. Use dados mockados em um array de objetos para renderizar os cards e demonstrar os diferentes estados (com imagem, sem imagem, timer rodando, etc).
