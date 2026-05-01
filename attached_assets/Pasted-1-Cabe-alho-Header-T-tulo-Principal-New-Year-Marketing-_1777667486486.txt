@@ -1,0 +1,81 @@
+1. Cabeçalho (Header)
+Título Principal: "New Year Marketing Campaign" (Fonte grande, em negrito, cor escura).
+
+Prioridade (Priority): Texto "Priority:" seguido por uma badge (etiqueta) azul clara com um ícone de bandeira e o texto "Normal".
+
+Linha Divisória: Há uma linha horizontal sutil (cinza claro) separando o cabeçalho dos campos de metadados.
+
+2. Metadados (Informações da Tarefa)
+Esta seção usa um layout de grade (grid) com duas colunas principais: Rótulo (à esquerda) e Valor (à direita).
+
+Assignees (Atribuídos):
+
+Dois usuários atribuídos, exibidos como chips (pílulas) com avatar circular + nome: "Mayad Ahmed" e "Tanvir Saimon".
+
+Botão circular com um ícone de "+".
+
+Interação visível: Ao passar o mouse no botão "+", exibe um tooltip com o texto escuro: "Add assignee for this task".
+
+Due date (Data de entrega): Texto simples: "23 Jan 2023".
+
+Status: Badge cinza claro com um pequeno círculo escuro à esquerda e o texto "TO DO" em letras maiúsculas.
+
+Tags:
+
+Badge verde clara com o texto verde escuro: "Graphics".
+
+Badge azul clara com o texto azul escuro: "Marketing".
+
+Texto placeholder (cinza claro) ao lado: "Add more".
+
+Created by (Criado por): Chip com avatar circular + nome: "Mayad Ahmed".
+
+3. Navegação por Abas (Tabs)
+Abas disponíveis: "Description", "Comments", "Activities".
+
+Estado Ativo: A aba "Description" está ativa (texto em negrito e com uma borda/linha preta inferior indicando seleção).
+
+Linha Divisória: Uma linha horizontal cinza estende-se por toda a largura abaixo das abas.
+
+4. Corpo da Aba: Description (Descrição)
+Caixa de Texto: Fundo cinza bem claro, com bordas arredondadas.
+
+Texto de Exemplo: "This campaign will focus on promoting our new product line through social media channels, includin... am, and Twitter."
+
+Interação de Formatação (Rich Text): Há uma palavra destacada ("promoting" com fundo roxo/azul claro). Abaixo dela, flutua um pequeno menu de ferramentas (toolbar) branco com sombra, contendo os ícones de formatação: B (Negrito), I (Itálico), U (Sublinhado) e T (Tachado/Formatação de texto).
+
+Há um ícone de redimensionamento (duas linhas diagonais) no canto inferior direito da caixa de texto.
+
+5. Seção de Subtarefas (Subtasks)
+Cabeçalho da Seção: Texto em caixa alta, fonte pequena e cinza: "ADD SUBTASKS".
+
+Item Existente: Ícone de quadrado (preenchido/preto) seguido do texto "Report on campaign results to the marketing team".
+
+Novo Item (Input): Ícone de quadrado cinza claro seguido de um texto placeholder cinza "Add subtask".
+
+Linha Divisória: Outra linha horizontal cinza claro abaixo dessa seção.
+
+6. Seção de Anexos (Attachments)
+Cabeçalho da Seção: Texto em caixa alta "ATTACHMENTS" seguido por um link/botão clicável azul escrito "Upload".
+
+Cards de Arquivos (estilo em grade horizontal):
+
+Card 1 (PDF): Ícone vermelho de PDF. Título: "Guidelines.pdf". Subtítulo (cinza): "PDF • Download".
+
+Card 2 (Drive): Ícone triangular do Google Drive. Título: "Branding Asssets" (nota: há um erro de digitação na imagem original com três "s"). Subtítulo (cinza): "Media • Download".
+
+Botão Adicionar: Um card quadrado, apenas com um ícone de "+" centralizado para adicionar mais arquivos.
+
+Estilo dos Cards: Fundo branco, contorno cinza muito sutil, bordas arredondadas.
+
+7. Rodapé (Footer)
+Visualizadores (Viewers): Texto "Viewers:" seguido de três avatares circulares sobrepostos (dois com fotos, um azul com a letra 'R') e um botão circular cinza com o ícone "+".
+
+Ação Principal: Botão grande, alinhado à direita, com cor de fundo azul-escuro/preto, bordas levemente arredondadas, contendo o texto branco: "Create Task".
+
+💡 Notas de UI/UX Gerais para a IA:
+Espaçamento (Padding/Margin): O modal possui um respiro (white space) generoso entre as seções, passando uma sensação clean.
+
+Bordas: Quase todos os elementos interativos (botões, caixas de texto, inputs, cards) possuem border-radius (bordas arredondadas).
+
+Tipografia: Fonte sem serifa (sans-serif), moderna, utilizando pesos diferentes (negrito, regular) e cores (preto, cinza escuro, cinza claro) para criar hierarquia visual.

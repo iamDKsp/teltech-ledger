@@ -94,6 +94,7 @@ interface DragCtx {
   colRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   cardRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   justDropped: string | null;
+  onCardClick: (task: Task) => void;
 }
 
 const DragContext = createContext<DragCtx>({
@@ -102,6 +103,7 @@ const DragContext = createContext<DragCtx>({
   colRefs: { current: new Map() },
   cardRefs: { current: new Map() },
   justDropped: null,
+  onCardClick: () => {},
 });
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -590,17 +592,328 @@ function moveTask(columns: Column[], taskId: string, srcColId: string, tgtColId:
   });
 }
 
+// ─── Task Modal ───────────────────────────────────────────────────────────────
+
+const COL_LABELS: Record<string, string> = {
+  untitled: "Sem Título", todo: "A Fazer", doing: "Em Andamento", review: "Revisão", done: "Concluído",
+};
+const PRIORITY_LABELS = ["Baixa","Normal","Alta","Urgente"];
+const PRIORITY_COLORS = ["#22c55e","#3B82F6","#f59e0b","#ef4444"];
+const PRIORITY_ICONS = ["▽","⚑","▲","!!"];
+
+const ASSIGNEE_NAMES = ["Mayad Ahmed","Tanvir Saimon","Ana Silva","Carlos Rocha","Beatriz Costa"];
+
+function ModalAvatar({ index, size=24 }: { index:number; size?:number }) {
+  return (
+    <div style={{ width:size, height:size, borderRadius:"50%", flexShrink:0, overflow:"hidden", border:"2px solid #1e1e22" }}>
+      <FaceAvatar index={index} size={size}/>
+    </div>
+  );
+}
+
+interface TaskModalProps { task: Task; colId: string; onClose: () => void; }
+
+function TaskModal({ task, colId, onClose }: TaskModalProps) {
+  const [activeTab, setActiveTab] = useState<"descricao"|"comentarios"|"atividades">("descricao");
+  const [priority, setPriority] = useState(1);
+  const [description, setDescription] = useState(
+    "Esta tarefa foca em " + (task.title || "desenvolver o projeto") + " dentro do prazo estabelecido pelo time. Os entregáveis devem ser revisados antes de avançar para a próxima etapa do fluxo."
+  );
+  const [subtasks, setSubtasks] = useState(["Revisar briefing com o time de marketing","Enviar para aprovação do cliente"]);
+  const [newSubtask, setNewSubtask] = useState("");
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [hoverClose, setHoverClose] = useState(false);
+
+  const colLabel = COL_LABELS[colId] ?? "Sem Título";
+
+  const handleAddSubtask = () => {
+    if (newSubtask.trim()) { setSubtasks(s=>[...s, newSubtask.trim()]); setNewSubtask(""); }
+  };
+
+  const toggleSubtask = (i: number) => {
+    // visual only
+  };
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", backdropFilter:"blur(3px)", animation:"fadeIn 0.18s ease" }}
+    >
+      <div style={{ width:560, maxHeight:"88vh", background:"#1a1a1f", borderRadius:16, border:"1px solid rgba(255,255,255,0.07)", boxShadow:"0 32px 80px rgba(0,0,0,0.8)", display:"flex", flexDirection:"column", overflow:"hidden", animation:"slideUp 0.22s cubic-bezier(0.34,1.2,0.64,1)" }}>
+
+        {/* ── Top bar ── */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px 12px", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>StrataScratch</span>
+            <span style={{ color:"#333", fontSize:12 }}>›</span>
+            <span style={{ fontSize:11, color:"#555" }}>{colLabel}</span>
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <button style={{ width:28, height:28, borderRadius:7, background:"transparent", border:"1px solid rgba(255,255,255,0.06)", color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⤢</button>
+            <button
+              onMouseEnter={()=>setHoverClose(true)} onMouseLeave={()=>setHoverClose(false)}
+              onClick={onClose}
+              style={{ width:28, height:28, borderRadius:7, background: hoverClose?"rgba(239,68,68,0.15)":"transparent", border:"1px solid rgba(255,255,255,0.06)", color: hoverClose?"#ef4444":"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, transition:"all 0.15s" }}>✕</button>
+          </div>
+        </div>
+
+        {/* ── Scrollable body ── */}
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 24px 0" }}>
+
+          {/* Title */}
+          <div style={{ fontSize:20, fontWeight:700, color:"#f0f0f0", lineHeight:1.3, marginBottom:8 }}>
+            {task.title || "Tarefa sem título"}
+          </div>
+
+          {/* Priority */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}>
+            <span style={{ fontSize:12, color:"#666" }}>Prioridade:</span>
+            <div style={{ display:"flex", gap:5 }}>
+              {PRIORITY_LABELS.map((lbl,i)=>(
+                <button key={i} onClick={()=>setPriority(i)} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 9px", borderRadius:20, background: priority===i ? `${PRIORITY_COLORS[i]}22` : "transparent", border:`1px solid ${priority===i ? PRIORITY_COLORS[i] : "rgba(255,255,255,0.08)"}`, color: priority===i ? PRIORITY_COLORS[i] : "#555", fontSize:11, cursor:"pointer", fontWeight: priority===i ? 600 : 400, transition:"all 0.15s" }}>
+                  <span style={{ fontSize:10 }}>{PRIORITY_ICONS[i]}</span>{lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ height:1, background:"rgba(255,255,255,0.05)", marginBottom:16 }}/>
+
+          {/* Metadata grid */}
+          <div style={{ display:"grid", gridTemplateColumns:"110px 1fr", gap:"12px 0", marginBottom:16 }}>
+
+            {/* Responsáveis */}
+            <span style={{ fontSize:12, color:"#555", paddingTop:4 }}>Responsáveis</span>
+            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+              {Array.from({length: Math.min(task.assignees, 3)}).map((_,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:20, padding:"3px 10px 3px 4px" }}>
+                  <ModalAvatar index={i} size={20}/>
+                  <span style={{ fontSize:11, color:"#bbb" }}>{ASSIGNEE_NAMES[i]}</span>
+                </div>
+              ))}
+              <div style={{ position:"relative" }}>
+                <button
+                  onMouseEnter={()=>setShowTooltip(true)} onMouseLeave={()=>setShowTooltip(false)}
+                  style={{ width:26, height:26, borderRadius:"50%", background:"rgba(255,255,255,0.06)", border:"1.5px dashed rgba(255,255,255,0.15)", color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, transition:"all 0.15s" }}>+</button>
+                {showTooltip && <div style={{ position:"absolute", bottom:"calc(100% + 6px)", left:"50%", transform:"translateX(-50%)", background:"#2a2a30", color:"#ccc", fontSize:10, padding:"5px 8px", borderRadius:6, whiteSpace:"nowrap", boxShadow:"0 4px 12px rgba(0,0,0,0.5)", zIndex:1 }}>Adicionar responsável</div>}
+              </div>
+            </div>
+
+            {/* Prazo */}
+            <span style={{ fontSize:12, color:"#555", paddingTop:4 }}>Prazo</span>
+            <div style={{ fontSize:12, color:"#c0c0c0", paddingTop:4 }}>{task.date ? `${task.date} 2025` : "Sem prazo definido"}</div>
+
+            {/* Status */}
+            <span style={{ fontSize:12, color:"#555", paddingTop:4 }}>Status</span>
+            <div style={{ paddingTop:2 }}>
+              <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#aaa", fontWeight:600, letterSpacing:"0.04em" }}>
+                <span style={{ width:7, height:7, borderRadius:"50%", background: colId==="done"?"#10B981": colId==="review"?"#f59e0b": colId==="doing"?"#7C5AC2":"#4a4a5a", flexShrink:0, display:"inline-block" }}/>
+                {colLabel.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Tags */}
+            <span style={{ fontSize:12, color:"#555", paddingTop:4 }}>Tags</span>
+            <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap", paddingTop:2 }}>
+              {task.tags.map(tag => {
+                const s = TAG_STYLES[tag.color];
+                return (
+                  <span key={tag.label} style={{ background:s.bg, color:s.text, fontSize:11, padding:"2px 9px", borderRadius:20, display:"inline-flex", alignItems:"center", gap:4, border:`1px solid ${s.dot}44` }}>
+                    <span style={{ width:5, height:5, borderRadius:"50%", background:s.dot, display:"inline-block" }}/>
+                    {tag.label}
+                  </span>
+                );
+              })}
+              <span style={{ fontSize:11, color:"#3a3a4a", cursor:"pointer" }}>+ Adicionar</span>
+            </div>
+
+            {/* Criado por */}
+            <span style={{ fontSize:12, color:"#555", paddingTop:4 }}>Criado por</span>
+            <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:20, padding:"3px 10px 3px 4px", width:"fit-content" }}>
+              <ModalAvatar index={0} size={20}/>
+              <span style={{ fontSize:11, color:"#bbb" }}>{ASSIGNEE_NAMES[0]}</span>
+            </div>
+
+          </div>
+
+          <div style={{ height:1, background:"rgba(255,255,255,0.05)", marginBottom:12 }}/>
+
+          {/* Tabs */}
+          <div style={{ display:"flex", gap:0, borderBottom:"1px solid rgba(255,255,255,0.05)", marginBottom:14 }}>
+            {(["descricao","comentarios","atividades"] as const).map(tab=>{
+              const labels = { descricao:"Descrição", comentarios:"Comentários", atividades:"Atividades" };
+              return (
+                <button key={tab} onClick={()=>setActiveTab(tab)} style={{ padding:"8px 16px", background:"transparent", border:"none", borderBottom:`2px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#e0e0e0":"#555", fontWeight: activeTab===tab?600:400, fontSize:13, cursor:"pointer", transition:"all 0.12s" }}>
+                  {labels[tab]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Tab content */}
+          {activeTab==="descricao" && (
+            <div>
+              {/* Rich text area */}
+              <div style={{ position:"relative", marginBottom:18 }}>
+                <textarea
+                  value={description}
+                  onChange={e=>setDescription(e.target.value)}
+                  style={{ width:"100%", minHeight:90, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, padding:"12px 14px", fontSize:13, color:"#ccc", lineHeight:1.6, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }}
+                />
+                {/* Floating format toolbar */}
+                <div style={{ position:"absolute", top:38, left:18, background:"#2a2a32", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, boxShadow:"0 8px 24px rgba(0,0,0,0.5)", display:"flex", gap:2, padding:"4px 6px" }}>
+                  {["B","I","U","S"].map((f,i)=>(
+                    <button key={i} style={{ width:24, height:24, borderRadius:5, background:"transparent", border:"none", color:"#aaa", fontSize:12, fontWeight: f==="B"?700:400, fontStyle: f==="I"?"italic":"normal", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>{f}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Subtarefas */}
+              <div style={{ marginBottom:18 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#444", letterSpacing:"0.1em", marginBottom:10 }}>SUBTAREFAS</div>
+                {subtasks.map((st,i)=>(
+                  <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:8 }}>
+                    <button onClick={()=>toggleSubtask(i)} style={{ width:14, height:14, borderRadius:3, background:"rgba(124,90,194,0.8)", border:"none", cursor:"pointer", flexShrink:0, marginTop:1 }}/>
+                    <span style={{ fontSize:12, color:"#bbb", lineHeight:1.5 }}>{st}</span>
+                  </div>
+                ))}
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ width:14, height:14, borderRadius:3, border:"1.5px solid #333", flexShrink:0 }}/>
+                  <input
+                    value={newSubtask}
+                    onChange={e=>setNewSubtask(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter") handleAddSubtask(); }}
+                    placeholder="Adicionar subtarefa..."
+                    style={{ flex:1, background:"transparent", border:"none", outline:"none", fontSize:12, color:"#666", fontFamily:"inherit" }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ height:1, background:"rgba(255,255,255,0.05)", marginBottom:16 }}/>
+
+              {/* Anexos */}
+              <div style={{ marginBottom:20 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                  <span style={{ fontSize:10, fontWeight:700, color:"#444", letterSpacing:"0.1em" }}>ANEXOS</span>
+                  <button style={{ fontSize:11, color:"#7C5AC2", fontWeight:500, background:"transparent", border:"none", cursor:"pointer", padding:0 }}>Enviar</button>
+                </div>
+                <div style={{ display:"flex", gap:8 }}>
+                  {/* PDF card */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:8, padding:"8px 12px", flex:1 }}>
+                    <div style={{ width:28, height:32, background:"#ef4444", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                      <span style={{ fontSize:8, fontWeight:800, color:"#fff" }}>PDF</span>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:11, color:"#ccc", fontWeight:500 }}>Diretrizes.pdf</div>
+                      <div style={{ fontSize:10, color:"#555" }}>PDF • Baixar</div>
+                    </div>
+                  </div>
+                  {/* Drive card */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:8, padding:"8px 12px", flex:1 }}>
+                    <div style={{ width:28, height:32, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                        <path d="M4 18L8.5 6L15.5 18H4Z" fill="#4285F4"/>
+                        <path d="M8.5 6L15.5 18H22.5L15.5 6H8.5Z" fill="#FBBC04"/>
+                        <path d="M4 18H15.5L19 12L15.5 6L8.5 6L4 18Z" fill="#34A853"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:11, color:"#ccc", fontWeight:500 }}>Identidade Visual</div>
+                      <div style={{ fontSize:10, color:"#555" }}>Drive • Baixar</div>
+                    </div>
+                  </div>
+                  {/* Add button */}
+                  <button style={{ width:50, background:"rgba(255,255,255,0.03)", border:"1.5px dashed rgba(255,255,255,0.1)", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", color:"#444", fontSize:18, cursor:"pointer", transition:"all 0.15s", flexShrink:0 }}>+</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab==="comentarios" && (
+            <div style={{ paddingBottom:16 }}>
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                <ModalAvatar index={0} size={28}/>
+                <div style={{ flex:1, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#555", cursor:"text" }}>Adicionar comentário...</div>
+              </div>
+              {[
+                { msg:"Revisei o layout, ficou ótimo! Apenas precisamos ajustar o contraste dos botões secundários.", time:"há 2 dias", idx:1 },
+                { msg:"Boa observação! Já fiz as correções no Figma, pode conferir o link atualizado.", time:"há 1 dia", idx:2 },
+              ].map((c,i)=>(
+                <div key={i} style={{ display:"flex", gap:10, marginBottom:14 }}>
+                  <ModalAvatar index={c.idx} size={28}/>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"baseline", marginBottom:4 }}>
+                      <span style={{ fontSize:12, color:"#bbb", fontWeight:600 }}>{ASSIGNEE_NAMES[c.idx]}</span>
+                      <span style={{ fontSize:10, color:"#444" }}>{c.time}</span>
+                    </div>
+                    <div style={{ fontSize:12, color:"#888", lineHeight:1.6 }}>{c.msg}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab==="atividades" && (
+            <div style={{ paddingBottom:16 }}>
+              {[
+                { action:"moveu esta tarefa para", target:"Em Andamento", time:"há 3 horas", idx:0 },
+                { action:"adicionou o anexo", target:"Diretrizes.pdf", time:"há 1 dia", idx:1 },
+                { action:"criou esta tarefa", target:"", time:"há 3 dias", idx:0 },
+              ].map((act,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:12, paddingBottom:12, borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                  <ModalAvatar index={act.idx} size={24}/>
+                  <div style={{ flex:1 }}>
+                    <span style={{ fontSize:12, color:"#888" }}><span style={{ color:"#bbb", fontWeight:600 }}>{ASSIGNEE_NAMES[act.idx]}</span> {act.action} {act.target && <span style={{ color:"#7C5AC2" }}>{act.target}</span>}</span>
+                    <div style={{ fontSize:10, color:"#444", marginTop:2 }}>{act.time}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 24px", borderTop:"1px solid rgba(255,255,255,0.05)", background:"#161619" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:12, color:"#555" }}>Visualizadores:</span>
+            <div style={{ display:"flex" }}>
+              {[0,1,2].map(i=>(
+                <div key={i} style={{ marginLeft: i===0?0:-8, zIndex:3-i }}>
+                  <ModalAvatar index={i} size={26}/>
+                </div>
+              ))}
+            </div>
+            <button style={{ width:24, height:24, borderRadius:"50%", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>+</button>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={onClose} style={{ padding:"8px 16px", borderRadius:8, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#777", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>Cancelar</button>
+            <button style={{ padding:"8px 22px", borderRadius:8, background:"linear-gradient(135deg,#5b3ea6,#7C5AC2)", border:"none", color:"#fff", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", boxShadow:"0 4px 14px rgba(124,90,194,0.4)" }}>Salvar Tarefa</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ─── Board ────────────────────────────────────────────────────────────────────
 
 function Board() {
   const [columns, setColumns] = useState<Column[]>(INITIAL_COLUMNS);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [justDropped, setJustDropped] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<{ task: Task; colId: string } | null>(null);
   const colRefs = useRef<Map<string, HTMLElement>>(new Map());
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const dragRef = useRef<DragState | null>(null);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
+
+  const onCardClick = useCallback((task: Task) => {
+    const colId = columnsRef.current.find(c=>c.tasks.some(t=>t.id===task.id))?.id ?? "untitled";
+    setSelectedTask({ task, colId });
+  }, []);
 
   const startDrag = useCallback((taskId: string, sourceColId: string, e: React.MouseEvent, cardEl: HTMLElement) => {
     e.preventDefault();
@@ -668,6 +981,13 @@ function Board() {
         setColumns(newCols);
         setJustDropped(d.taskId);
         setTimeout(()=>setJustDropped(null), 500);
+      } else {
+        // Simple click — open modal
+        const task = columnsRef.current.flatMap(c=>c.tasks).find(t=>t.id===d.taskId);
+        if (task) {
+          const colId = columnsRef.current.find(c=>c.tasks.some(t=>t.id===task.id))?.id ?? "untitled";
+          setSelectedTask({ task, colId });
+        }
       }
       dragRef.current = null;
       setDrag(null);
@@ -692,7 +1012,7 @@ function Board() {
   const dragTask = drag ? allTasks.find(t=>t.id===drag.taskId) ?? findTask(drag.taskId) : null;
 
   return (
-    <DragContext.Provider value={{ drag, startDrag, colRefs, cardRefs, justDropped }}>
+    <DragContext.Provider value={{ drag, startDrag, colRefs, cardRefs, justDropped, onCardClick }}>
       <div
         style={{ flex:1, overflowX:"auto", overflowY:"auto", padding:"18px 20px", display:"flex", gap:16, alignItems:"flex-start", background:"#111111", position:"relative" }}
         onMouseLeave={()=>{}}
@@ -700,6 +1020,13 @@ function Board() {
         {columns.map(col=><BoardColumn key={col.id} col={col}/>)}
         {drag?.active && dragTask && <FloatingCard drag={drag} task={dragTask}/>}
       </div>
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask.task}
+          colId={selectedTask.colId}
+          onClose={()=>setSelectedTask(null)}
+        />
+      )}
     </DragContext.Provider>
   );
 }
@@ -860,10 +1187,20 @@ const STYLES = `
     60%  { transform: rotate(0.3deg) scale(1.01); }
     100% { transform: rotate(0deg) scale(1); }
   }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
   * { box-sizing: border-box; }
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: #111; }
   ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  textarea:focus { border-color: rgba(124,90,194,0.5) !important; box-shadow: 0 0 0 3px rgba(124,90,194,0.1); }
+  input::placeholder { color: #444; }
 `;
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
