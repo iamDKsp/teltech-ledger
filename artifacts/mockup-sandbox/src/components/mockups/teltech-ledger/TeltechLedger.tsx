@@ -28,44 +28,44 @@ interface Column { id: string; title: string; tasks: Task[]; }
 
 const INITIAL_COLUMNS: Column[] = [
   {
-    id: "untitled", title: "Untitled",
+    id: "untitled", title: "Sem Título",
     tasks: [
-      { id:"u1", tags:[{label:"QA",color:"blue"}], title:"Testing (Platform Pages)", assignees:2, timerState:"idle", timerValue:"00:00", progress:0, estTime:"" },
-      { id:"u2", tags:[{label:"UX/UI",color:"purple"},{label:"No billing",color:"gray"}], title:"StrataScratch - Dribbble Presentation (Shot #4)", assignees:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 8:00 h" },
-      { id:"u3", tags:[], title:"Get customer feedback for Clutch", assignees:1, timerState:"idle", timerValue:"00:00", progress:0, estTime:"", showStatusBadge:true },
-      { id:"u4", tags:[{label:"Management",color:"pink"}], title:"Project retrospective", assignees:0, addAssignee:true, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 2:00 h" },
+      { id:"u1", tags:[{label:"QA",color:"blue"}], title:"Testes (Páginas da Plataforma)", assignees:2, timerState:"idle", timerValue:"00:00", progress:0, estTime:"" },
+      { id:"u2", tags:[{label:"UX/UI",color:"purple"},{label:"Sem cobrança",color:"gray"}], title:"StrataScratch - Apresentação Dribbble (Versão #4)", assignees:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 8:00 h" },
+      { id:"u3", tags:[], title:"Coletar feedback de clientes do Clutch", assignees:1, timerState:"idle", timerValue:"00:00", progress:0, estTime:"", showStatusBadge:true },
+      { id:"u4", tags:[{label:"Gestão",color:"pink"}], title:"Retrospectiva do projeto", assignees:0, addAssignee:true, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 2:00 h" },
     ],
   },
   {
-    id: "todo", title: "To Do",
+    id: "todo", title: "A Fazer",
     tasks: [
-      { id:"t1", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"},{label:"No billing",color:"gray"}], date:"3 Jun", title:"StrataScratch - Instagram Post", assignees:3, comments:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 0:30 h" },
-      { id:"t2", tags:[{label:"UX/UI",color:"purple"}], date:"3 Jun", title:"StrataScratch - New Pricing Page", assignees:1, attachments:3, comments:1, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 3:00 h" },
-      { id:"t3", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"11 Jun", title:"StrataScratch - Display Ads (#3)", assignees:3, comments:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 8:00 h" },
-      { id:"t4", coverImage:"photo", tags:[], title:"", assignees:0, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Est: 2:00 h" },
+      { id:"t1", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"},{label:"Sem cobrança",color:"gray"}], date:"3 Jun", title:"StrataScratch - Post para Instagram", assignees:3, comments:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 0:30 h" },
+      { id:"t2", tags:[{label:"UX/UI",color:"purple"}], date:"3 Jun", title:"StrataScratch - Nova Página de Preços", assignees:1, attachments:3, comments:1, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 3:00 h" },
+      { id:"t3", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"11 Jun", title:"StrataScratch - Anúncios Display (#3)", assignees:3, comments:3, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 8:00 h" },
+      { id:"t4", coverImage:"photo", tags:[], title:"", assignees:0, timerState:"idle", timerValue:"00:00", progress:0, estTime:"Prev: 2:00 h" },
     ],
   },
   {
-    id: "doing", title: "Doing",
+    id: "doing", title: "Em Andamento",
     tasks: [
-      { id:"d1", coverImage:"dashboard", tags:[{label:"UX/UI",color:"purple"},{label:"No billing",color:"gray"}], date:"2 Jun", title:"StrataScratch - Behance Presentation", assignees:3, attachments:2, comments:17, timerState:"running", timerValue:"16:32 h", progress:55, estTime:"Est: 30:00 h" },
-      { id:"d2", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"4 Jun", title:"StrataScratch - Display Ads (#2)", assignees:3, comments:3, timerState:"running", timerValue:"0:57 h", progress:25, estTime:"Est: 4:00 h" },
-      { id:"d3", tags:[{label:"UX/UI",color:"purple"}], date:"14 Jun", title:"Strata Scratch - Animation for loader/splash screen", assignees:1, attachments:1, comments:1, timerState:"running", timerValue:"0:46 h", progress:46, estTime:"Est: 1:00 h" },
+      { id:"d1", coverImage:"dashboard", tags:[{label:"UX/UI",color:"purple"},{label:"Sem cobrança",color:"gray"}], date:"2 Jun", title:"StrataScratch - Apresentação Behance", assignees:3, attachments:2, comments:17, timerState:"running", timerValue:"16:32 h", progress:55, estTime:"Prev: 30:00 h" },
+      { id:"d2", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"4 Jun", title:"StrataScratch - Anúncios Display (#2)", assignees:3, comments:3, timerState:"running", timerValue:"0:57 h", progress:25, estTime:"Prev: 4:00 h" },
+      { id:"d3", tags:[{label:"UX/UI",color:"purple"}], date:"14 Jun", title:"Strata Scratch - Animação para tela de carregamento", assignees:1, attachments:1, comments:1, timerState:"running", timerValue:"0:46 h", progress:46, estTime:"Prev: 1:00 h" },
     ],
   },
   {
-    id: "review", title: "Review",
+    id: "review", title: "Revisão",
     tasks: [
-      { id:"r1", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"28 May", title:"StrataScratch - Display Ads", assignees:3, comments:3, timerState:"overtime", timerValue:"9:43", progress:100, estTime:"Est: 8:00 h" },
-      { id:"r2", coverImage:"figma", tags:[{label:"UX/UI",color:"purple"},{label:"No billing",color:"gray"}], date:"24 Jun", title:"StrataScratch - Dribbble Presentation (Shot #3)", assignees:2, comments:5, timerState:"overtime", timerValue:"2:54 h", progress:100, estTime:"Est: 3:00 h" },
+      { id:"r1", tags:[{label:"UX/UI",color:"purple"},{label:"Marketing",color:"yellow"}], date:"28 Mai", title:"StrataScratch - Anúncios Display", assignees:3, comments:3, timerState:"overtime", timerValue:"9:43", progress:100, estTime:"Prev: 8:00 h" },
+      { id:"r2", coverImage:"figma", tags:[{label:"UX/UI",color:"purple"},{label:"Sem cobrança",color:"gray"}], date:"24 Jun", title:"StrataScratch - Apresentação Dribbble (Versão #3)", assignees:2, comments:5, timerState:"overtime", timerValue:"2:54 h", progress:100, estTime:"Prev: 3:00 h" },
     ],
   },
   {
-    id: "done", title: "Done",
+    id: "done", title: "Concluído",
     tasks: [
-      { id:"dn1", tags:[{label:"UX/UI",color:"purple"}], title:"New website homepage", assignees:2, timerState:"idle", timerValue:"8:00 h", progress:100, estTime:"Est: 8:00 h" },
-      { id:"dn2", tags:[{label:"QA",color:"blue"}], title:"Fix and test in Zeplin", assignees:1, timerState:"idle", timerValue:"3:00 h", progress:100, estTime:"Est: 3:00 h" },
-      { id:"dn3", tags:[{label:"QA",color:"blue"}], title:"Fix the bug on mobile", assignees:1, timerState:"idle", timerValue:"1:30 h", progress:100, estTime:"Est: 2:00 h" },
+      { id:"dn1", tags:[{label:"UX/UI",color:"purple"}], title:"Nova página inicial do site", assignees:2, timerState:"idle", timerValue:"8:00 h", progress:100, estTime:"Prev: 8:00 h" },
+      { id:"dn2", tags:[{label:"QA",color:"blue"}], title:"Corrigir e testar no Zeplin", assignees:1, timerState:"idle", timerValue:"3:00 h", progress:100, estTime:"Prev: 3:00 h" },
+      { id:"dn3", tags:[{label:"QA",color:"blue"}], title:"Corrigir bug no mobile", assignees:1, timerState:"idle", timerValue:"1:30 h", progress:100, estTime:"Prev: 2:00 h" },
     ],
   },
 ];
@@ -292,7 +292,7 @@ function TagBadge({ tag }: { tag: Tag }) {
 function AddStatusBadge() {
   return (
     <span style={{ fontSize:10, color:"#555", padding:"2px 7px", border:"1px dashed #3a3a3a", borderRadius:4, display:"inline-flex", alignItems:"center", gap:3, whiteSpace:"nowrap" }}>
-      <span style={{ fontSize:11, lineHeight:1 }}>+</span>Add Status
+      <span style={{ fontSize:11, lineHeight:1 }}>+</span>Adicionar Status
     </span>
   );
 }
@@ -547,7 +547,7 @@ function BoardColumn({ col }: { col: Column }) {
     >
       <div style={{ display:"flex", alignItems:"center", gap:6, padding: isTarget ? "0 2px 6px" : "0 2px 6px", paddingTop: isTarget ? 2 : 0 }}>
         <span style={{ fontSize:13, fontWeight:600, color:"#d0d0d4" }}>{col.title}</span>
-        <span style={{ fontSize:11, color:"#505058" }}>{col.tasks.length} Tasks</span>
+        <span style={{ fontSize:11, color:"#505058" }}>{col.tasks.length} Tarefas</span>
         <div style={{ flex:1 }}/>
         <button style={{ background:"transparent", border:"none", color:"#505058", cursor:"pointer", fontSize:16, lineHeight:1 }}>+</button>
         <button style={{ background:"transparent", border:"none", color:"#505058", cursor:"pointer", letterSpacing:1, fontSize:13 }}>···</button>
@@ -707,9 +707,9 @@ function Board() {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { icon:"home", label:"Home" }, { icon:"dashboard", label:"Dashboard" },
-  { icon:"projects", label:"Projects" }, { icon:"tasks", label:"My Tasks" },
-  { icon:"members", label:"Members" }, { icon:"goals", label:"Goals" }, { icon:"settings", label:"Settings" },
+  { icon:"home", label:"Início" }, { icon:"dashboard", label:"Painel" },
+  { icon:"projects", label:"Projetos" }, { icon:"tasks", label:"Minhas Tarefas" },
+  { icon:"members", label:"Membros" }, { icon:"goals", label:"Metas" }, { icon:"settings", label:"Configurações" },
 ];
 const PROJECT_ITEMS = [
   { name:"Apvision", color:"#6366F1" }, { name:"AlertSec", color:"#3B82F6" },
@@ -758,7 +758,7 @@ function Sidebar() {
       <div style={{ height:8 }}/>
       <div style={{ padding:"0 6px" }}>
         <button onClick={()=>setFavOpen(!favOpen)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%", padding:"5px 8px", background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:11, fontWeight:600, letterSpacing:"0.04em" }}>
-          <span>Favorite</span>
+          <span>Favoritos</span>
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: favOpen?"rotate(0)":"rotate(-90deg)", transition:"0.2s" }}><path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
         {favOpen && [
@@ -776,7 +776,7 @@ function Sidebar() {
       <div style={{ height:6 }}/>
       <div style={{ padding:"0 6px", flex:1 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"5px 8px" }}>
-          <span style={{ fontSize:11, fontWeight:600, color:"#555", letterSpacing:"0.04em" }}>Projects</span>
+          <span style={{ fontSize:11, fontWeight:600, color:"#555", letterSpacing:"0.04em" }}>Projetos</span>
           <div style={{ display:"flex", gap:4 }}>
             <button style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:15, lineHeight:1 }}>+</button>
             <button onClick={()=>setProjOpen(!projOpen)} style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer" }}>
@@ -793,7 +793,7 @@ function Sidebar() {
             <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{proj.name}</span>
           </div>
         ))}
-        <div style={{ padding:"6px 8px" }}><span style={{ fontSize:11, color:"#3a3a3a", cursor:"pointer" }}>Show All Projects ∨</span></div>
+        <div style={{ padding:"6px 8px" }}><span style={{ fontSize:11, color:"#3a3a3a", cursor:"pointer" }}>Mostrar Todos os Projetos ∨</span></div>
       </div>
     </div>
   );
@@ -801,10 +801,10 @@ function Sidebar() {
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
-const TABS = ["Overview","List","Boards","Chronology","Calendar","Members","Channels","Files"];
+const TABS = ["Visão Geral","Lista","Quadros","Cronologia","Calendário","Membros","Canais","Arquivos"];
 
 function Header() {
-  const [activeTab, setActiveTab] = useState("Boards");
+  const [activeTab, setActiveTab] = useState("Quadros");
   return (
     <div style={{ background:"#1A1A1A", borderBottom:"1px solid #242424", flexShrink:0 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 20px" }}>
@@ -826,7 +826,7 @@ function Header() {
             <div style={{ width:15, height:15, borderRadius:"50%", background:"#10B981", display:"flex", alignItems:"center", justifyContent:"center" }}>
               <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
-            <span style={{ fontSize:12, color:"#10B981", fontWeight:500 }}>According to plan</span>
+            <span style={{ fontSize:12, color:"#10B981", fontWeight:500 }}>No prazo</span>
             <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M2 3.5l2.5 2.5 2.5-2.5" stroke="#10B981" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
         </div>
