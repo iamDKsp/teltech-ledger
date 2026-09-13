@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, createContext, useContext } from "react";
+import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from "react";
+import { ArrowDown, Flag, ArrowUp, AlertTriangle, X, Zap } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ const FACE_SPECS: FaceSpec[] = [
 function FaceAvatar({ index, size=22 }: { index:number; size?:number }) {
   const s = FACE_SPECS[index % FACE_SPECS.length];
   const r = size/2;
-  const hairPaths: Record<string, JSX.Element> = {
+  const hairPaths: Record<string, React.ReactNode> = {
     curly: <><ellipse cx={r} cy={r*0.38} rx={r*0.54} ry={r*0.36} fill={s.hair}/><ellipse cx={r*0.35} cy={r*0.52} rx={r*0.22} ry={r*0.28} fill={s.hair}/><ellipse cx={r*1.65} cy={r*0.52} rx={r*0.22} ry={r*0.28} fill={s.hair}/></>,
     afro:  <ellipse cx={r} cy={r*0.35} rx={r*0.68} ry={r*0.48} fill={s.hair}/>,
     straight: <><ellipse cx={r} cy={r*0.36} rx={r*0.52} ry={r*0.3} fill={s.hair}/><rect x={r*0.42} y={r*0.55} width={r*0.14} height={r*0.55} rx={r*0.07} fill={s.hair}/><rect x={r*1.44} y={r*0.55} width={r*0.14} height={r*0.55} rx={r*0.07} fill={s.hair}/></>,
@@ -514,7 +515,7 @@ function BoardColumn({ col }: { col: Column }) {
 
   // Build card list with ghost + drop zone inserted
   const renderedTasks = col.tasks;
-  const items: JSX.Element[] = [];
+  const items: React.ReactNode[] = [];
 
   renderedTasks.forEach((task, idx) => {
     const isGhost = drag?.active && drag.taskId === task.id && drag.sourceColId === col.id;
@@ -599,7 +600,7 @@ const COL_LABELS: Record<string, string> = {
 };
 const PRIORITY_LABELS = ["Baixa","Normal","Alta","Urgente"];
 const PRIORITY_COLORS = ["#22c55e","#3B82F6","#f59e0b","#ef4444"];
-const PRIORITY_ICONS = ["▽","⚑","▲","!!"];
+const PRIORITY_ICONS = [ArrowDown, Flag, ArrowUp, AlertTriangle];
 
 const ASSIGNEE_NAMES = ["Mayad Ahmed","Tanvir Saimon","Ana Silva","Carlos Rocha","Beatriz Costa"];
 
@@ -653,7 +654,9 @@ function TaskModal({ task, colId, onClose }: TaskModalProps) {
             <button
               onMouseEnter={()=>setHoverClose(true)} onMouseLeave={()=>setHoverClose(false)}
               onClick={onClose}
-              style={{ width:28, height:28, borderRadius:7, background: hoverClose?"rgba(239,68,68,0.15)":"transparent", border:"1px solid rgba(255,255,255,0.06)", color: hoverClose?"#ef4444":"#555", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, transition:"all 0.15s" }}>✕</button>
+              style={{ width:28, height:28, borderRadius:7, background: hoverClose?"rgba(239,68,68,0.15)":"transparent", border:"1px solid rgba(255,255,255,0.06)", color: hoverClose?"#ef4444":"#888", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}>
+              <X size={15} />
+            </button>
           </div>
         </div>
 
@@ -669,11 +672,14 @@ function TaskModal({ task, colId, onClose }: TaskModalProps) {
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}>
             <span style={{ fontSize:12, color:"#666" }}>Prioridade:</span>
             <div style={{ display:"flex", gap:5 }}>
-              {PRIORITY_LABELS.map((lbl,i)=>(
-                <button key={i} onClick={()=>setPriority(i)} style={{ display:"flex", alignItems:"center", gap:4, padding:"3px 9px", borderRadius:20, background: priority===i ? `${PRIORITY_COLORS[i]}22` : "transparent", border:`1px solid ${priority===i ? PRIORITY_COLORS[i] : "rgba(255,255,255,0.08)"}`, color: priority===i ? PRIORITY_COLORS[i] : "#555", fontSize:11, cursor:"pointer", fontWeight: priority===i ? 600 : 400, transition:"all 0.15s" }}>
-                  <span style={{ fontSize:10 }}>{PRIORITY_ICONS[i]}</span>{lbl}
-                </button>
-              ))}
+              {PRIORITY_LABELS.map((lbl,i)=>{
+                const Icon = PRIORITY_ICONS[i];
+                return (
+                  <button key={i} onClick={()=>setPriority(i)} style={{ display:"flex", alignItems:"center", gap:5, padding:"3px 9px", borderRadius:20, background: priority===i ? `${PRIORITY_COLORS[i]}22` : "transparent", border:`1px solid ${priority===i ? PRIORITY_COLORS[i] : "rgba(255,255,255,0.08)"}`, color: priority===i ? PRIORITY_COLORS[i] : "#555", fontSize:11, cursor:"pointer", fontWeight: priority===i ? 600 : 400, transition:"all 0.15s" }}>
+                    <Icon size={11} />{lbl}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1046,7 +1052,7 @@ const PROJECT_ITEMS = [
 ];
 
 function NavIcon({ icon }: { icon:string }) {
-  const d: Record<string,JSX.Element> = {
+  const d: Record<string, React.ReactNode> = {
     home:<path d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1H5a1 1 0 01-1-1v-9.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" fill="none"/>,
     dashboard:<><rect x="3" y="3" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/><rect x="13" y="3" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/><rect x="3" y="13" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/><rect x="13" y="13" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none"/></>,
     projects:<path d="M4 6h16M4 10h12M4 14h8M4 18h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>,
@@ -1067,7 +1073,7 @@ function Sidebar() {
     <div style={{ width:200, minWidth:200, height:"100%", background:"#1A1A1A", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", overflowY:"auto", flexShrink:0 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 14px 10px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ width:28, height:28, background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:800, color:"#fff" }}>▲</div>
+          <div style={{ width:28, height:28, background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" }}><Zap size={15} fill="currentColor" /></div>
           <span style={{ fontSize:14, fontWeight:700, color:"#f0f0f0", letterSpacing:"-0.3px" }}>brandux</span>
         </div>
         <button style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", padding:2 }}>

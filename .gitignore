@@ -47,3 +47,14 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Environment local secrets
+.env
+.env.*
+!.env.example
+
+# Large archives and temporary folders
+projeto.zip
+scratch/
+artifacts/api-server/public/uploads/*
+!artifacts/api-server/public/uploads/.gitkeep

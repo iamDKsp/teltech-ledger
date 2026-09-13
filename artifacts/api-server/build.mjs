@@ -29,7 +29,7 @@ async function buildAll() {
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
-      "sharp",
+      "zod",
       "better-sqlite3",
       "sqlite3",
       "canvas",

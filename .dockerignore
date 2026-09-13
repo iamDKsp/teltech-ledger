@@ -1,0 +1,31 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies
+node_modules
+*/node_modules
+*/*/node_modules
+
+# Caches and temporary files
+.cache
+.local
+.agents
+scratch
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Large archives and unnecessary files
+projeto.zip
+attached_assets
+
+# Environment local secrets
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist
+artifacts/*/dist
+lib/*/dist
