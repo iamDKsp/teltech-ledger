@@ -57,7 +57,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
     try {
       // Update Name, Email and Avatar
       if (name !== user.name || email !== user.email || avatarUrl !== user.avatarUrl) {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/members/${user.id}`, {
+        const res = await fetch(`${API_BASE}/api/members/${user.id}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -70,7 +70,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
 
       // Update Password if provided
       if (password) {
-        const resPw = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/members/${user.id}/password`, {
+        const resPw = await fetch(`${API_BASE}/api/members/${user.id}/password`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
