@@ -36,8 +36,8 @@ router.get("/", async (req: Request, res: Response) => {
 const createProjectSchema = z.object({
   workspaceId: z.string().uuid(),
   name: z.string().min(1),
-  color: z.string().optional(),
-  icon: z.string().optional(),
+  color: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
 });
 
 router.post("/", async (req: Request, res: Response) => {
@@ -238,8 +238,8 @@ router.post("/:id/columns", async (req: Request, res: Response) => {
 
 const updateProjectSchema = z.object({
   name: z.string().min(1).optional(),
-  color: z.string().optional(),
-  icon: z.string().optional(),
+  color: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
   isFavorite: z.boolean().optional(),
   status: z.string().optional(),
 });
@@ -247,7 +247,7 @@ const updateProjectSchema = z.object({
 router.put("/:id", async (req: Request, res: Response) => {
   const id = req.params.id as string;
   const parsed = updateProjectSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: "Validation failed" }); return; }
+  if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed.data.name) updates.name = parsed.data.name;

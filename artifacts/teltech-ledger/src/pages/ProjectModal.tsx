@@ -91,16 +91,24 @@ export function ProjectModal({ project, onClose, onSaved }: {
     try {
       if (isEdit) {
         // Update project
-        await fetch(`${API}/api/projects/${project!.id}`, {
+        const updateRes = await fetch(`${API}/api/projects/${project!.id}`, {
           method: "PUT", headers: headers(),
           body: JSON.stringify({ name, color, icon }),
         });
+        if (!updateRes.ok) {
+          const err = await updateRes.json().catch(() => ({}));
+          throw new Error(err.error || "Erro ao atualizar dados do projeto");
+        }
         // Update columns order/titles
         if (columns.length > 0) {
-          await fetch(`${API}/api/projects/${project!.id}/columns-order`, {
+          const colRes = await fetch(`${API}/api/projects/${project!.id}/columns-order`, {
             method: "PUT", headers: headers(),
             body: JSON.stringify({ columns: columns.map((c, i) => ({ ...c, position: i })) }),
           });
+          if (!colRes.ok) {
+            const err = await colRes.json().catch(() => ({}));
+            throw new Error(err.error || "Erro ao atualizar colunas do projeto");
+          }
         }
       } else {
         // Create project — use workspaceId from authenticated user
