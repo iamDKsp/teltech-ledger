@@ -12,20 +12,25 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Copy workspace package manifests
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+# Copy workspace files
+COPY package.json pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
 COPY lib/ ./lib/
 COPY scripts/ ./scripts/
 COPY artifacts/ ./artifacts/
 
-# Patch pnpm-workspace.yaml for Docker: disable minimumReleaseAge and remove esbuild version override
+# Patch pnpm-workspace.yaml for Docker:
+# - disable minimumReleaseAge (blocks packages published < 1 day ago)
+# - remove esbuild version override that may not exist
+# - remove stripe-replit-sync from minimumReleaseAgeExclude
 RUN sed -i 's/minimumReleaseAge: 1440/minimumReleaseAge: 0/' pnpm-workspace.yaml && \
-    sed -i '/^  esbuild: "0\.27\.3"/d' pnpm-workspace.yaml
+    sed -i '/^  esbuild: "0\.27\.3"/d' pnpm-workspace.yaml && \
+    sed -i '/stripe-replit-sync/d' pnpm-workspace.yaml && \
+    sed -i "/'@replit\/\*'/d" pnpm-workspace.yaml
 
-# Install dependencies
+# Install dependencies (no lockfile - generate fresh on Linux)
 RUN pnpm install --no-frozen-lockfile
 
-# Build workspace packages and api-server
+# Build api-server
 RUN pnpm --filter @workspace/api-server run build
 
 # Create directory for file uploads

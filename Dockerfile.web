@@ -10,17 +10,22 @@ RUN npm install -g pnpm@10.33.2
 
 WORKDIR /app
 
-# Copy monorepo configuration and packages
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+# Copy workspace files (without pnpm-lock.yaml - generate fresh on Linux)
+COPY package.json pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
 COPY lib/ ./lib/
 COPY scripts/ ./scripts/
 COPY artifacts/ ./artifacts/
 
-# Patch pnpm-workspace.yaml for Docker: disable minimumReleaseAge and remove esbuild version override
+# Patch pnpm-workspace.yaml for Docker:
+# - disable minimumReleaseAge (blocks packages published < 1 day ago)
+# - remove esbuild version override that may not exist
+# - remove replit-specific entries
 RUN sed -i 's/minimumReleaseAge: 1440/minimumReleaseAge: 0/' pnpm-workspace.yaml && \
-    sed -i '/^  esbuild: "0\.27\.3"/d' pnpm-workspace.yaml
+    sed -i '/^  esbuild: "0\.27\.3"/d' pnpm-workspace.yaml && \
+    sed -i '/stripe-replit-sync/d' pnpm-workspace.yaml && \
+    sed -i "/'@replit\/\*'/d" pnpm-workspace.yaml
 
-# Install dependencies
+# Install dependencies (no lockfile - generate fresh on Linux)
 RUN pnpm install --no-frozen-lockfile
 
 # Build teltech-ledger frontend SPA
