@@ -50,8 +50,7 @@ services:
     container_name: teltech-web
     restart: unless-stopped
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     ports:
       - "${WEB_PORT:-4500}:80"
     networks:
