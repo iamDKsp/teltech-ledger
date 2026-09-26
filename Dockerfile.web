@@ -16,6 +16,10 @@ COPY lib/ ./lib/
 COPY scripts/ ./scripts/
 COPY artifacts/ ./artifacts/
 
+# Patch pnpm-workspace.yaml for Docker: disable minimumReleaseAge and remove esbuild version override
+RUN sed -i 's/minimumReleaseAge: 1440/minimumReleaseAge: 0/' pnpm-workspace.yaml && \
+    sed -i '/^  esbuild: "0\.27\.3"/d' pnpm-workspace.yaml
+
 # Install dependencies
 RUN pnpm install --no-frozen-lockfile
 
