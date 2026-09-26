@@ -1,10 +1,13 @@
-#!/bin/sh
+﻿#!/bin/sh
 set -e
 
 echo "=== [Teltech API] Aguardando banco de dados PostgreSQL ficar pronto ==="
 
-pnpm --filter @workspace/db exec node -e "
-const { Pool } = require('pg');
+# Use node with --input-type=module to avoid CommonJS/ESM conflicts
+# (the @workspace/db package is "type": "module", so require() fails)
+node --input-type=module -e "
+import pg from 'pg';
+const { Pool } = pg;
 const url = process.env.DATABASE_URL;
 if (!url) {
   console.error('DATABASE_URL is not set!');
@@ -17,6 +20,7 @@ async function check() {
       const client = await pool.connect();
       await client.query('SELECT 1');
       client.release();
+      await pool.end();
       console.log('PostgreSQL conectado com sucesso!');
       process.exit(0);
     } catch (err) {
@@ -24,6 +28,7 @@ async function check() {
       await new Promise(r => setTimeout(r, 2000));
     }
   }
+  await pool.end();
   console.error('Tempo limite esgotado esperando o PostgreSQL.');
   process.exit(1);
 }
