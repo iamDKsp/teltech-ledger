@@ -5,6 +5,7 @@ import { API } from "../lib/api";
 export function ProjectFiles({ projectId }: { projectId: string }) {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -14,13 +15,17 @@ export function ProjectFiles({ projectId }: { projectId: string }) {
 
   const fetchFiles = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await API.get(`/projects/${projectId}/files`);
-      if (res.data?.files) setFiles(res.data.files);
+      const res = await API.get<{ files: any[] }>(`/projects/${projectId}/files`);
+      if (!Array.isArray(res?.files)) throw new Error("Resposta inválida ao carregar arquivos.");
+      setFiles(res.files);
     } catch (e) {
       console.error("Failed to load files", e);
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os arquivos.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const filteredFiles = files.filter(f => 
@@ -43,6 +48,7 @@ export function ProjectFiles({ projectId }: { projectId: string }) {
   };
 
   if (loading) return <div style={{ color: "#a1a1aa", padding: 20 }}>Carregando arquivos...</div>;
+  if (error) return <div role="alert" style={{ color: "#f87171", padding: 20 }}>{error}</div>;
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 24, height: "100%", overflowY: "auto" }}>

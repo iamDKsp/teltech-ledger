@@ -15,6 +15,7 @@ import { TaskModal } from "./components/TaskModal";
 import { ProjectList } from "./components/ProjectList";
 import { ProjectCalendar } from "./components/ProjectCalendar";
 import { ProjectOverview } from "./components/ProjectOverview";
+import { ProjectTimeline } from "./components/ProjectTimeline";
 import { ProjectFiles } from "./components/ProjectFiles";
 import { ProjectChannels } from "./components/ProjectChannels";
 import { ConfiguracoesPage } from "./pages/ConfiguracoesPage";
@@ -1698,6 +1699,8 @@ function MainContent() {
       case "Lista": return <ProjectList />;
       case "Calendário": return <ProjectCalendar />;
       case "Visão Geral": return <ProjectOverview />;
+      case "Cronologia":
+      case "Cronograma": return <ProjectTimeline />;
       case "Arquivos": return activeProject ? <ProjectFiles projectId={activeProject.id} /> : <div/>;
       case "Canais": return activeProject ? <ProjectChannels projectId={activeProject.id} /> : <div/>;
       default: return <ComingSoon module={`Projeto: ${activeTab}`} />;
@@ -1761,6 +1764,7 @@ export function TeltechLedger() {
           "lista": "Lista",
           "quadros": "Quadros",
           "cronologia": "Cronologia",
+          "cronograma": "Cronologia",
           "calendário": "Calendário",
           "canais": "Canais",
           "arquivos": "Arquivos"

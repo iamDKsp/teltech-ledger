@@ -5,6 +5,8 @@ import { API } from "../lib/api";
 export function ProjectChannels({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [body, setBody] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -22,13 +24,18 @@ export function ProjectChannels({ projectId }: { projectId: string }) {
 
   const fetchMessages = async () => {
     setLoading(true);
+    setError(null);
+    setMessages([]);
     try {
-      const res = await API.get(`/projects/${projectId}/messages`);
-      if (res.data?.messages) setMessages(res.data.messages);
+      const res = await API.get<{ messages: any[] }>(`/projects/${projectId}/messages`);
+      if (!Array.isArray(res?.messages)) throw new Error("Resposta inválida ao carregar mensagens.");
+      setMessages(res.messages);
     } catch (e) {
       console.error("Failed to fetch messages", e);
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as mensagens.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const scrollToBottom = () => {
@@ -36,15 +43,19 @@ export function ProjectChannels({ projectId }: { projectId: string }) {
   };
 
   const handleSend = async () => {
-    if (!body.trim()) return;
+    if (!body.trim() || sending) return;
+    setSending(true);
+    setError(null);
     try {
-      const res = await API.post(`/projects/${projectId}/messages`, { body: body.trim() });
-      if (res.data?.message) {
-        setMessages(prev => [...prev, res.data.message]);
-        setBody("");
-      }
+      const res = await API.post<{ message: any }>(`/projects/${projectId}/messages`, { body: body.trim() });
+      if (!res?.message?.id) throw new Error("Resposta inválida ao enviar mensagem.");
+      setMessages(prev => [...prev, res.message]);
+      setBody("");
     } catch (e) {
       console.error("Failed to send message", e);
+      setError(e instanceof Error ? e.message : "Não foi possível enviar a mensagem.");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -70,9 +81,10 @@ export function ProjectChannels({ projectId }: { projectId: string }) {
       <div style={{ padding: "20px 24px", borderBottom: "1px solid #242424" }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, color: "#fafafa", margin: 0 }}>Canal do Projeto</h2>
       </div>
+      {error && <div role="alert" style={{ color: "#f87171", padding: "12px 24px" }}>{error}</div>}
 
       <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-        {messages.length === 0 ? (
+        {messages.length === 0 ? !error && (
           <div style={{ margin: "auto", color: "#a1a1aa", textAlign: "center" }}>
             <p>Nenhuma mensagem ainda.</p>
             <p>Comece a conversa!</p>
@@ -124,7 +136,8 @@ export function ProjectChannels({ projectId }: { projectId: string }) {
           <input 
             type="text" 
             placeholder="Escreva uma mensagem..." 
-            value={body}
+              value={body}
+              disabled={sending}
             onChange={e => setBody(e.target.value)}
             onKeyDown={e => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -139,7 +152,7 @@ export function ProjectChannels({ projectId }: { projectId: string }) {
           />
           <button 
             onClick={handleSend}
-            disabled={!body.trim()}
+            disabled={!body.trim() || sending}
             style={{ 
               background: body.trim() ? "#7C5AC2" : "#313136", 
               border: "none", borderRadius: "50%", width: 36, height: 36, 

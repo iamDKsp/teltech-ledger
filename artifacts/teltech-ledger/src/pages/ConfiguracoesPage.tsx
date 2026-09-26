@@ -6,6 +6,8 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
   const [activeTab, setActiveTab] = useState<"geral" | "reunioes">("geral");
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Form states
   const [isCreating, setIsCreating] = useState(false);
@@ -24,24 +26,33 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
 
   const fetchMeetings = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await API.get("/meetings");
-      if (res.data?.meetings) setMeetings(res.data.meetings);
+      const res = await API.get<{ meetings: any[] }>("/meetings");
+      if (!Array.isArray(res?.meetings)) throw new Error("Resposta inválida ao carregar reuniões.");
+      setMeetings(res.meetings);
     } catch (e) {
       console.error("Failed to load meetings", e);
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as reuniões.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCreateMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!workspace) return;
-    
+    if (saving) return;
+    if (!workspace?.id) {
+      setError("Não foi possível identificar o espaço de trabalho para agendar a reunião.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
     try {
       const start = new Date(`${date}T${time}:00`);
       const end = new Date(start.getTime() + parseInt(duration) * 60000);
       
-      const res = await API.post("/meetings", {
+      const res = await API.post<{ meeting: any }>("/meetings", {
         workspaceId: workspace.id,
         title,
         description,
@@ -50,8 +61,9 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
         location
       });
       
-      if (res.data?.meeting) {
-        setMeetings(prev => [...prev, res.data.meeting].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+      if (!res?.meeting?.id) throw new Error("Resposta inválida ao agendar reunião.");
+      {
+        setMeetings(prev => [...prev, res.meeting].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
         setIsCreating(false);
         setTitle("");
         setDescription("");
@@ -61,16 +73,21 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
       }
     } catch (e) {
       console.error("Failed to create meeting", e);
+      setError(e instanceof Error ? e.message : "Não foi possível agendar a reunião.");
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir esta reunião?")) return;
+    setError(null);
     try {
       await API.delete(`/meetings/${id}`);
       setMeetings(prev => prev.filter(m => m.id !== id));
     } catch (e) {
       console.error("Failed to delete meeting", e);
+      setError(e instanceof Error ? e.message : "Não foi possível excluir a reunião.");
     }
   };
 
@@ -141,6 +158,7 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
 
         {activeTab === "reunioes" && (
           <div>
+            {error && <div role="alert" style={{ color: "#f87171", marginBottom: 16 }}>{error}</div>}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <h1 style={{ fontSize: 24, fontWeight: 600 }}>Reuniões</h1>
               <button 
@@ -220,8 +238,8 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
                     <button type="button" onClick={() => setIsCreating(false)} style={{ background: "transparent", border: "1px solid #313136", color: "#fafafa", padding: "8px 16px", borderRadius: 8, cursor: "pointer" }}>
                       Cancelar
                     </button>
-                    <button type="submit" style={{ background: "#10B981", border: "none", color: "#fff", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontWeight: 500 }}>
-                      Agendar
+                    <button type="submit" disabled={saving} style={{ background: "#10B981", border: "none", color: "#fff", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontWeight: 500 }}>
+                      {saving ? "Agendando..." : "Agendar"}
                     </button>
                   </div>
                 </div>
@@ -232,7 +250,7 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
               <div style={{ color: "#a1a1aa" }}>Carregando reuniões...</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {upcomingMeetings.length === 0 && !isCreating && (
+                {upcomingMeetings.length === 0 && !isCreating && !error && (
                   <div style={{ textAlign: "center", padding: 40, background: "#1a1a1a", borderRadius: 12, border: "1px solid #242424", color: "#a1a1aa" }}>
                     Nenhuma reunião agendada.
                   </div>
