@@ -36,6 +36,7 @@ minimumReleaseAgeExclude:
 
 packages:
   - artifacts/*
+  - '!artifacts/teltech-mobile'
   - lib/*
   - lib/integrations/*
   - scripts
