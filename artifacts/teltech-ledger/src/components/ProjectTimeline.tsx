@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useRef, useMemo, useCallback } 
 import { AppContext, Task, AvatarCluster, API } from "../TeltechLedger";
 import { useAuth } from "../lib/auth-context";
 import { TaskModal } from "./TaskModal";
+import { useIsMobile } from "../hooks/use-mobile";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -109,6 +110,8 @@ export function ProjectTimeline() {
   const { token } = useAuth();
 
   // Estados principais
+  const isMobile = useIsMobile();
+  const [mobileTimelineTab, setMobileTimelineTab] = useState<"tasks" | "gantt">("tasks");
   const [viewMode, setViewMode] = useState<ViewMode>("timeline");
   const [zoom, setZoom] = useState<ZoomLevel>("dias");
   const [groupBy, setGroupBy] = useState<GroupBy>("column");
@@ -532,19 +535,19 @@ export function ProjectTimeline() {
       {/* ─── Top Control Header ─────────────────────────────────────────────── */}
       <div
         style={{
-          padding: "14px 20px",
+          padding: isMobile ? "10px 12px" : "14px 20px",
           background: "#161618",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
           display: "flex",
-          alignItems: "center",
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center",
           justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 12,
+          gap: isMobile ? 8 : 12,
           flexShrink: 0,
         }}
       >
-        {/* Esquerda: Switcher de Visão (Timeline vs Roadmap) & Agrupamento */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Esquerda / Linha 1 no Mobile: Modos e Segmented Control */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           {/* View Mode Toggle Pill */}
           <div
             style={{
@@ -553,7 +556,7 @@ export function ProjectTimeline() {
               background: "#202024",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: 8,
-              padding: 3,
+              padding: 2,
             }}
           >
             <button
@@ -561,21 +564,21 @@ export function ProjectTimeline() {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 7,
-                padding: "6px 14px",
+                gap: isMobile ? 4 : 7,
+                padding: isMobile ? "5px 10px" : "6px 14px",
                 borderRadius: 6,
                 background: viewMode === "timeline" ? "linear-gradient(135deg, #7C5AC2, #6044A8)" : "transparent",
                 color: viewMode === "timeline" ? "#FFFFFF" : "#888892",
                 fontWeight: viewMode === "timeline" ? 600 : 400,
-                fontSize: 12.5,
+                fontSize: isMobile ? 11.5 : 12.5,
                 border: "none",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
                 boxShadow: viewMode === "timeline" ? "0 2px 8px rgba(124,90,194,0.4)" : "none",
               }}
             >
-              <CalendarDays size={14} />
-              Linha do Tempo (Gantt)
+              <CalendarDays size={13} />
+              {isMobile ? "Cronograma" : "Linha do Tempo (Gantt)"}
             </button>
 
             <button
@@ -583,26 +586,71 @@ export function ProjectTimeline() {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 7,
-                padding: "6px 14px",
+                gap: isMobile ? 4 : 7,
+                padding: isMobile ? "5px 10px" : "6px 14px",
                 borderRadius: 6,
                 background: viewMode === "roadmap" ? "linear-gradient(135deg, #7C5AC2, #6044A8)" : "transparent",
                 color: viewMode === "roadmap" ? "#FFFFFF" : "#888892",
                 fontWeight: viewMode === "roadmap" ? 600 : 400,
-                fontSize: 12.5,
+                fontSize: isMobile ? 11.5 : 12.5,
                 border: "none",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
                 boxShadow: viewMode === "roadmap" ? "0 2px 8px rgba(124,90,194,0.4)" : "none",
               }}
             >
-              <Milestone size={14} />
-              Roadmap de Marcos
+              <Milestone size={13} />
+              {isMobile ? "Marcos" : "Roadmap de Marcos"}
             </button>
           </div>
 
-          {/* Seletor de Agrupamento (Apenas no Gantt) */}
-          {viewMode === "timeline" && (
+          {/* Segmented Control no Mobile (Tarefas vs Gantt) */}
+          {isMobile && viewMode === "timeline" && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                background: "#202024",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8,
+                padding: 2,
+              }}
+            >
+              <button
+                onClick={() => setMobileTimelineTab("tasks")}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: mobileTimelineTab === "tasks" ? 600 : 400,
+                  background: mobileTimelineTab === "tasks" ? "rgba(124,90,194,0.3)" : "transparent",
+                  color: mobileTimelineTab === "tasks" ? "#fff" : "#888",
+                }}
+              >
+                Tarefas ({filteredTasks.length})
+              </button>
+              <button
+                onClick={() => setMobileTimelineTab("gantt")}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: mobileTimelineTab === "gantt" ? 600 : 400,
+                  background: mobileTimelineTab === "gantt" ? "rgba(124,90,194,0.3)" : "transparent",
+                  color: mobileTimelineTab === "gantt" ? "#fff" : "#888",
+                }}
+              >
+                Gráfico Gantt
+              </button>
+            </div>
+          )}
+
+          {/* Seletor de Agrupamento (Apenas no Desktop) */}
+          {!isMobile && viewMode === "timeline" && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
               <span style={{ fontSize: 12, color: "#666672" }}>Agrupar:</span>
               <div
@@ -649,34 +697,43 @@ export function ProjectTimeline() {
           )}
         </div>
 
-        {/* Direita: Controles de Busca, Filtros, Zoom e Botão de Ação */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Direita / Linha 2 no Mobile: Controles de Busca, Filtros, Zoom e Botão de Ação */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          overflowX: isMobile ? "auto" : "visible",
+          WebkitOverflowScrolling: "touch",
+          paddingBottom: isMobile ? 2 : 0,
+          scrollbarWidth: "none"
+        }}>
           {/* Campo de Busca Rápida */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
+              gap: 6,
               background: "#1C1C20",
               border: "1px solid rgba(255,255,255,0.07)",
               borderRadius: 8,
-              padding: "5px 10px",
-              minWidth: 160,
+              padding: "5px 8px",
+              minWidth: isMobile ? 120 : 160,
+              flexShrink: 0
             }}
           >
-            <Search size={13} color="#777" />
+            <Search size={12} color="#777" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar tarefa..."
+              placeholder="Buscar..."
               style={{
                 background: "transparent",
                 border: "none",
                 outline: "none",
                 color: "#E0E0E6",
                 fontSize: 12,
-                width: 110,
+                width: isMobile ? 80 : 110,
               }}
             />
             {search && (
@@ -697,17 +754,18 @@ export function ProjectTimeline() {
               fontSize: 12,
               outline: "none",
               cursor: "pointer",
+              flexShrink: 0
             }}
           >
-            <option value="all">Todas Prioridades</option>
+            <option value="all">Prioridades</option>
             <option value="urgent">Urgente</option>
             <option value="high">Alta</option>
             <option value="normal">Normal</option>
             <option value="low">Baixa</option>
           </select>
 
-          {/* Controles de Zoom (Apenas na Linha do Tempo) */}
-          {viewMode === "timeline" && (
+          {/* Controles de Zoom (Apenas na Linha do Tempo e quando Gantt está ativo) */}
+          {viewMode === "timeline" && (!isMobile || mobileTimelineTab === "gantt") && (
             <>
               <div
                 style={{
@@ -717,6 +775,7 @@ export function ProjectTimeline() {
                   borderRadius: 8,
                   border: "1px solid rgba(255,255,255,0.07)",
                   padding: 2,
+                  flexShrink: 0
                 }}
               >
                 {(["dias", "semanas", "meses"] as ZoomLevel[]).map((z) => (
@@ -724,9 +783,9 @@ export function ProjectTimeline() {
                     key={z}
                     onClick={() => setZoom(z)}
                     style={{
-                      padding: "4px 9px",
+                      padding: "4px 8px",
                       borderRadius: 6,
-                      fontSize: 11.5,
+                      fontSize: 11,
                       border: "none",
                       cursor: "pointer",
                       background: zoom === z ? "#2B2B32" : "transparent",
@@ -746,20 +805,21 @@ export function ProjectTimeline() {
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
-                  padding: "5px 11px",
+                  gap: 4,
+                  padding: "5px 9px",
                   borderRadius: 8,
                   background: "rgba(124,90,194,0.12)",
                   border: "1px solid rgba(124,90,194,0.3)",
                   color: "#9B6DE3",
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: 600,
                   cursor: "pointer",
                   transition: "all 0.15s ease",
+                  flexShrink: 0
                 }}
                 title="Rolar para o dia de hoje"
               >
-                <Clock size={13} />
+                <Clock size={12} />
                 Hoje
               </button>
             </>
@@ -772,19 +832,20 @@ export function ProjectTimeline() {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 6,
-                padding: "6px 13px",
+                gap: 5,
+                padding: "6px 12px",
                 borderRadius: 8,
                 background: "linear-gradient(135deg, #7C5AC2, #6044A8)",
                 border: "none",
                 color: "#FFFFFF",
-                fontSize: 12.5,
+                fontSize: 12,
                 fontWeight: 600,
                 cursor: "pointer",
                 boxShadow: "0 2px 10px rgba(124,90,194,0.4)",
+                flexShrink: 0
               }}
             >
-              <Plus size={14} />
+              <Plus size={13} />
               Novo Marco
             </button>
           )}
@@ -793,24 +854,34 @@ export function ProjectTimeline() {
 
       {/* ─── Conteúdo Principal: Alternância entre Modos ───────────────────── */}
       {viewMode === "timeline" ? (
+        filteredTasks.length === 0 ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "#8E8E9A" }}>
+            <CalendarDays size={48} color="#7C5AC2" style={{ marginBottom: 16, opacity: 0.8 }} />
+            <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 700, color: "#EDEDF0" }}>Nenhuma tarefa com prazo no projeto</h3>
+            <p style={{ margin: 0, fontSize: 13, maxWidth: 360, lineHeight: 1.5, color: "#777782" }}>
+              Adicione datas de início e entrega às suas tarefas para visualizá-las aqui na linha do tempo e acompanhar o cronograma do projeto.
+            </p>
+          </div>
+        ) : (
         /* ══════════════════════════════════════════════════════════════════════
            MODO 1: LINHA DO TEMPO / GANTT INTERATIVO
         ══════════════════════════════════════════════════════════════════════ */
         <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
           
           {/* Painel Esquerdo: Lista de Tarefas / Grupos */}
-          <div
-            style={{
-              width: 320,
-              minWidth: 320,
-              background: "#161618",
-              borderRight: "1px solid rgba(255,255,255,0.06)",
-              display: "flex",
-              flexDirection: "column",
-              zIndex: 10,
-              boxShadow: "4px 0 20px rgba(0,0,0,0.35)",
-            }}
-          >
+          {(!isMobile || mobileTimelineTab === "tasks") && (
+            <div
+              style={{
+                width: isMobile ? "100%" : 320,
+                minWidth: isMobile ? "100%" : 320,
+                background: "#161618",
+                borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.06)",
+                display: "flex",
+                flexDirection: "column",
+                zIndex: 10,
+                boxShadow: isMobile ? "none" : "4px 0 20px rgba(0,0,0,0.35)",
+              }}
+            >
             {/* Header da Coluna de Tarefas */}
             <div
               style={{
@@ -935,18 +1006,22 @@ export function ProjectTimeline() {
               })}
             </div>
           </div>
+        )}
 
           {/* Painel Direito: Grid da Linha do Tempo e Régua */}
-          <div
-            ref={timelineScrollRef}
-            style={{
-              flex: 1,
-              overflowX: "auto",
-              overflowY: "auto",
-              position: "relative",
-              background: "#111113",
-            }}
-          >
+          {(!isMobile || mobileTimelineTab === "gantt") && (
+            <div
+              ref={timelineScrollRef}
+              style={{
+                flex: 1,
+                width: isMobile ? "100%" : undefined,
+                overflowX: "auto",
+                overflowY: "auto",
+                position: "relative",
+                background: "#111113",
+                WebkitOverflowScrolling: "touch"
+              }}
+            >
             <div style={{ minWidth: daysArray.length * columnWidth, position: "relative" }}>
               
               {/* ─── Header da Régua Temporal ─────────────────────────────── */}
@@ -1220,18 +1295,20 @@ export function ProjectTimeline() {
               </div>
             </div>
           </div>
-        </div>
-      ) : (
+        )}
+      </div>
+      )
+    ) : (
         /* ══════════════════════════════════════════════════════════════════════
            MODO 2: ROADMAP ESTRATÉGICO DE MARCOS (MILESTONES & SPRINTS)
         ══════════════════════════════════════════════════════════════════════ */
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px" : "24px 32px" }}>
           
           {/* Top Metric Cards */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(210px, 1fr))",
               gap: 16,
               marginBottom: 32,
             }}
@@ -1736,7 +1813,7 @@ function CreateMilestoneModal({
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#8E8E9A", marginBottom: 6 }}>
                 Data Alvo
@@ -1753,7 +1830,7 @@ function CreateMilestoneModal({
                   border: "1px solid rgba(255,255,255,0.08)",
                   borderRadius: 8,
                   color: "#EDEDF0",
-                  fontSize: 13,
+                  fontSize: 16,
                   outline: "none",
                   boxSizing: "border-box",
                 }}
@@ -1774,7 +1851,7 @@ function CreateMilestoneModal({
                   border: "1px solid rgba(255,255,255,0.08)",
                   borderRadius: 8,
                   color: "#EDEDF0",
-                  fontSize: 13,
+                  fontSize: 16,
                   outline: "none",
                   boxSizing: "border-box",
                   cursor: "pointer",

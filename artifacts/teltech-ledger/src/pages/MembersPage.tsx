@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../lib/auth-context";
 import { Loader } from "../components/Loader";
 import { X, KeyRound, Check, Camera, Pencil, Trash2 } from "lucide-react";
+import { useIsMobile } from "../hooks/use-mobile";
 
 const API = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ""
   ? import.meta.env.VITE_API_URL
@@ -55,8 +56,8 @@ function Avatar({ member, size = 44 }: { member: Member; size?: number }) {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)", animation: "fadeIn 0.15s ease" }}>
-      <div style={{ width: 460, background: "#1a1a1f", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 32px 80px rgba(0,0,0,0.8)", overflow: "hidden", animation: "slideUp 0.2s cubic-bezier(0.34,1.2,0.64,1)" }}>
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)", padding: 16, animation: "fadeIn 0.15s ease" }}>
+      <div style={{ width: "min(460px, calc(100vw - 32px))", maxHeight: "90dvh", overflowY: "auto", background: "#1a1a1f", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 32px 80px rgba(0,0,0,0.8)", animation: "slideUp 0.2s cubic-bezier(0.34,1.2,0.64,1)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f0f0f0" }}>{title}</h2>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
@@ -83,6 +84,7 @@ const btnSecondary: React.CSSProperties = { padding: "10px 20px", borderRadius: 
 
 export function MembersPage() {
   const { user, token } = useAuth();
+  const isMobile = useIsMobile();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLoader, setShowLoader] = useState(true);
@@ -217,11 +219,11 @@ export function MembersPage() {
   const ErrorBox = () => error ? <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#f87171" }}>{error}</div> : null;
 
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+    <div style={{ flex: 1, overflow: "auto", padding: isMobile ? "16px 14px" : "28px 32px", boxSizing: "border-box" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isMobile ? 16 : 24, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#f0f0f0" }}>Membros</h1>
+          <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 22, fontWeight: 700, color: "#f0f0f0" }}>Membros</h1>
           <p style={{ margin: "4px 0 0", fontSize: 13, color: "#666" }}>{members.length} membro{members.length !== 1 ? "s" : ""} no workspace</p>
         </div>
         <button onClick={openCreate} style={btnPrimary}>
@@ -230,25 +232,106 @@ export function MembersPage() {
       </div>
 
       {/* Search */}
-      <div style={{ marginBottom: 20 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou email..." style={{ ...inputStyle, maxWidth: 360 }} />
+      <div style={{ marginBottom: isMobile ? 14 : 20 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou email..." style={{ ...inputStyle, maxWidth: isMobile ? "100%" : 360 }} />
       </div>
 
-      {/* Table */}
+      {/* Table / Cards */}
       {showLoader ? (
         <div style={{ padding: 40, display: "flex", minHeight: 300 }}>
           <Loader isReady={!loading} onFinish={() => setShowLoader(false)} />
         </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#555" }}>Nenhum membro encontrado</div>
+      ) : isMobile ? (
+        /* Mobile Cards View */
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map(m => {
+            const r = ROLE_LABELS[m.role] ?? { label: m.role || "Membro", color: "#888", bg: "rgba(255,255,255,0.06)" };
+            return (
+              <div
+                key={m.id}
+                style={{
+                  background: "#161618",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                {/* Top: Avatar + Name + Role */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                    <Avatar member={m} size={40} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                      <div style={{ fontSize: 12, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</div>
+                      {m.phone && <div style={{ fontSize: 11, color: "#666" }}>{m.phone}</div>}
+                    </div>
+                  </div>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: r.bg, color: r.color, fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 16, flexShrink: 0 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: r.color }} />{r.label}
+                  </span>
+                </div>
+
+                {/* Bottom: Status + Actions */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 10 }}>
+                  <div>
+                    {m.mustChangePassword ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#f59e0b", background: "rgba(245,158,11,0.1)", padding: "3px 8px", borderRadius: 6 }}>
+                        <KeyRound size={11} /> Trocar senha
+                      </span>
+                    ) : (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#10B981" }}>
+                        <Check size={12} /> Ativo
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {[
+                      { icon: <Camera size={14} />, title: "Foto", onClick: () => openAvatar(m) },
+                      { icon: <Pencil size={14} />, title: "Editar", onClick: () => openEdit(m) },
+                      { icon: <KeyRound size={14} />, title: "Senha", onClick: () => openPassword(m) },
+                      { icon: <Trash2 size={14} />, title: "Excluir", onClick: () => openDelete(m), danger: true },
+                    ].map((a, i) => (
+                      <button
+                        key={i}
+                        onClick={a.onClick}
+                        title={a.title}
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          color: a.danger ? "#f87171" : "#ccc",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {a.icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
+        /* Desktop Table View */
         <div style={{ background: "#161618", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, overflow: "hidden" }}>
           {/* Table header */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 200px 140px 120px 160px", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#555", letterSpacing: "0.05em", textTransform: "uppercase" }}>
             <span>Membro</span><span>Email</span><span>Cargo</span><span>Status</span><span style={{ textAlign: "right" }}>Ações</span>
           </div>
 
-          {filtered.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#555" }}>Nenhum membro encontrado</div>
-          ) : filtered.map(m => {
+          {filtered.map(m => {
             const r = ROLE_LABELS[m.role] ?? { label: m.role || "Membro", color: "#888", bg: "rgba(255,255,255,0.06)" };
             return (
               <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 200px 140px 120px 160px", padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center", transition: "background 0.15s" }}

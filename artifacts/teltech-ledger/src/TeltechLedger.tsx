@@ -1422,7 +1422,7 @@ function Board() {
       )}
       {taskToDelete && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", backdropFilter:"blur(5px)", zIndex:100000, display:"flex", alignItems:"center", justifyContent:"center", animation:"fadeIn 0.15s ease" }}>
-          <div style={{ width:380, background:"#1e1e22", borderRadius:12, border:"1px solid rgba(255,255,255,0.1)", padding:"24px", boxShadow:"0 20px 60px rgba(0,0,0,0.8)", animation:"slideUp 0.2s ease" }}>
+          <div style={{ width:"min(380px, calc(100vw - 32px))", background:"#1e1e22", borderRadius:12, border:"1px solid rgba(255,255,255,0.1)", padding:"20px", boxShadow:"0 20px 60px rgba(0,0,0,0.8)", animation:"slideUp 0.2s ease" }}>
             <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
               <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(239,68,68,0.1)", display:"flex", alignItems:"center", justifyContent:"center", color:"#ef4444" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -1861,6 +1861,7 @@ function MobileDrawer({
         {/* Drawer Header */}
         <div style={{
           padding: "16px",
+          paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -2048,6 +2049,7 @@ function MobileDrawer({
         {/* Drawer Footer */}
         <div style={{
           padding: "16px",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
           borderTop: "1px solid rgba(255,255,255,0.06)",
           display: "flex",
           gap: 10
@@ -2137,7 +2139,12 @@ function Header() {
   }, [token, user]);
 
   return (
-    <div style={{ background:"#1A1A1A", borderBottom:"1px solid #242424", flexShrink:0 }}>
+    <div style={{
+      background: "#1A1A1A",
+      borderBottom: "1px solid #242424",
+      flexShrink: 0,
+      paddingTop: isMobile ? "env(safe-area-inset-top, 0px)" : undefined
+    }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding: isMobile ? "8px 12px" : "11px 20px" }}>
         <div style={{ display:"flex", alignItems:"center", gap: 10 }}>
           {isMobile && (
@@ -2339,7 +2346,6 @@ const STYLES = `
   @media (max-width: 768px) {
     .responsive-page-pad {
       padding: 16px !important;
-      padding-bottom: calc(76px + env(safe-area-inset-bottom, 16px)) !important;
     }
   }
 `;

@@ -106,6 +106,7 @@ interface Client {
   document?: string;
   email?: string;
   phone?: string;
+  whatsappOptIn: boolean;
   status: string;
   notes?: string;
 }
@@ -552,8 +553,7 @@ function CockpitKpiCard({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function FinanceiroPage() {
-  const { user } = useAuth();
-  const { isMobile } = useContext(AppContext) as { isMobile?: boolean };
+  const isMobile = useIsMobile();
 
   // Routine Tabs
   const [activeTab, setActiveTab] = useState<TabType>("dashboard");
@@ -581,6 +581,8 @@ export function FinanceiroPage() {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [sendingBillingId, setSendingBillingId] = useState<string | null>(null);
   const [rejectingTxId, setRejectingTxId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
@@ -732,27 +734,35 @@ export function FinanceiroPage() {
     }
   };
 
-  // WhatsApp Billing Link Generator with Teltech Pix Key
-  const handleSendWhatsAppPix = (client: Client, tx?: Transaction) => {
-    const phone = client.phone ? client.phone.replace(/\D/g, "") : "";
-    if (!phone) {
-      toast.error("Este cliente não possui telefone/WhatsApp cadastrado.");
+  const handleSendWhatsAppPix = async (_client: Client, tx?: Transaction) => {
+    const selectedTx = transactions.find(item => item.id === tx?.id);
+    const selectedClient = clients.find(item => item.id === selectedTx?.clientId);
+    if (!selectedTx || selectedTx.type !== "inflow" || selectedTx.status !== "pending") {
+      toast.error("Selecione uma parcela em aberto para enviar a cobrança.");
       return;
     }
-    const cleanPhone = phone.startsWith("55") ? phone : `55${phone}`;
-    const amountStr = tx ? formatBRL(tx.amount) : "conforme acordado";
-    const dueStr = tx ? formatDate(tx.dueDate) : "a combinar";
-    const descStr = tx ? tx.description : "serviços prestados";
-
-    const msg =
-      `Olá, ${client.name}! Tudo bem?\n\n` +
-      `Passando para enviar a fatura da Teltech referente a *${descStr}*:\n` +
-      `💰 *Valor:* ${amountStr}\n` +
-      `📅 *Vencimento:* ${dueStr}\n\n` +
-      `🔑 *Chave Pix (CNPJ Teltech):* financeiro@teltech.com.br\n\n` +
-      `Qualquer dúvida ficamos à disposição!`;
-
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+    if (!selectedClient?.whatsappOptIn) {
+      toast.error("Registre a autorização do cliente antes de enviar cobranças pelo WhatsApp.");
+      return;
+    }
+    if (!selectedClient.phone?.replace(/\D/g, "")) {
+      toast.error("Este cliente não possui WhatsApp cadastrado.");
+      return;
+    }
+    if (selectedClient.status === "inactive") {
+      toast.error("Este cliente está inativo. Revise a ficha antes de cobrar.");
+      return;
+    }
+    if (sendingBillingId) return;
+    setSendingBillingId(selectedTx.id);
+    try {
+      await API.post("/whatsapp/messages/manual-billing", { transactionId: selectedTx.id });
+      toast.success("Cobrança registrada para envio pelo WhatsApp da empresa.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível enviar a cobrança.");
+    } finally {
+      setSendingBillingId(null);
+    }
   };
 
   const monthNames = [
@@ -778,18 +788,18 @@ export function FinanceiroPage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "16px 24px",
+          padding: isMobile ? "12px 16px" : "16px 24px",
           borderBottom: "1px solid rgba(255,255,255,0.08)",
           background: "linear-gradient(180deg, #18181c 0%, #131316 100%)",
           flexWrap: "wrap",
           gap: 12,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div
             style={{
-              width: 40,
-              height: 40,
+              width: isMobile ? 34 : 40,
+              height: isMobile ? 34 : 40,
               borderRadius: 10,
               background: "linear-gradient(135deg, #8B5CF6 0%, #4F2D8A 100%)",
               display: "flex",
@@ -797,13 +807,14 @@ export function FinanceiroPage() {
               justifyContent: "center",
               color: "#fff",
               boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
+              flexShrink: 0
             }}
           >
-            <Wallet style={{ width: 20, height: 20 }} />
+            <Wallet style={{ width: isMobile ? 18 : 20, height: isMobile ? 18 : 20 }} />
           </div>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>
+              <h1 style={{ margin: 0, fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>
                 Gestão Financeira & Governança
               </h1>
               <span
@@ -820,14 +831,14 @@ export function FinanceiroPage() {
                 Mês Aberto
               </span>
             </div>
-            <p style={{ margin: 0, fontSize: 12, color: "#a1a1aa" }}>
+            <p style={{ margin: 0, fontSize: isMobile ? 11 : 12, color: "#a1a1aa" }}>
               Teltech Software & Inteligência Artificial
             </p>
           </div>
         </div>
 
         {/* Period Selector & Global Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto", justifyContent: isMobile ? "space-between" : "flex-end" }}>
           {/* Month Stepper */}
           <div
             style={{
@@ -846,7 +857,7 @@ export function FinanceiroPage() {
             >
               <ChevronLeft style={{ width: 16, height: 16 }} />
             </button>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", padding: "0 10px", minWidth: 140, textAlign: "center" }}>
+            <span style={{ fontSize: isMobile ? 12 : 13, fontWeight: 700, color: "#fff", padding: isMobile ? "0 6px" : "0 10px", minWidth: isMobile ? 110 : 140, textAlign: "center" }}>
               {monthNames[selectedMonth - 1]} / {selectedYear}
             </span>
             <button
@@ -858,49 +869,51 @@ export function FinanceiroPage() {
             </button>
           </div>
 
-          <button
-            onClick={handleExportCSV}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 14px",
-              borderRadius: 8,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              color: "#e4e4e7",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            <Download style={{ width: 14, height: 14 }} />
-            Exportar CSV
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={handleExportCSV}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: isMobile ? "7px 10px" : "8px 14px",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: "#e4e4e7",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <Download style={{ width: 14, height: 14 }} />
+              {isMobile ? "CSV" : "Exportar CSV"}
+            </button>
 
-          <button
-            onClick={() => {
-              setEditingTx(null);
-              setShowTxModal(true);
-            }}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 16px",
-              borderRadius: 8,
-              background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
-              border: "none",
-              color: "#fff",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              boxShadow: "0 4px 14px rgba(139,92,246,0.35)",
-            }}
-          >
-            <Plus style={{ width: 15, height: 15 }} />
-            Novo Lançamento
-          </button>
+            <button
+              onClick={() => {
+                setEditingTx(null);
+                setShowTxModal(true);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: isMobile ? "7px 12px" : "8px 16px",
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
+                border: "none",
+                color: "#fff",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(139,92,246,0.35)",
+              }}
+            >
+              <Plus style={{ width: 15, height: 15 }} />
+              Novo Lançamento
+            </button>
+          </div>
         </div>
       </div>
 
@@ -982,6 +995,7 @@ export function FinanceiroPage() {
             {activeTab === "dashboard" && (
               <CockpitView
                 dashboard={dashboard}
+                clients={clients}
                 onGoToTab={(t) => setActiveTab(t)}
                 onNewTx={() => setShowTxModal(true)}
                 onApprove={handleApprove}
@@ -1018,8 +1032,10 @@ export function FinanceiroPage() {
               <ClientsView
                 clients={clients}
                 transactions={transactions}
-                onNewClient={() => setShowClientModal(true)}
+                onNewClient={() => { setEditingClient(null); setShowClientModal(true); }}
+                onEditClient={(client) => { setEditingClient(client); setShowClientModal(true); }}
                 onSendWhatsApp={handleSendWhatsAppPix}
+                sendingBillingId={sendingBillingId}
                 onNewTxForClient={(clientId) => {
                   setEditingTx({ clientId } as unknown as Transaction);
                   setShowTxModal(true);
@@ -1115,9 +1131,11 @@ export function FinanceiroPage() {
 
       {showClientModal && (
         <ClientModal
-          onClose={() => setShowClientModal(false)}
+          client={editingClient}
+          onClose={() => { setShowClientModal(false); setEditingClient(null); }}
           onSaved={() => {
             setShowClientModal(false);
+            setEditingClient(null);
             loadAllData();
           }}
         />
@@ -1227,6 +1245,7 @@ export function FinanceiroPage() {
 
 function CockpitView({
   dashboard,
+  clients,
   onGoToTab,
   onNewTx,
   onApprove,
@@ -1235,6 +1254,7 @@ function CockpitView({
   onMarkPaid,
 }: {
   dashboard: DashboardData | null;
+  clients: Client[];
   onGoToTab: (t: TabType) => void;
   onNewTx: () => void;
   onApprove: (id: string) => void;
@@ -1242,6 +1262,7 @@ function CockpitView({
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onMarkPaid: (tx: Transaction) => void;
 }) {
+  const isMobile = useIsMobile();
   if (!dashboard) return null;
 
   // Runway Human Label
@@ -1265,9 +1286,9 @@ function CockpitView({
   const totalUrgentIssues = pendingApprovalsCount + overdueInflows.length + overdueOutflows.length;
 
   return (
-    <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: isMobile ? "12px 14px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       {/* ─── Row 1: The 4 Noble KPIs ────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
         {/* 1. Caixa Disponível */}
         <CockpitKpiCard
           title="Caixa Disponível Consolidado"
@@ -1336,7 +1357,7 @@ function CockpitView({
       </div>
 
       {/* ─── Row 2: 2-Column Grid (Left: 2/3 Content, Right: 1/3 Pendencies) ─── */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr", gap: 20, alignItems: "start" }}>
         {/* LEFT COLUMN (2/3) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* Cash Flow Evolution Chart */}
@@ -1345,7 +1366,7 @@ function CockpitView({
               background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: 14,
-              padding: "22px 24px",
+              padding: isMobile ? "16px 14px" : "22px 24px",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -1425,7 +1446,7 @@ function CockpitView({
               background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
               border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: 14,
-              padding: "22px 24px",
+              padding: isMobile ? "16px 14px" : "22px 24px",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -1568,7 +1589,7 @@ function CockpitView({
               background: "linear-gradient(135deg, rgba(30,30,36,0.98), rgba(22,22,26,0.98))",
               border: totalUrgentIssues > 0 ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.08)",
               borderRadius: 14,
-              padding: "22px 20px",
+              padding: isMobile ? "16px 14px" : "22px 20px",
               boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
             }}
           >
@@ -1705,9 +1726,9 @@ function CockpitView({
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
                         <span>Vencido em {formatShortDate(item.dueDate)}</span>
-                        {item.clientPhone ? (
+                        {item.clientPhone && clients.some(client => client.id === item.clientId && client.whatsappOptIn && client.status !== "inactive") ? (
                           <button
-                            onClick={() => onSendWhatsApp({ id: item.clientId ?? "", name: item.clientName, phone: item.clientPhone ?? "" } as Client, item as unknown as Transaction)}
+                            onClick={() => onSendWhatsApp({ id: item.clientId ?? "", name: item.clientName } as Client, item as unknown as Transaction)}
                             style={{
                               padding: "3px 8px",
                               borderRadius: 4,
@@ -1725,7 +1746,7 @@ function CockpitView({
                             <Send style={{ width: 10, height: 10 }} /> Cobrar Pix
                           </button>
                         ) : (
-                          <span style={{ color: "#777" }}>Sem WhatsApp</span>
+                          <span style={{ color: "#a1a1aa" }}>{item.clientPhone ? "Sem autorização" : "Sem WhatsApp"}</span>
                         )}
                       </div>
                     </div>
@@ -2402,15 +2423,20 @@ function ClientsView({
   clients,
   transactions,
   onNewClient,
+  onEditClient,
   onSendWhatsApp,
   onNewTxForClient,
+  sendingBillingId,
 }: {
   clients: Client[];
   transactions: Transaction[];
   onNewClient: () => void;
+  onEditClient: (client: Client) => void;
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onNewTxForClient: (clientId: string) => void;
+  sendingBillingId: string | null;
 }) {
+  const isMobile = useIsMobile();
   const [searchClient, setSearchClient] = useState("");
 
   const filteredClients = clients.filter(c =>
@@ -2419,10 +2445,10 @@ function ClientsView({
   );
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+          <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
             Carteira de Clientes & Contas a Receber
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
@@ -2449,7 +2475,7 @@ function ClientsView({
         </button>
       </div>
 
-      <div style={{ maxWidth: 360, position: "relative" }}>
+      <div style={{ maxWidth: 360, width: "100%", position: "relative" }}>
         <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: "#666" }} />
         <input
           type="text"
@@ -2463,7 +2489,7 @@ function ClientsView({
             borderRadius: 8,
             padding: "9px 12px 9px 36px",
             color: "#fff",
-            fontSize: 13,
+            fontSize: 16,
             outline: "none",
             boxSizing: "border-box",
           }}
@@ -2471,13 +2497,14 @@ function ClientsView({
       </div>
 
       {filteredClients.length > 0 ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
           {filteredClients.map((client) => {
             const clientTxs = transactions.filter(t => t.clientId === client.id && t.type === "inflow");
             const totalBilled = clientTxs.filter(t => t.status === "paid").reduce((s, t) => s + t.amount, 0);
-            const pendingTxs = clientTxs.filter(t => t.status === "pending");
+            const pendingTxs = clientTxs.filter(t => t.status === "pending").sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
             const pendingAmount = pendingTxs.reduce((s, t) => s + t.amount, 0);
             const hasOverdue = pendingTxs.some(t => new Date(t.dueDate) < new Date());
+            const canSendBilling = Boolean(client.whatsappOptIn && client.phone?.replace(/\D/g, "") && client.status !== "inactive" && pendingTxs.length > 0);
 
             return (
               <div
@@ -2512,6 +2539,15 @@ function ClientsView({
                   </span>
                 </div>
 
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: client.whatsappOptIn ? "hsl(152 65% 45%)" : "hsl(240 5% 65%)" }}>
+                    {client.whatsappOptIn ? "WhatsApp autorizado" : "WhatsApp sem autorização"}
+                  </span>
+                  <button type="button" onClick={() => onEditClient(client)} style={{ border: "none", background: "transparent", color: "hsl(265 85% 62%)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                    Editar ficha
+                  </button>
+                </div>
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, background: "rgba(0,0,0,0.25)", padding: "10px", borderRadius: 8 }}>
                   <div>
                     <span style={{ fontSize: 11, color: "#777" }}>Total Faturado:</span>
@@ -2528,23 +2564,26 @@ function ClientsView({
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={() => onSendWhatsApp(client, pendingTxs[0])}
+                    disabled={!canSendBilling || sendingBillingId === pendingTxs[0]?.id}
+                    title={!client.whatsappOptIn ? "Registre a autorização na ficha do cliente" : !client.phone ? "Cadastre o WhatsApp do cliente" : client.status === "inactive" ? "Cliente inativo" : !pendingTxs.length ? "Nenhuma parcela em aberto" : undefined}
                     style={{
                       flex: 1,
                       padding: "8px 10px",
                       borderRadius: 8,
-                      background: "#25D366",
+                      background: canSendBilling ? "hsl(152 65% 45%)" : "hsl(240 4% 22%)",
                       border: "none",
                       color: "#fff",
                       fontSize: 12,
                       fontWeight: 700,
-                      cursor: "pointer",
+                      cursor: canSendBilling ? "pointer" : "not-allowed",
+                      opacity: canSendBilling ? 1 : 0.65,
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: 6,
                     }}
                   >
-                    <Send style={{ width: 13, height: 13 }} /> Cobrança WhatsApp
+                    <Send style={{ width: 13, height: 13 }} /> {sendingBillingId === pendingTxs[0]?.id ? "Enviando..." : "Cobrança WhatsApp"}
                   </button>
                   <button
                     onClick={() => onNewTxForClient(client.id)}
@@ -2592,13 +2631,14 @@ function AccountsView({
   onNewAccount: () => void;
   onNewTx: () => void;
 }) {
+  const isMobile = useIsMobile();
   const totalBalance = accounts.reduce((s, a) => s + a.currentBalance, 0);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+          <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
             Contas Bancárias & Saldos do Sistema
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
@@ -2625,15 +2665,15 @@ function AccountsView({
         </button>
       </div>
 
-      <div style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(79,45,138,0.15))", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 14, padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+      <div style={{ background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(79,45,138,0.15))", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 14, padding: isMobile ? "14px 16px" : "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <span style={{ fontSize: 12, fontWeight: 600, color: "#A78BFA", textTransform: "uppercase" }}>Patrimônio Líquido em Caixa</span>
-          <div style={{ fontSize: 30, fontWeight: 900, color: "#fff", marginTop: 2 }}>{formatBRL(totalBalance)}</div>
+          <div style={{ fontSize: isMobile ? 22 : 30, fontWeight: 900, color: "#fff", marginTop: 2 }}>{formatBRL(totalBalance)}</div>
         </div>
         <span style={{ fontSize: 12, color: "#ccc" }}>{accounts.length} contas bancárias ativas registradas</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
         {accounts.map((acc) => {
           const accTxs = transactions.filter(t => t.accountId === acc.id);
           const pendingCount = accTxs.filter(t => t.status === "pending").length;
@@ -2691,12 +2731,13 @@ function DREView({
   dre: DREData | null;
   profitability: ProjectProfitability[];
 }) {
+  const isMobile = useIsMobile();
   if (!dre) return null;
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
           DRE Gerencial & Rentabilidade de Projetos
         </h2>
         <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
@@ -2705,13 +2746,13 @@ function DREView({
       </div>
 
       {/* DRE Accounting Cascade Table */}
-      <div style={{ background: "#18181c", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ background: "#18181c", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, overflow: "hidden", overflowX: "auto" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center", minWidth: isMobile ? 480 : "auto" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Estrutura de Demonstração de Resultado</span>
           <span style={{ fontSize: 12, color: "#888" }}>Base: Competência Contábil</span>
         </div>
 
-        <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 2, minWidth: isMobile ? 480 : "auto" }}>
           {[
             { label: "(+) RECEITA BRUTA OPERACIONAL", val: dre.grossRevenue, pct: 100, bold: true, color: "#10B981" },
             { label: "    (-) Provisão Tributária (Simples Nacional 6%)", val: dre.taxDeductions, pct: dre.grossRevenue > 0 ? (dre.taxDeductions / dre.grossRevenue) * 100 : 0, sign: "-", color: "#EC4899" },
@@ -2756,7 +2797,7 @@ function DREView({
         <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, color: "#fff" }}>
           Rentabilidade por Produto / Frente de Negócio
         </h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
           {profitability.map((p) => {
             const isHealthy = p.marginPercent >= 40;
             return (
@@ -2814,14 +2855,15 @@ function BudgetsView({
   budgets: BudgetData[];
   onNewBudget: () => void;
 }) {
+  const isMobile = useIsMobile();
   const totalBudget = budgets.reduce((s, b) => s + (b.amount || 0), 0);
   const totalSpent = budgets.reduce((s, b) => s + (b.spent || 0), 0);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+          <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
             Orçamentos & Metas Departamentais
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
@@ -2844,15 +2886,15 @@ function BudgetsView({
             gap: 6,
           }}
         >
-          <Plus style={{ width: 15, height: 15 }} /> Novo Teto Orçamentário
+          <Plus style={{ width: 15, height: 15 }} /> {isMobile ? "Novo Teto" : "Novo Teto Orçamentário"}
         </button>
       </div>
 
       {/* Global Progress */}
-      <div style={{ background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "20px 24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Teto Global Consolidado da Teltech</span>
-          <span style={{ fontSize: 14, fontWeight: 800, color: "#A78BFA" }}>
+      <div style={{ background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: isMobile ? "16px" : "20px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+          <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: "#fff" }}>Teto Global Consolidado da Teltech</span>
+          <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 800, color: "#A78BFA" }}>
             {formatBRL(totalSpent)} de {formatBRL(totalBudget)}
           </span>
         </div>
@@ -2869,7 +2911,7 @@ function BudgetsView({
       </div>
 
       {/* Department Cards Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
         {budgets.map((b) => {
           const isOver = (b.percentage || 0) >= 90;
           const remaining = Math.max((b.amount || 0) - (b.spent || 0), 0);
@@ -2946,10 +2988,12 @@ function ApprovalsGovernanceView({
   onReject: (id: string) => void;
   onNewTx: () => void;
 }) {
+  const isMobile = useIsMobile();
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
           Governança Corporativa & Matriz de Alçadas
         </h2>
         <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
@@ -2958,7 +3002,7 @@ function ApprovalsGovernanceView({
       </div>
 
       {/* Matriz Ativa de Governança (Cards Always Visible) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
         <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 12, padding: "16px" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981", textTransform: "uppercase" }}>Faixa 1 — Operacional</span>
           <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", marginTop: 4 }}>Até R$ 500,00</div>
@@ -3002,33 +3046,33 @@ function ApprovalsGovernanceView({
                   background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
                   border: "1px solid rgba(139,92,246,0.4)",
                   borderRadius: 14,
-                  padding: "18px 22px",
+                  padding: isMobile ? "14px 16px" : "18px 22px",
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                  alignItems: isMobile ? "stretch" : "center",
                   flexWrap: "wrap",
-                  gap: 16,
+                  gap: 14,
                 }}
               >
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#fff" }}>{item.description}</h4>
                     <CostTypeBadge type={item.costType} />
                   </div>
-                  <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12, color: "#a1a1aa" }}>
+                  <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 4 : 16, marginTop: 6, fontSize: 12, color: "#a1a1aa" }}>
                     <span>Solicitante: <strong style={{ color: "#fff" }}>{item.partnerName || "Membro"}</strong></span>
                     <span>Vencimento: <strong style={{ color: "#fff" }}>{formatDate(item.dueDate)}</strong></span>
                     <span>Conta: <strong style={{ color: "#fff" }}>{item.accountName || "Geral"}</strong></span>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  <span style={{ fontSize: 20, fontWeight: 900, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: isMobile ? "space-between" : "flex-end", width: isMobile ? "100%" : "auto", gap: 12, borderTop: isMobile ? "1px solid rgba(255,255,255,0.06)" : "none", paddingTop: isMobile ? 10 : 0 }}>
+                  <span style={{ fontSize: isMobile ? 18 : 20, fontWeight: 900, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       onClick={() => onApprove(item.id)}
                       style={{
-                        padding: "8px 16px",
+                        padding: "8px 14px",
                         borderRadius: 8,
                         background: "#10B981",
                         border: "none",
@@ -3038,12 +3082,12 @@ function ApprovalsGovernanceView({
                         cursor: "pointer",
                       }}
                     >
-                      Aprovar Despesa
+                      Aprovar
                     </button>
                     <button
                       onClick={() => onReject(item.id)}
                       style={{
-                        padding: "8px 16px",
+                        padding: "8px 14px",
                         borderRadius: 8,
                         background: "rgba(239,68,68,0.15)",
                         border: "1px solid rgba(239,68,68,0.3)",
@@ -3089,12 +3133,14 @@ function PartnersView({
   onNewTx: () => void;
   onMarkPaid: (tx: Transaction) => void;
 }) {
+  const isMobile = useIsMobile();
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
               Sócios Fundadores da Teltech
             </h2>
             <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12, background: "rgba(139,92,246,0.15)", color: "#A78BFA", border: "1px solid rgba(139,92,246,0.3)" }}>
@@ -3121,12 +3167,12 @@ function PartnersView({
             gap: 6,
           }}
         >
-          <Plus style={{ width: 15, height: 15 }} /> Solicitar Reembolso / Pró-labore
+          <Plus style={{ width: 15, height: 15 }} /> {isMobile ? "Solicitar" : "Solicitar Reembolso / Pró-labore"}
         </button>
       </div>
 
       {/* Partner Executive Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
         {partners.map((p) => (
           <div
             key={p.id}
@@ -3134,7 +3180,7 @@ function PartnersView({
               background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
               border: `1px solid ${p.color}40`,
               borderRadius: 14,
-              padding: "22px",
+              padding: isMobile ? "16px" : "22px",
               display: "flex",
               flexDirection: "column",
               gap: 14,
@@ -3227,6 +3273,7 @@ function TransactionModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [type, setType] = useState<TxType>(tx?.type || "outflow");
   const [description, setDescription] = useState(tx?.description || "");
   const [amountInput, setAmountInput] = useState(tx ? (tx.amount / 100).toFixed(2).replace(".", ",") : "");
@@ -3275,6 +3322,7 @@ function TransactionModal({
 
       if (!tx && isInstallment && installmentsCount > 1) {
         payload.installmentsTotal = installmentsCount;
+        payload.isInstallmentBatch = true;
       }
 
       if (!tx && isRecurring) {
@@ -3298,8 +3346,8 @@ function TransactionModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 18 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: isMobile ? 12 : 16 }}>
+      <div style={{ width: "100%", maxWidth: 560, maxHeight: "90dvh", overflowY: "auto", background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
             {tx ? "Editar Lançamento" : "Novo Lançamento Financeiro"}
@@ -3694,12 +3742,13 @@ function BudgetModal({
 // MODAL: CLIENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState("");
-  const [document, setDocument] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [notes, setNotes] = useState("");
+function ClientModal({ client, onClose, onSaved }: { client?: Client | null; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(client?.name ?? "");
+  const [document, setDocument] = useState(client?.document ?? "");
+  const [email, setEmail] = useState(client?.email ?? "");
+  const [phone, setPhone] = useState(client?.phone ?? "");
+  const [notes, setNotes] = useState(client?.notes ?? "");
+  const [whatsappOptIn, setWhatsappOptIn] = useState(client?.whatsappOptIn === true);
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -3707,13 +3756,19 @@ function ClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     if (!name.trim()) return;
     try {
       setSaving(true);
-      await API.post("/finance/clients", {
+      const payload = {
         name: name.trim(),
         document: document.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
         notes: notes.trim() || null,
-      });
+        whatsappOptIn,
+      };
+      if (client?.id) {
+        await API.put(`/finance/clients/${client.id}`, payload);
+      } else {
+        await API.post("/finance/clients", payload);
+      }
       onSaved();
     } catch (err) {
       console.error(err);
@@ -3725,8 +3780,8 @@ function ClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>Novo Cliente Corporativo</h3>
+      <div style={{ width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", background: "linear-gradient(135deg, hsl(240 3% 18% / 0.95), hsl(240 4% 12% / 0.95))", border: "1px solid hsl(240 4% 20%)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 10px 40px -10px hsl(0 0% 0% / 0.55)" }}>
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa" }}>{client ? "Editar Cliente" : "Novo Cliente Corporativo"}</h3>
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Razão Social / Nome *</label>
@@ -3774,12 +3829,20 @@ function ClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             />
           </div>
 
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 10, border: "1px solid hsl(240 4% 20%)", background: "hsl(240 3% 7% / 0.55)", cursor: "pointer" }}>
+            <input type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} style={{ marginTop: 3, accentColor: "hsl(265 85% 62%)" }} />
+            <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#fafafa" }}>Cliente autorizou cobranças pelo WhatsApp</span>
+              <span style={{ fontSize: 11, lineHeight: 1.5, color: "hsl(240 5% 65%)" }}>Marque apenas após confirmar a autorização com o cliente. Desmarcar interrompe novos envios. Trocar o telefone revoga a autorização; confirme o novo número e autorize novamente.</span>
+            </span>
+          </label>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
             <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12 }}>
               Cancelar
             </button>
             <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700 }}>
-              {saving ? "Salvando..." : "Salvar Cliente"}
+              {saving ? "Salvando..." : client ? "Salvar Alterações" : "Salvar Cliente"}
             </button>
           </div>
         </form>

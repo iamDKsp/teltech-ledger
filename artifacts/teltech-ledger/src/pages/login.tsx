@@ -132,7 +132,7 @@ export function LoginPage() {
     <div
       style={{
         position: "relative",
-        minHeight: "100vh",
+        minHeight: "100dvh",
         overflow: "hidden",
         background: BG,
         color: "#f0f0f8",
@@ -156,7 +156,7 @@ export function LoginPage() {
       }} />
 
       {/* ── Content ── */}
-      <div style={{ position: "relative", zIndex: 10, display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", padding: "40px 16px" }}>
+      <div style={{ position: "relative", zIndex: 10, display: "flex", minHeight: "100dvh", alignItems: "center", justifyContent: "center", padding: "calc(24px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px))", boxSizing: "border-box" }}>
         <section
           style={{
             width: "100%", maxWidth: 440,
@@ -165,7 +165,7 @@ export function LoginPage() {
             WebkitBackdropFilter: "blur(24px) saturate(160%)",
             border: `1px solid ${BORDER}`,
             borderRadius: 24,
-            padding: "36px 36px 30px",
+            padding: "min(36px, 7vw) min(36px, 7vw) min(30px, 6vw)",
             boxShadow: "0 10px 40px -10px rgba(0,0,0,0.55), 0 20px 60px -20px hsl(265 85% 62% / 0.45)",
             animation: shake ? "tg-shake 0.45s ease" : "tg-fade-up 0.6s ease both",
           }}

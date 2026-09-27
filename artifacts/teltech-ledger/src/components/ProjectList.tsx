@@ -13,6 +13,7 @@ import {
 } from "../TeltechLedger";
 import { Loader } from "./Loader";
 import { TaskModal } from "./TaskModal";
+import { useIsMobile } from "../hooks/use-mobile";
 
 // ─── Stage Dropdown Component ──────────────────────────────────────────────────
 
@@ -121,6 +122,102 @@ interface TaskRowProps {
 
 function TaskRow({ task, colId, columns, onTaskClick, onDeleteClick, onMoveTask }: TaskRowProps) {
   const [hovered, setHovered] = useState(false);
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          padding: "12px 6px",
+          borderBottom: "1px solid rgba(255,255,255,0.04)",
+          background: "transparent",
+        }}
+      >
+        {/* Row 1: Stage + Title + Delete */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StageDropdown currentColumnId={colId} columns={columns} onMove={(targetId) => onMoveTask(task.id, targetId)} />
+          <span
+            onClick={() => onTaskClick(task)}
+            style={{
+              fontSize: 14,
+              fontWeight: 500,
+              color: "#dfdfdf",
+              cursor: "pointer",
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {task.title || <span style={{ color: "#444", fontStyle: "italic" }}>(Sem Título)</span>}
+          </span>
+          <button
+            onClick={() => onDeleteClick(task)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px 6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#ef4444",
+              opacity: 0.7,
+            }}
+            title="Excluir Tarefa"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4M6 7v5M10 7v5M3 4l.9 9a1.5 1.5 0 001.5 1.35h5.2A1.5 1.5 0 0012.1 13L13 4" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Row 2: Tags */}
+        {task.tags && task.tags.length > 0 && (
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", paddingLeft: 2 }}>
+            {task.tags.map(t => <TagBadge key={t.label} tag={t} />)}
+          </div>
+        )}
+
+        {/* Row 3: Meta & Timer */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#888", marginTop: 2 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {task.date && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#aaa" }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+                <span>{task.date}</span>
+              </div>
+            )}
+
+            {Array.isArray(task.assignees) ? (
+              <AvatarCluster assignees={task.assignees} size={18}/>
+            ) : task.assignees > 0 ? (
+              <AvatarCluster count={task.assignees} size={18}/>
+            ) : null}
+
+            {task.comments != null && task.comments > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 3, color: "#666" }}>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                  <path d="M14 9.5C14 10.33 13.33 11 12.5 11H5L2 14V3.5C2 2.67 2.67 2 3.5 2H12.5C13.33 2 14 2.67 14 3.5V9.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                </svg>
+                <span>{task.comments}</span>
+              </div>
+            )}
+          </div>
+
+          <TimerButton taskId={task.id} state={task.timerState} value={task.timerValue} timerSeconds={task.timerSeconds} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -260,6 +357,7 @@ function TaskRow({ task, colId, columns, onTaskClick, onDeleteClick, onMoveTask 
 export function ProjectList() {
   const { activeProject } = useContext(AppContext);
   const { token } = useAuth();
+  const isMobile = useIsMobile();
   
   const [columns, setColumns] = useState<Column[]>([]);
   const [loadingBoard, setLoadingBoard] = useState(false);
@@ -455,7 +553,7 @@ export function ProjectList() {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px", background: "#111111", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "12px 10px" : "18px 20px", background: "#111111", display: "flex", flexDirection: "column", gap: 14 }}>
       {showLoader ? (
         <div style={{ flex: 1, display: "flex", minHeight: 300 }}>
           <Loader isReady={!loadingBoard} onFinish={() => setShowLoader(false)} />
@@ -482,7 +580,7 @@ export function ProjectList() {
                 style={{ 
                   display: "flex", 
                   alignItems: "center", 
-                  padding: "14px 20px", 
+                  padding: isMobile ? "12px 14px" : "14px 20px", 
                   cursor: "pointer", 
                   background: "rgba(255,255,255,0.01)", 
                   userSelect: "none" 
@@ -544,14 +642,14 @@ export function ProjectList() {
 
               {/* Stage Task Table */}
               {!isCollapsed && (
-                <div style={{ padding: "0 20px 16px" }}>
+                <div style={{ padding: isMobile ? "0 10px 12px" : "0 20px 16px" }}>
                   {col.tasks.length === 0 && quickAddColumnId !== col.id ? (
                     <div style={{ padding: "16px 0", color: "#555", fontSize: 12, textAlign: "center" }}>
                       Nenhuma tarefa nesta etapa. Clique em "+" para criar.
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column" }}>
-                      {col.tasks.length > 0 && (
+                      {col.tasks.length > 0 && !isMobile && (
                         <div style={{ 
                           display: "grid", 
                           gridTemplateColumns: "2.8fr 1.1fr 1fr 1.2fr 0.7fr 0.4fr", 
