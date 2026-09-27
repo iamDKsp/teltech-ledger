@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Users, Video, Plus, Calendar, Clock, Link as LinkIcon, Trash } from "lucide-react";
+import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle } from "lucide-react";
 import { API } from "../lib/api";
+import { WhatsAppSettingsPanel } from "../components/WhatsAppSettingsPanel";
 
 export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
-  const [activeTab, setActiveTab] = useState<"geral" | "reunioes">("geral");
+  const [activeTab, setActiveTab] = useState<"geral" | "reunioes" | "whatsapp">("geral");
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,13 +96,10 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
   const pastMeetings = meetings.filter(m => new Date(m.endTime) < new Date());
 
   return (
-    <div style={{ display: "flex", height: "100%", background: "#111111", color: "#fafafa" }}>
+    <div className="flex h-full min-w-0 flex-col bg-background text-foreground md:flex-row">
       {/* Sidebar de Configurações */}
-      <div style={{ 
-        width: 250, borderRight: "1px solid #242424", padding: "24px 16px",
-        display: "flex", flexDirection: "column", gap: 8
-      }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, paddingLeft: 12, marginBottom: 16 }}>Configurações</h2>
+      <div className="flex shrink-0 flex-row gap-2 overflow-x-auto border-b border-border p-3 md:w-[250px] md:flex-col md:overflow-visible md:border-b-0 md:border-r md:p-4">
+        <h2 className="hidden pl-3 text-lg font-semibold md:mb-4 md:block">Configurações</h2>
         
         <button
           onClick={() => setActiveTab("geral")}
@@ -130,10 +128,25 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
           <Video size={18} />
           Reuniões
         </button>
+        <button
+          onClick={() => setActiveTab("whatsapp")}
+          style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+            background: activeTab === "whatsapp" ? "hsl(265 85% 62% / 0.14)" : "transparent",
+            color: activeTab === "whatsapp" ? "hsl(265 85% 62%)" : "hsl(240 5% 65%)",
+            border: "none", borderRadius: 8, cursor: "pointer", textAlign: "left",
+            fontWeight: activeTab === "whatsapp" ? 600 : 400,
+            whiteSpace: "nowrap"
+          }}
+        >
+          <MessageCircle size={18} />
+          WhatsApp
+        </button>
       </div>
 
       {/* Conteúdo Principal */}
-      <div style={{ flex: 1, padding: 32, overflowY: "auto" }}>
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
+        {activeTab === "whatsapp" && <WhatsAppSettingsPanel />}
         {activeTab === "geral" && (
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>Geral</h1>

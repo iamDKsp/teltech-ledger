@@ -16,6 +16,8 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
+import { enqueueWithdrawalAlert } from "../services/whatsapp-automation";
+import { normalizeWhatsAppPhone } from "../services/whatsapp-session";
 import { randomUUID } from "node:crypto";
 
 const router: IRouter = Router();
@@ -65,6 +67,16 @@ function computeStatus(tx: { status: string; dueDate: Date }): string {
   if (tx.status !== "pending") return tx.status;
   if (new Date(tx.dueDate) < new Date()) return "overdue";
   return "pending";
+}
+
+function addMonthsClamped(date: Date, months: number): Date {
+  const result = new Date(date);
+  const dayOfMonth = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  const lastDayOfMonth = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+  result.setUTCDate(Math.min(dayOfMonth, lastDayOfMonth));
+  return result;
 }
 
 async function updateAccountBalance(tx: any, accountId: string, deltaCents: number) {
@@ -498,12 +510,19 @@ router.post("/clients", requireAuth, async (req: Request, res: Response) => {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
 
-    const { name, document, email, phone, notes } = req.body;
+    const { name, document, email, phone, notes, whatsappOptIn } = req.body;
     if (!name) { res.status(400).json({ error: "name is required" }); return; }
+    if (whatsappOptIn !== undefined && typeof whatsappOptIn !== "boolean") {
+      res.status(400).json({ error: "whatsappOptIn must be a boolean" }); return;
+    }
 
     const [client] = await db
       .insert(clientsTable)
-      .values({ workspaceId, name, document, email, phone, notes })
+      .values({
+        workspaceId, name, document, email, phone, notes,
+        whatsappOptIn: whatsappOptIn === true,
+        whatsappOptInAt: whatsappOptIn === true ? new Date() : null,
+      })
       .returning();
 
     res.status(201).json({ client });
@@ -519,10 +538,30 @@ router.put("/clients/:id", requireAuth, async (req: Request, res: Response) => {
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
     const id = req.params.id as string;
 
-    const { name, document, email, phone, notes, status } = req.body;
+    const { name, document, email, phone, notes, status, whatsappOptIn } = req.body;
+    if (whatsappOptIn !== undefined && typeof whatsappOptIn !== "boolean") {
+      res.status(400).json({ error: "whatsappOptIn must be a boolean" }); return;
+    }
+    if (phone !== undefined && phone !== null && typeof phone !== "string") {
+      res.status(400).json({ error: "phone must be a string or null" }); return;
+    }
+    const [existing] = await db.select({ phone: clientsTable.phone })
+      .from(clientsTable)
+      .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)))
+      .limit(1);
+    if (!existing) { res.status(404).json({ error: "Client not found" }); return; }
+
+    const phoneChanged = phone !== undefined
+      && normalizeWhatsAppPhone(phone) !== normalizeWhatsAppPhone(existing.phone);
+    const optInUpdate = phoneChanged
+      ? { whatsappOptIn: false, whatsappOptInAt: null }
+      : whatsappOptIn === undefined ? {} : {
+        whatsappOptIn,
+        whatsappOptInAt: whatsappOptIn ? sql`coalesce(${clientsTable.whatsappOptInAt}, now())` : null,
+      };
     const [client] = await db
       .update(clientsTable)
-      .set({ name, document, email, phone, notes, status, updatedAt: new Date() })
+      .set({ name, document, email, phone, notes, status, ...optInUpdate, updatedAt: new Date() })
       .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)))
       .returning();
 
@@ -644,8 +683,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       const createdList = await db.transaction(async (tx) => {
         const list = [];
         for (let i = 1; i <= n; i++) {
-          const instDueDate = new Date(baseDueDate);
-          instDueDate.setMonth(instDueDate.getMonth() + (i - 1));
+          const instDueDate = addMonthsClamped(baseDueDate, i - 1);
 
           const instAmount = i === n ? perInstallment + remainder : perInstallment;
           const requiresApproval = type === "outflow" && instAmount > maxAuto && !isExec;
@@ -689,6 +727,9 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
           }
 
           await logAudit(tx, workspaceId, txRecord.id, userInfo?.userId ?? null, "created", { batch: true, installment: i, total: n });
+          if (txRecord.type === "outflow" && txRecord.costType === "partner_withdrawal" && txRecord.status === "paid") {
+            await enqueueWithdrawalAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null);
+          }
         }
         return list;
       });
@@ -739,6 +780,9 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       }
 
       await logAudit(tx, workspaceId, record.id, userInfo?.userId ?? null, "created", record);
+      if (record.type === "outflow" && record.costType === "partner_withdrawal" && record.status === "paid") {
+        await enqueueWithdrawalAlert(tx, workspaceId, record, userInfo?.userId ?? null);
+      }
       return record;
     });
 
@@ -846,6 +890,11 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
         before: existing,
         after: transaction,
       });
+
+      if (existing.status !== "paid" && transaction.status === "paid"
+          && transaction.type === "outflow" && transaction.costType === "partner_withdrawal") {
+        await enqueueWithdrawalAlert(tx, workspaceId, transaction, userInfo?.userId ?? null);
+      }
 
       return transaction;
     });

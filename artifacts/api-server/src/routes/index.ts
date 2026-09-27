@@ -10,6 +10,7 @@ import dashboardRouter from "./dashboard";
 import goalsRouter from "./goals";
 import workspaceRouter from "./workspace";
 import meetingsRouter from "./meetings";
+import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/dashboard", dashboardRouter);
 router.use("/goals", goalsRouter);
 router.use("/workspace", workspaceRouter);
 router.use("/meetings", meetingsRouter);
+router.use("/whatsapp", whatsappRouter);
 
 export default router;

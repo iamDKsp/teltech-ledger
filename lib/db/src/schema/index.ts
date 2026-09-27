@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, boolean, pgEnum, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean, pgEnum, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { relations } from "drizzle-orm";
@@ -403,6 +403,8 @@ export const clientsTable = pgTable("clients", {
   document: text("document"),       // CNPJ ou CPF
   email: text("email"),
   phone: text("phone"),
+  whatsappOptIn: boolean("whatsapp_opt_in").notNull().default(false),
+  whatsappOptInAt: timestamp("whatsapp_opt_in_at"),
   status: text("status").notNull().default("active"), // 'active' | 'inactive'
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -549,6 +551,57 @@ export const financialAuditLogsTable = pgTable("financial_audit_logs", {
 });
 
 export type FinancialAuditLog = typeof financialAuditLogsTable.$inferSelect;
+
+// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+// Credentials and Signal keys are encrypted by the API before they reach these
+// tables. A separate key supplied at deployment time is required to connect.
+export const whatsappConnectionsTable = pgTable("whatsapp_connections", {
+  workspaceId: uuid("workspace_id").primaryKey().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  credsCiphertext: text("creds_ciphertext"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const whatsappAuthKeysTable = pgTable("whatsapp_auth_keys", {
+  id: serial("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  keyType: text("key_type").notNull(),
+  keyId: text("key_id").notNull(),
+  valueCiphertext: text("value_ciphertext").notNull(),
+}, (table) => [
+  uniqueIndex("whatsapp_auth_keys_workspace_type_id_uq").on(table.workspaceId, table.keyType, table.keyId),
+]);
+
+export const whatsappSettingsTable = pgTable("whatsapp_settings", {
+  workspaceId: uuid("workspace_id").primaryKey().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  autoBillingEnabled: boolean("auto_billing_enabled").notNull().default(false),
+  daysBeforeDue: integer("days_before_due").notNull().default(3),
+  sendOnDueDate: boolean("send_on_due_date").notNull().default(true),
+  daysAfterDue: integer("days_after_due").notNull().default(3),
+  dailySendHour: integer("daily_send_hour").notNull().default(10),
+  pixKey: text("pix_key"),
+  internalAlertPhone: text("internal_alert_phone"),
+  withdrawalAlertsEnabled: boolean("withdrawal_alerts_enabled").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const whatsappMessagesTable = pgTable("whatsapp_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  transactionId: uuid("transaction_id").references(() => financialTransactionsTable.id, { onDelete: "set null" }),
+  clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
+  dedupeKey: text("dedupe_key").notNull().unique(),
+  kind: text("kind").notNull(),
+  recipient: text("recipient").notNull(),
+  body: text("body").notNull(),
+  status: text("status").notNull().default("queued"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at").notNull().defaultNow(),
+  sentAt: timestamp("sent_at"),
+  waMessageId: text("wa_message_id"),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
 
 // ─── Financial Relations ──────────────────────────────────────────────────────
 
