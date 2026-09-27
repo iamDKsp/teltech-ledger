@@ -83,28 +83,31 @@ export function InicioPage() {
   };
 
   return (
-    <div style={{
+    <div className="responsive-page-pad" style={{
       flex: 1,
       display: "flex",
       flexDirection: "column",
       backgroundColor: "#111111",
       color: "#e0e0e0",
       overflowY: "auto",
-      padding: "32px",
-      gap: "32px",
-      fontFamily: "'Inter', 'SF Pro Display', -apple-system, 'Segoe UI', sans-serif"
+      padding: "clamp(16px, 3vw, 32px)",
+      gap: "24px",
+      fontFamily: "'Inter', 'SF Pro Display', -apple-system, 'Segoe UI', sans-serif",
+      WebkitOverflowScrolling: "touch"
     }}>
       {/* Welcome Banner */}
       <div style={{
         position: "relative",
-        padding: "32px",
+        padding: "clamp(18px, 3vw, 32px)",
         borderRadius: "16px",
         border: "1px solid #242424",
         backgroundColor: "#1a1a1a",
         overflow: "hidden",
         display: "flex",
         justifyContent: "space-between",
-        alignItems: "center"
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: "16px"
       }}>
         {/* Mesh Gradient Background */}
         <div style={{
@@ -127,7 +130,7 @@ export function InicioPage() {
         </div>
 
         {/* Quick Actions */}
-        <div style={{ position: "relative", zIndex: 1, display: "flex", gap: "12px" }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", flexWrap: "wrap", gap: "10px" }}>
           <button style={{
             display: "flex",
             alignItems: "center",
@@ -201,7 +204,7 @@ export function InicioPage() {
       </div>
 
       {/* Stats Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "14px" }}>
         {/* Card 1 */}
         <div style={{
           backgroundColor: "#161618",
@@ -320,15 +323,15 @@ export function InicioPage() {
       </div>
 
       {/* Two Column Layout */}
-      <div style={{ display: "flex", gap: "24px", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", flex: 1, minHeight: 0 }}>
         
         {/* Left Column - Today's Tasks */}
         <div style={{
-          flex: "6",
+          flex: "1 1 320px",
           backgroundColor: "#1a1a1a",
           border: "1px solid #242424",
           borderRadius: "12px",
-          padding: "24px",
+          padding: "20px",
           display: "flex",
           flexDirection: "column",
           gap: "16px"
@@ -388,7 +391,7 @@ export function InicioPage() {
 
         {/* Right Column - Recent Activity */}
         <div style={{
-          flex: "4",
+          flex: "1 1 280px",
           backgroundColor: "#1a1a1a",
           border: "1px solid #242424",
           borderRadius: "12px",

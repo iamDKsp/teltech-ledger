@@ -63,36 +63,36 @@ export const PainelPage: React.FC = () => {
   const maxCompletions = Math.max(...weeklyTrend.map(d => d.completions), 10);
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', color: '#fafafa', fontFamily: "'Inter', sans-serif" }}>
-      <div style={{ marginBottom: '32px' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 600, margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Activity style={{ color: '#7C5AC2' }} size={28} />
+    <div className="responsive-page-pad" style={{ padding: 'clamp(16px, 3vw, 24px)', maxWidth: '1200px', margin: '0 auto', color: '#fafafa', fontFamily: "'Inter', sans-serif" }}>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: 'clamp(20px, 4vw, 28px)', fontWeight: 600, margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Activity style={{ color: '#7C5AC2' }} size={24} />
           Painel Global
         </h1>
-        <p style={{ margin: 0, color: '#a1a1aa' }}>Visão geral da produtividade e saúde dos projetos.</p>
+        <p style={{ margin: 0, color: '#a1a1aa', fontSize: '14px' }}>Visão geral da produtividade e saúde dos projetos.</p>
       </div>
 
       {/* Top Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '14px', marginBottom: '24px' }}>
         {[
-          { label: 'Total Tarefas', value: tasksOverview.total, icon: <Briefcase size={24} color="#a1a1aa" />, color: '#242424' },
-          { label: 'Concluídas', value: tasksOverview.completed, icon: <CheckSquare size={24} color="#10B981" />, color: 'rgba(16, 185, 129, 0.1)' },
-          { label: 'Em Andamento', value: tasksOverview.inProgress, icon: <Clock size={24} color="#7C5AC2" />, color: 'rgba(124, 90, 194, 0.1)' },
-          { label: 'Atrasadas', value: tasksOverview.overdue, icon: <AlertTriangle size={24} color="#ef4444" />, color: 'rgba(239, 68, 68, 0.1)' },
+          { label: 'Total Tarefas', value: tasksOverview.total, icon: <Briefcase size={20} color="#a1a1aa" />, color: '#242424' },
+          { label: 'Concluídas', value: tasksOverview.completed, icon: <CheckSquare size={20} color="#10B981" />, color: 'rgba(16, 185, 129, 0.1)' },
+          { label: 'Em Andamento', value: tasksOverview.inProgress, icon: <Clock size={20} color="#7C5AC2" />, color: 'rgba(124, 90, 194, 0.1)' },
+          { label: 'Atrasadas', value: tasksOverview.overdue, icon: <AlertTriangle size={20} color="#ef4444" />, color: 'rgba(239, 68, 68, 0.1)' },
         ].map((stat, i) => (
-          <div key={i} style={{ backgroundColor: '#1a1a1a', padding: '24px', borderRadius: '12px', border: '1px solid #242424', display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div key={i} style={{ backgroundColor: '#1a1a1a', padding: '16px', borderRadius: '12px', border: '1px solid #242424', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               {stat.icon}
             </div>
             <div>
-              <div style={{ color: '#a1a1aa', fontSize: '14px', marginBottom: '4px' }}>{stat.label}</div>
-              <div style={{ fontSize: '28px', fontWeight: 600 }}>{stat.value}</div>
+              <div style={{ color: '#a1a1aa', fontSize: '12px', marginBottom: '2px' }}>{stat.label}</div>
+              <div style={{ fontSize: '20px', fontWeight: 600 }}>{stat.value}</div>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
         
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

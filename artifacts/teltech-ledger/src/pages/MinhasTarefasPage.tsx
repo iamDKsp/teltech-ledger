@@ -93,13 +93,13 @@ export default function MinhasTarefasPage() {
   };
 
   return (
-    <div style={{ padding: "2rem", height: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box", overflowY: "auto", fontFamily: "'Inter', 'SF Pro Display', -apple-system, sans-serif" }}>
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "2rem", fontWeight: 600, color: "#fafafa", margin: "0 0 1.5rem 0" }}>
+    <div className="responsive-page-pad" style={{ padding: "clamp(1rem, 3vw, 2rem)", height: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box", overflowY: "auto", fontFamily: "'Inter', 'SF Pro Display', -apple-system, sans-serif", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ fontSize: "clamp(1.4rem, 4vw, 2rem)", fontWeight: 600, color: "#fafafa", margin: "0 0 1rem 0" }}>
           Minhas Tarefas
         </h1>
         
-        <div style={{ display: "flex", gap: "1rem", overflowX: "auto", paddingBottom: "0.5rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", overflowX: "auto", paddingBottom: "0.5rem", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
           {[
             { id: "todas", label: "Todas" },
             { id: "hoje", label: "Para Hoje" },
@@ -114,12 +114,14 @@ export default function MinhasTarefasPage() {
                 background: filter === tab.id ? "#2b2b2e" : "transparent",
                 color: filter === tab.id ? "#fafafa" : "#a1a1aa",
                 border: `1px solid ${filter === tab.id ? "#313136" : "transparent"}`,
-                padding: "0.5rem 1rem",
-                borderRadius: "6px",
+                padding: "0.45rem 0.9rem",
+                borderRadius: "8px",
                 cursor: "pointer",
                 fontWeight: 500,
-                fontSize: "0.9rem",
-                transition: "all 0.2s ease"
+                fontSize: "0.85rem",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                transition: "all 0.15s ease"
               }}
             >
               {tab.label}

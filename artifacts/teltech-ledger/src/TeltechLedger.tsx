@@ -19,7 +19,25 @@ import { ProjectTimeline } from "./components/ProjectTimeline";
 import { ProjectFiles } from "./components/ProjectFiles";
 import { ProjectChannels } from "./components/ProjectChannels";
 import { ConfiguracoesPage } from "./pages/ConfiguracoesPage";
-import { Settings, Check, Zap } from "lucide-react";
+import { 
+  Settings, 
+  Check, 
+  Zap, 
+  Home, 
+  FolderKanban, 
+  CheckSquare, 
+  DollarSign, 
+  MoreHorizontal, 
+  Menu, 
+  X, 
+  Activity, 
+  Target, 
+  Users, 
+  LogOut, 
+  Plus, 
+  ChevronRight 
+} from "lucide-react";
+import { useIsMobile } from "./hooks/use-mobile";
 // ─── App Context ──────────────────────────────────────────────────────────────
 
 import { API } from "./lib/api";
@@ -35,6 +53,9 @@ export interface AppCtx {
   activeProject: AppProject | null; setActiveProject: (p: AppProject) => void;
   projects: AppProject[]; refreshProjects: () => void;
   loadBoard?: () => void;
+  isMobile?: boolean;
+  mobileDrawerOpen?: boolean;
+  setMobileDrawerOpen?: (v: boolean) => void;
 }
 export const AppContext = createContext<AppCtx>({} as AppCtx);
 
@@ -1477,6 +1498,431 @@ function StatusDropdown({ value, onChange }: { value: string; onChange: (v: stri
   );
 }
 
+// ─── Mobile Bottom Nav & Drawer ───────────────────────────────────────────────
+
+function MobileBottomNav({
+  activeModule,
+  onOpenDrawer,
+  activeProject,
+  projects
+}: {
+  activeModule: string;
+  onOpenDrawer: () => void;
+  activeProject: AppProject | null;
+  projects: AppProject[];
+}) {
+  const [location, navigate] = useLocation();
+
+  const tabs = [
+    { id: "Início", label: "Início", icon: Home, path: "/" },
+    { 
+      id: "project", 
+      label: "Projetos", 
+      icon: FolderKanban, 
+      path: activeProject ? `/projetos/${activeProject.id}/quadros` : (projects[0] ? `/projetos/${projects[0].id}/quadros` : "/projetos")
+    },
+    { id: "Minhas Tarefas", label: "Tarefas", icon: CheckSquare, path: "/minhas-tarefas" },
+    { id: "Financeiro", label: "Financeiro", icon: DollarSign, path: "/financeiro" },
+    { id: "more", label: "Mais", icon: MoreHorizontal, onClick: onOpenDrawer },
+  ];
+
+  return (
+    <nav style={{
+      position: "fixed",
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: "calc(56px + env(safe-area-inset-bottom, 0px))",
+      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      background: "rgba(18, 18, 22, 0.94)",
+      backdropFilter: "blur(20px)",
+      WebkitBackdropFilter: "blur(20px)",
+      borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-around",
+      zIndex: 9999,
+      boxShadow: "0 -8px 32px rgba(0,0,0,0.6)"
+    }}>
+      {tabs.map((tab) => {
+        const Icon = tab.icon;
+        const isActive = tab.id === "more" ? false : (
+          tab.id === "project" ? activeModule === "project" : activeModule === tab.id
+        );
+
+        return (
+          <button
+            key={tab.id}
+            onClick={() => {
+              if (tab.onClick) {
+                tab.onClick();
+              } else if (tab.path) {
+                navigate(tab.path);
+              }
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 3,
+              padding: "4px 8px",
+              cursor: "pointer",
+              color: isActive ? "#7C5AC2" : "#71717a",
+              transition: "all 0.15s ease",
+              flex: 1,
+              position: "relative",
+              userSelect: "none",
+              WebkitTapHighlightColor: "transparent"
+            }}
+          >
+            <div style={{ position: "relative" }}>
+              <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} />
+              {isActive && (
+                <div style={{
+                  position: "absolute",
+                  bottom: -5,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 4,
+                  height: 4,
+                  borderRadius: "50%",
+                  backgroundColor: "#7C5AC2",
+                  boxShadow: "0 0 8px #7C5AC2"
+                }} />
+              )}
+            </div>
+            <span style={{
+              fontSize: 10,
+              fontWeight: isActive ? 600 : 500,
+              letterSpacing: "-0.2px"
+            }}>
+              {tab.label}
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MobileDrawer({
+  isOpen,
+  onClose,
+  activeModule,
+  projects,
+  activeProject,
+  user,
+  logout,
+  onEditProfile,
+  onNewProject,
+  onEditProject
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  activeModule: string;
+  projects: AppProject[];
+  activeProject: AppProject | null;
+  user: any;
+  logout: () => void;
+  onEditProfile: () => void;
+  onNewProject: () => void;
+  onEditProject: (p: AppProject) => void;
+}) {
+  const [location, navigate] = useLocation();
+
+  if (!isOpen) return null;
+
+  const prof = user ? getMemberProfile(user.name) : null;
+
+  const navLinks = [
+    { label: "Início", path: "/", icon: Home },
+    { label: "Minhas Tarefas", path: "/minhas-tarefas", icon: CheckSquare },
+    { label: "Painel Global", path: "/painel", icon: Activity },
+    { label: "Financeiro", path: "/financeiro", icon: DollarSign },
+    { label: "Metas & OKRs", path: "/metas", icon: Target },
+    { label: "Membros da Equipe", path: "/membros", icon: Users },
+    { label: "Configurações", path: "/configuracoes", icon: Settings },
+  ];
+
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 100000,
+      display: "flex"
+    }}>
+      {/* Backdrop */}
+      <div 
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(0,0,0,0.72)",
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+          animation: "fadeIn 0.2s ease"
+        }}
+      />
+
+      {/* Drawer Body */}
+      <div style={{
+        position: "relative",
+        width: "min(310px, 84vw)",
+        height: "100%",
+        background: "#161619",
+        borderRight: "1px solid rgba(255,255,255,0.08)",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "10px 0 40px rgba(0,0,0,0.8)",
+        animation: "slideRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch"
+      }}>
+        {/* Drawer Header */}
+        <div style={{
+          padding: "16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          borderBottom: "1px solid rgba(255,255,255,0.06)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              background: "linear-gradient(135deg,#4f2d8a,#7C5AC2)",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff"
+            }}>
+              <Zap size={18} fill="currentColor" />
+            </div>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#fafafa" }}>Teltech</span>
+          </div>
+
+          <button 
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "50%",
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#aaa",
+              cursor: "pointer"
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* User Profile Card */}
+        {user && (
+          <div style={{
+            padding: "14px",
+            margin: "12px 14px",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}>
+            <div style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              border: `2px solid ${prof?.color ?? "#7C5AC2"}`,
+              overflow: "hidden",
+              background: "linear-gradient(135deg,#4f2d8a,#7C5AC2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              fontWeight: 700,
+              color: "#fff",
+              flexShrink: 0
+            }}>
+              {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : user.name[0]?.toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fafafa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: prof?.color ?? "#7C5AC2", marginTop: 2 }}>{prof?.role || "Membro"}</div>
+              <div style={{ fontSize: 10, color: "#888", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Nav Links */}
+        <div style={{ padding: "0 10px", display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#555", letterSpacing: "0.08em", padding: "8px 10px 4px" }}>MENU</div>
+          {navLinks.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeModule === item.label;
+            return (
+              <div
+                key={item.label}
+                onClick={() => {
+                  navigate(item.path);
+                  onClose();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  color: isActive ? "#fafafa" : "#a1a1aa",
+                  background: isActive ? "#28282d" : "transparent",
+                  fontSize: 13,
+                  fontWeight: isActive ? 600 : 400
+                }}
+              >
+                <Icon size={17} color={isActive ? "#7C5AC2" : "#71717a"} />
+                <span style={{ flex: 1 }}>{item.label}</span>
+                <ChevronRight size={14} color="#444" />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Projects Section */}
+        <div style={{ padding: "14px 10px 0", flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px 8px" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#555", letterSpacing: "0.08em" }}>PROJETOS</span>
+            <button 
+              onClick={() => {
+                onClose();
+                onNewProject();
+              }}
+              style={{ background: "transparent", border: "none", color: "#7C5AC2", cursor: "pointer", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}
+            >
+              <Plus size={13} />
+              <span>Novo</span>
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {projects.map((proj) => {
+              const isActive = activeProject?.id === proj.id && activeModule === "project";
+              return (
+                <div
+                  key={proj.id}
+                  onClick={() => {
+                    navigate(`/projetos/${proj.id}/quadros`);
+                    onClose();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    color: isActive ? "#fafafa" : "#888",
+                    background: isActive ? "#28282d" : "transparent",
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 400
+                  }}
+                >
+                  <div style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    background: proj.icon ? `url(${proj.icon}) center/cover` : proj.color,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#fff",
+                    flexShrink: 0
+                  }}>
+                    {!proj.icon && proj.name[0]}
+                  </div>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {proj.name}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClose();
+                      onEditProject(proj);
+                    }}
+                    style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", padding: 3 }}
+                  >
+                    <Settings size={13} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Drawer Footer */}
+        <div style={{
+          padding: "16px",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          display: "flex",
+          gap: 10
+        }}>
+          <button
+            onClick={() => {
+              onClose();
+              onEditProfile();
+            }}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "#e0e0e0",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer"
+            }}
+          >
+            Editar Perfil
+          </button>
+
+          <button
+            onClick={() => {
+              onClose();
+              logout();
+            }}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid rgba(239,68,68,0.2)",
+              color: "#ef4444",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6
+            }}
+          >
+            <LogOut size={14} />
+            <span>Sair</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Header ───────────────────────────────────────────────────────────────────
 
 const TABS = ["Visão Geral","Lista","Quadros","Cronologia","Calendário","Canais","Arquivos"];
@@ -1485,7 +1931,16 @@ function Header() {
   const { user, logout, token } = useAuth();
   const [location, navigate] = useLocation();
   const ctx = useContext(AppContext);
-  const { activeTab, setActiveTab, activeProject, setActiveProject, projects, refreshProjects, sidebarModule, setSidebarModule } = ctx;
+  const { 
+    activeTab, 
+    setActiveTab, 
+    activeProject, 
+    projects, 
+    refreshProjects, 
+    sidebarModule, 
+    isMobile, 
+    setMobileDrawerOpen 
+  } = ctx;
   const [showDropdown, setShowDropdown] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -1506,13 +1961,36 @@ function Header() {
 
   return (
     <div style={{ background:"#1A1A1A", borderBottom:"1px solid #242424", flexShrink:0 }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 20px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding: isMobile ? "8px 12px" : "11px 20px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap: 10 }}>
+          {isMobile && (
+            <button
+              onClick={() => setMobileDrawerOpen?.(true)}
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8,
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#e0e0e0",
+                cursor: "pointer",
+                padding: 0,
+                flexShrink: 0
+              }}
+              title="Menu"
+            >
+              <Menu size={18} />
+            </button>
+          )}
+
           {isProjectView ? (
             <>
-              <div style={{ width:36, height:36, borderRadius:8, background: activeProject.icon ? `url(${activeProject.icon}) center/cover` : activeProject.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:700, color:"#fff", flexShrink:0 }}>{!activeProject.icon && activeProject.name[0]}</div>
+              <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius:8, background: activeProject.icon ? `url(${activeProject.icon}) center/cover` : activeProject.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize: isMobile ? 13 : 15, fontWeight:700, color:"#fff", flexShrink:0 }}>{!activeProject.icon && activeProject.name[0]}</div>
               <div style={{ display:"flex", alignItems:"center", gap:5, cursor:"pointer", position:"relative" }} onClick={() => setShowDropdown(!showDropdown)}>
-                <span style={{ fontSize:16, fontWeight:700, color:"#f0f0f0" }}>{activeProject.name}</span>
+                <span style={{ fontSize: isMobile ? 14 : 16, fontWeight:700, color:"#f0f0f0", maxWidth: isMobile ? 140 : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeProject.name}</span>
                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M3 5l3.5 3.5L10 5" stroke="#777" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 {showDropdown && (
                   <div style={{ position:"absolute", top:"calc(100% + 8px)", left:0, background:"#1e1e22", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, boxShadow:"0 12px 40px rgba(0,0,0,0.7)", zIndex:100, minWidth:220, padding:"6px", animation:"fadeIn 0.12s ease" }}>
@@ -1529,21 +2007,23 @@ function Header() {
                 )}
               </div>
               
-              <button 
-                onClick={async () => {
-                  try {
-                    await fetch(`${API}/api/projects/${activeProject.id}`, {
-                      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ isFavorite: !activeProject.isFavorite })
-                    });
-                    refreshProjects();
-                  } catch(e) { console.error(e); }
-                }}
-                style={{ background:"transparent", border:"none", cursor:"pointer", padding:"2px 4px", color: activeProject.isFavorite ? "#EAB308" : "#555", transition:"color 0.2s" }}
-                title={activeProject.isFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill={activeProject.isFavorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-              </button>
+              {!isMobile && (
+                <button 
+                  onClick={async () => {
+                    try {
+                      await fetch(`${API}/api/projects/${activeProject.id}`, {
+                        method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ isFavorite: !activeProject.isFavorite })
+                      });
+                      refreshProjects();
+                    } catch(e) { console.error(e); }
+                  }}
+                  style={{ background:"transparent", border:"none", cursor:"pointer", padding:"2px 4px", color: activeProject.isFavorite ? "#EAB308" : "#555", transition:"color 0.2s" }}
+                  title={activeProject.isFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill={activeProject.isFavorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                </button>
+              )}
 
               <StatusDropdown
                 value={activeProject.status || "active"}
@@ -1559,24 +2039,24 @@ function Header() {
               />
             </>
           ) : (
-            <span style={{ fontSize:16, fontWeight:700, color:"#f0f0f0" }}>{sidebarModule === "Membros" ? "Membros" : sidebarModule}</span>
+            <span style={{ fontSize: isMobile ? 15 : 16, fontWeight:700, color:"#f0f0f0" }}>{sidebarModule === "Membros" ? "Membros" : sidebarModule}</span>
           )}
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          {otherMembers.length > 0 && (
+        <div style={{ display:"flex", alignItems:"center", gap: isMobile ? 8 : 12 }}>
+          {!isMobile && otherMembers.length > 0 && (
             <AvatarCluster assignees={otherMembers} size={28} />
           )}
           {user && (
             <div style={{ position: "relative" }}>
               <div 
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:20, padding:"5px 12px 5px 6px", cursor: "pointer", transition: "all 0.15s" }}
+                style={{ display:"flex", alignItems:"center", gap: isMobile ? 0 : 8, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:20, padding: isMobile ? "3px" : "5px 12px 5px 6px", cursor: "pointer", transition: "all 0.15s" }}
                 onMouseEnter={e=>(e.currentTarget.style.background="rgba(255,255,255,0.08)")} onMouseLeave={e=>(e.currentTarget.style.background="rgba(255,255,255,0.04)")}
               >
                 <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#fff", overflow: "hidden" }}>
                   {user.avatarUrl ? <img src={user.avatarUrl} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}} /> : user.name[0]?.toUpperCase()}
                 </div>
-                <span style={{ fontSize:12, color:"#bbb", fontWeight:500 }}>{user.name}</span>
+                {!isMobile && <span style={{ fontSize:12, color:"#bbb", fontWeight:500 }}>{user.name}</span>}
               </div>
               
               {profileMenuOpen && (
@@ -1627,11 +2107,11 @@ function Header() {
       </div>
       {profileModalOpen && <ProfileModal onClose={() => setProfileModalOpen(false)} />}
       {isProjectView && (
-        <div style={{ display:"flex", alignItems:"center", padding:"0 20px", overflowX:"auto" }}>
+        <div style={{ display:"flex", alignItems:"center", padding: isMobile ? "0 8px" : "0 20px", overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none" }}>
           {TABS.map(tab=>(
             <button key={tab} onClick={()=>{
               if (activeProject) navigate(`/projetos/${activeProject.id}/${tab.toLowerCase().replace(/ /g, '-')}`);
-            }} style={{ padding:"8px 14px", background:"transparent", border:"none", borderBottom:`2.5px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#f0f0f0":"#505060", fontWeight: activeTab===tab?600:400, fontSize:13, cursor:"pointer", whiteSpace:"nowrap", transition:"all 0.12s" }}>
+            }} style={{ padding: isMobile ? "7px 11px" : "8px 14px", background:"transparent", border:"none", borderBottom:`2.5px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#f0f0f0":"#505060", fontWeight: activeTab===tab?600:400, fontSize: isMobile ? 12 : 13, cursor:"pointer", whiteSpace:"nowrap", transition:"all 0.12s" }}>
               {tab}
             </button>
           ))}
@@ -1661,6 +2141,10 @@ const STYLES = `
     from { opacity: 0; transform: translateY(24px) scale(0.97); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
+  @keyframes slideRight {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(0); }
+  }
   * { box-sizing: border-box; }
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: #111; }
@@ -1674,6 +2158,12 @@ const STYLES = `
   }
   input[type=number] {
     -moz-appearance: textfield;
+  }
+  @media (max-width: 768px) {
+    .responsive-page-pad {
+      padding: 16px !important;
+      padding-bottom: calc(76px + env(safe-area-inset-bottom, 16px)) !important;
+    }
   }
 `;
 
@@ -1712,8 +2202,13 @@ function MainContent() {
 }
 
 export function TeltechLedger() {
-  const { token } = useAuth();
+  const { token, user, logout } = useAuth();
   const [location, navigate] = useLocation();
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [editProject, setEditProject] = useState<AppProject | null>(null);
+  const [showNewProject, setShowNewProject] = useState(false);
   const [activeTab, setActiveTab] = useState("Quadros");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarModule, setSidebarModule] = useState("Início");
@@ -1780,16 +2275,71 @@ export function TeltechLedger() {
     <AppContext.Provider value={{
       activeTab, setActiveTab, sidebarOpen, setSidebarOpen,
       sidebarModule, setSidebarModule, activeProject, setActiveProject,
-      projects, refreshProjects: fetchProjects
+      projects, refreshProjects: fetchProjects,
+      isMobile, mobileDrawerOpen, setMobileDrawerOpen
     }}>
       <style>{STYLES}</style>
-      <div style={{ width:"100vw", height:"100vh", display:"flex", background:"#111111", fontFamily:"'Inter','SF Pro Display',-apple-system,'Segoe UI',sans-serif", overflow:"hidden", color:"#e0e0e0", fontSize:13 }}>
-        <Sidebar/>
-        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", minWidth:0 }}>
+      <div style={{ 
+        width:"100vw", 
+        height:"100vh", 
+        display:"flex", 
+        background:"#111111", 
+        fontFamily:"'Inter','SF Pro Display',-apple-system,'Segoe UI',sans-serif", 
+        overflow:"hidden", 
+        color:"#e0e0e0", 
+        fontSize:13 
+      }}>
+        {!isMobile && <Sidebar/>}
+        <div style={{ 
+          flex:1, 
+          display:"flex", 
+          flexDirection:"column", 
+          overflow:"hidden", 
+          minWidth:0,
+          position: "relative"
+        }}>
           <Header/>
-          <MainContent />
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            minWidth: 0,
+            paddingBottom: isMobile ? "calc(56px + env(safe-area-inset-bottom, 0px))" : 0
+          }}>
+            <MainContent />
+          </div>
         </div>
       </div>
+
+      {/* Mobile-Only iOS Experience */}
+      {isMobile && (
+        <>
+          <MobileBottomNav
+            activeModule={sidebarModule}
+            onOpenDrawer={() => setMobileDrawerOpen(true)}
+            activeProject={activeProject}
+            projects={projects}
+          />
+          <MobileDrawer
+            isOpen={mobileDrawerOpen}
+            onClose={() => setMobileDrawerOpen(false)}
+            activeModule={sidebarModule}
+            projects={projects}
+            activeProject={activeProject}
+            user={user}
+            logout={logout}
+            onEditProfile={() => setProfileModalOpen(true)}
+            onNewProject={() => setShowNewProject(true)}
+            onEditProject={(p) => setEditProject(p)}
+          />
+        </>
+      )}
+
+      {/* Modals triggered from drawer or elsewhere */}
+      {editProject && <ProjectModal project={editProject} onClose={() => setEditProject(null)} onSaved={fetchProjects} />}
+      {showNewProject && <ProjectModal project={null} onClose={() => setShowNewProject(false)} onSaved={fetchProjects} />}
+      {profileModalOpen && <ProfileModal onClose={() => setProfileModalOpen(false)} />}
     </AppContext.Provider>
   );
 }
