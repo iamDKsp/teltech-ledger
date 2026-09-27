@@ -27,12 +27,11 @@ RUN pnpm --filter @workspace/api-server run build
 # Create directory for file uploads
 RUN mkdir -p /app/public/uploads
 
-# Copy entrypoint script and strip Windows CRLF line endings (tr is more reliable than sed for this)
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN tr -d '\r' < /app/docker-entrypoint.sh > /tmp/ep.sh && mv /tmp/ep.sh /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
+# Copy Node.js startup script (avoids CRLF/exec format error from Windows shell scripts)
+COPY start.mjs /app/start.mjs
 
 # Expose API port
 EXPOSE 5000
 
-# Run entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Use Node.js directly as entrypoint - no shell script, no CRLF issues
+ENTRYPOINT ["node", "/app/start.mjs"]
