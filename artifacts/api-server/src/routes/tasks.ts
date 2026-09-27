@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, commentsTable, subtasksTable, activityLogsTable, usersTable, tasksTable, taskTimersTable, commentLikesTable, taskAttachmentsTable, columnsTable, projectsTable, taskAssigneesTable } from "@workspace/db";
+import { db, commentsTable, subtasksTable, activityLogsTable, usersTable, tasksTable, taskTimersTable, commentLikesTable, taskAttachmentsTable, columnsTable, projectsTable, taskAssigneesTable, workspaceMembersTable } from "@workspace/db";
 import { eq, asc, isNull, sql, inArray, and } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/auth";
 import { z } from "zod";
@@ -7,6 +7,31 @@ import { type Request, type Response } from "express";
 
 const router: IRouter = Router();
 router.use(requireAuth);
+
+async function verifyTaskAccess(taskId: string, userId: string) {
+  const [task] = await db
+    .select({
+      id: tasksTable.id,
+      projectId: tasksTable.projectId,
+      workspaceId: projectsTable.workspaceId,
+    })
+    .from(tasksTable)
+    .innerJoin(projectsTable, eq(tasksTable.projectId, projectsTable.id))
+    .where(eq(tasksTable.id, taskId))
+    .limit(1);
+
+  if (!task) return { status: 404, error: "Task not found" } as const;
+
+  const [membership] = await db
+    .select({ id: workspaceMembersTable.id, role: workspaceMembersTable.role })
+    .from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, task.workspaceId), eq(workspaceMembersTable.userId, userId)))
+    .limit(1);
+
+  if (!membership) return { status: 403, error: "Sem acesso a esta tarefa." } as const;
+
+  return { status: 200, task, membership } as const;
+}
 
 // ─── GET /api/tasks/my-tasks ──────────────────────────────────────────────────
 
@@ -59,6 +84,10 @@ router.get("/my-tasks", async (req: Request, res: Response) => {
 
 router.get("/:id", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const [task] = await db.select().from(tasksTable).where(eq(tasksTable.id, id)).limit(1);
   if (!task) { res.status(404).json({ error: "Task not found" }); return; }
   res.json({ task });
@@ -69,6 +98,8 @@ router.get("/:id", async (req: Request, res: Response) => {
 router.get("/:id/comments", async (req: Request, res: Response) => {
   const id = req.params.id as string;
   const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
   
   const comments = await db
     .select({
@@ -112,6 +143,9 @@ router.get("/:id/comments", async (req: Request, res: Response) => {
 router.post("/:id/comments", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { body, attachmentUrl } = req.body;
   if (!body?.trim() && !attachmentUrl) { res.status(400).json({ error: "body or attachment is required" }); return; }
 
@@ -126,8 +160,13 @@ router.post("/:id/comments", async (req: Request, res: Response) => {
 // ─── DELETE /api/tasks/:id/comments/:commentId ───────────────────────────────
 
 router.delete("/:id/comments/:commentId", async (req: Request, res: Response) => {
+  const { userId } = (req as AuthenticatedRequest).user;
+  const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const commentId = req.params.commentId as string;
-  await db.delete(commentsTable).where(eq(commentsTable.id, commentId));
+  await db.delete(commentsTable).where(and(eq(commentsTable.id, commentId), eq(commentsTable.taskId, id)));
   res.status(204).end();
 });
 
@@ -135,6 +174,10 @@ router.delete("/:id/comments/:commentId", async (req: Request, res: Response) =>
 
 router.post("/:id/comments/:commentId/like", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
+  const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const commentId = req.params.commentId as string;
   const { isLike } = req.body; // boolean: true for like, false for dislike, null to remove
 
@@ -156,6 +199,10 @@ router.post("/:id/comments/:commentId/like", async (req: Request, res: Response)
 
 router.get("/:id/subtasks", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const subtasks = await db.select().from(subtasksTable).where(eq(subtasksTable.taskId, id)).orderBy(asc(subtasksTable.position));
   res.json({ subtasks });
 });
@@ -164,6 +211,10 @@ router.get("/:id/subtasks", async (req: Request, res: Response) => {
 
 router.post("/:id/subtasks", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { title } = req.body;
   if (!title?.trim()) { res.status(400).json({ error: "title is required" }); return; }
 
@@ -177,20 +228,30 @@ router.post("/:id/subtasks", async (req: Request, res: Response) => {
 // ─── PATCH /api/tasks/:id/subtasks/:subtaskId ────────────────────────────────
 
 router.patch("/:id/subtasks/:subtaskId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const subtaskId = req.params.subtaskId as string;
   const { title, completed } = req.body;
   const updates: Record<string, unknown> = {};
   if (title !== undefined) updates.title = title;
   if (completed !== undefined) updates.completed = completed;
-  const [subtask] = await db.update(subtasksTable).set(updates as any).where(eq(subtasksTable.id, subtaskId)).returning();
+  const [subtask] = await db.update(subtasksTable).set(updates as any).where(and(eq(subtasksTable.id, subtaskId), eq(subtasksTable.taskId, id))).returning();
   res.json({ subtask });
 });
 
 // ─── DELETE /api/tasks/:id/subtasks/:subtaskId ───────────────────────────────
 
 router.delete("/:id/subtasks/:subtaskId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const subtaskId = req.params.subtaskId as string;
-  await db.delete(subtasksTable).where(eq(subtasksTable.id, subtaskId));
+  await db.delete(subtasksTable).where(and(eq(subtasksTable.id, subtaskId), eq(subtasksTable.taskId, id)));
   res.status(204).end();
 });
 
@@ -198,6 +259,10 @@ router.delete("/:id/subtasks/:subtaskId", async (req: Request, res: Response) =>
 
 router.get("/:id/activities", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const activities = await db
     .select({
       id: activityLogsTable.id,
@@ -218,6 +283,8 @@ router.get("/:id/activities", async (req: Request, res: Response) => {
 router.post("/:id/timer/start", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   // Stop any running timer first
   await db
@@ -235,7 +302,10 @@ router.post("/:id/timer/start", async (req: Request, res: Response) => {
 // ─── Timer: POST /api/tasks/:id/timer/stop ───────────────────────────────────
 
 router.post("/:id/timer/stop", async (req: Request, res: Response) => {
+  const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   await db
     .update(taskTimersTable)
@@ -254,7 +324,10 @@ router.post("/:id/timer/stop", async (req: Request, res: Response) => {
 // ─── GET /api/tasks/:id/timer ─────────────────────────────────────────────────
 
 router.get("/:id/timer", async (req: Request, res: Response) => {
+  const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   const timers = await db.select().from(taskTimersTable).where(eq(taskTimersTable.taskId, id)).orderBy(asc(taskTimersTable.startedAt));
   const running = timers.find(t => !t.stoppedAt) ?? null;
@@ -266,7 +339,11 @@ router.get("/:id/timer", async (req: Request, res: Response) => {
 // ─── GET /api/tasks/:id/attachments ──────────────────────────────────────────
 
 router.get("/:id/attachments", async (req: Request, res: Response) => {
+  const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const attachments = await db.select().from(taskAttachmentsTable).where(eq(taskAttachmentsTable.taskId, id)).orderBy(asc(taskAttachmentsTable.createdAt));
   res.json({ attachments });
 });
@@ -276,6 +353,9 @@ router.get("/:id/attachments", async (req: Request, res: Response) => {
 router.post("/:id/attachments", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await verifyTaskAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { fileName, fileUrl, fileType } = req.body;
   if (!fileName || !fileUrl || !fileType) {
     res.status(400).json({ error: "fileName, fileUrl, and fileType are required" });

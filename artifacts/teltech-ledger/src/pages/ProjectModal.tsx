@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../lib/auth-context";
+import { useIsMobile } from "../hooks/use-mobile";
 import { X, Trash2 } from "lucide-react";
 import { API } from "../lib/api";
 import { getProjectChanges } from "../lib/project-changes";
@@ -12,7 +13,7 @@ const COLORS = ["#7C5AC2","#3B82F6","#14B8A6","#10B981","#F59E0B","#EF4444","#EC
 const inputStyle: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.09)", borderRadius: 9, padding: "10px 14px",
-  fontSize: 14, color: "#e0e0e0", outline: "none", fontFamily: "inherit",
+  fontSize: 15, color: "#e0e0e0", outline: "none", fontFamily: "inherit",
 };
 
 export function ProjectModal({ project, onClose, onSaved }: {
@@ -21,6 +22,7 @@ export function ProjectModal({ project, onClose, onSaved }: {
   onSaved: (savedProject?: Project) => void | Promise<void>;
 }) {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const isEdit = !!project;
 
   const [name, setName] = useState(project?.name ?? "");
@@ -187,8 +189,20 @@ export function ProjectModal({ project, onClose, onSaved }: {
 
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)", animation: "fadeIn 0.15s ease" }}>
-      <div style={{ width: 480, maxHeight: "85vh", background: "#1a1a1f", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 32px 80px rgba(0,0,0,0.8)", display: "flex", flexDirection: "column", overflow: "hidden", animation: "slideUp 0.2s cubic-bezier(0.34,1.2,0.64,1)" }}>
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", backdropFilter: "blur(4px)", animation: "fadeIn 0.15s ease" }}>
+      <div style={{
+        width: isMobile ? "100vw" : 480,
+        maxWidth: "100vw",
+        maxHeight: isMobile ? "92dvh" : "85vh",
+        background: "#1a1a1f",
+        borderRadius: isMobile ? "16px 16px 0 0" : 16,
+        border: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        animation: isMobile ? "slideUp 0.2s ease" : "slideUp 0.2s cubic-bezier(0.34,1.2,0.64,1)"
+      }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f0f0f0" }}>

@@ -8,6 +8,26 @@ import { type Request, type Response } from "express";
 const router: IRouter = Router();
 router.use(requireAuth);
 
+async function getProjectAccess(projectId: string, userId: string) {
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .limit(1);
+
+  if (!project) return { status: 404, error: "Projeto não encontrado." } as const;
+
+  const [membership] = await db
+    .select({ id: workspaceMembersTable.id, role: workspaceMembersTable.role })
+    .from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, project.workspaceId), eq(workspaceMembersTable.userId, userId)))
+    .limit(1);
+
+  if (!membership) return { status: 403, error: "Sem acesso a este projeto." } as const;
+
+  return { status: 200, project, membership } as const;
+}
+
 // ─── GET /api/projects ────────────────────────────────────────────────────────
 
 router.get("/", async (req: Request, res: Response) => {
@@ -46,6 +66,19 @@ router.post("/", async (req: Request, res: Response) => {
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
   const { workspaceId, name, color, icon } = parsed.data;
+
+  // Check that the user belongs to the requested workspace
+  const [membership] = await db
+    .select({ id: workspaceMembersTable.id })
+    .from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, workspaceId), eq(workspaceMembersTable.userId, userId)))
+    .limit(1);
+
+  if (!membership) {
+    res.status(403).json({ error: "Forbidden", message: "Usuário não pertence ao workspace informado." });
+    return;
+  }
+
   const [project] = await db.insert(projectsTable).values({ workspaceId, name, color: color ?? "#7C5AC2", icon, createdBy: userId }).returning();
 
   // Auto-create default columns
@@ -64,6 +97,9 @@ router.post("/", async (req: Request, res: Response) => {
 
 router.get("/:id/board", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   const columns = await db
     .select()
@@ -140,6 +176,9 @@ router.get("/:id/board", async (req: Request, res: Response) => {
 
 router.get("/:id/stats", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   // 1. Fetch columns
   const columns = await db
@@ -224,6 +263,10 @@ router.get("/:id/stats", async (req: Request, res: Response) => {
  
 router.post("/:id/columns", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { title } = req.body;
   if (!title) { res.status(400).json({ error: "title is required" }); return; }
 
@@ -249,15 +292,9 @@ router.put("/:id", async (req: Request, res: Response) => {
   const parsed = updateProjectSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
-  const [existing] = await db.select({ workspaceId: projectsTable.workspaceId })
-    .from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
-  if (!existing) { res.status(404).json({ error: "Projeto não encontrado. Recarregue a lista de projetos." }); return; }
   const { userId } = (req as AuthenticatedRequest).user;
-  const [membership] = await db.select({ id: workspaceMembersTable.id })
-    .from(workspaceMembersTable)
-    .where(and(eq(workspaceMembersTable.workspaceId, existing.workspaceId), eq(workspaceMembersTable.userId, userId)))
-    .limit(1);
-  if (!membership) { res.status(403).json({ error: "Sem acesso a este projeto." }); return; }
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed.data.name) updates.name = parsed.data.name;
@@ -275,6 +312,15 @@ router.put("/:id", async (req: Request, res: Response) => {
 
 router.delete("/:id", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
+  if (access.membership.role !== "admin" && access.membership.role !== "owner" && access.project.createdBy !== userId) {
+    res.status(403).json({ error: "Forbidden", message: "Apenas administradores ou o criador do projeto podem excluí-lo." });
+    return;
+  }
+
   await db.delete(projectsTable).where(eq(projectsTable.id, id));
   res.json({ success: true });
 });
@@ -282,21 +328,31 @@ router.delete("/:id", async (req: Request, res: Response) => {
 // ─── PUT /api/projects/:id/columns/:colId ────────────────────────────────────
 
 router.put("/:id/columns/:colId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const colId = req.params.colId as string;
   const { title, position } = req.body;
   const updates: Record<string, unknown> = {};
   if (title !== undefined) updates.title = title;
   if (position !== undefined) updates.position = position;
 
-  const [col] = await db.update(columnsTable).set(updates).where(eq(columnsTable.id, colId)).returning();
+  const [col] = await db.update(columnsTable).set(updates).where(and(eq(columnsTable.id, colId), eq(columnsTable.projectId, id))).returning();
   res.json({ column: col });
 });
 
 // ─── DELETE /api/projects/:id/columns/:colId ─────────────────────────────────
 
 router.delete("/:id/columns/:colId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const colId = req.params.colId as string;
-  await db.delete(columnsTable).where(eq(columnsTable.id, colId));
+  await db.delete(columnsTable).where(and(eq(columnsTable.id, colId), eq(columnsTable.projectId, id)));
   res.json({ success: true });
 });
 
@@ -304,12 +360,17 @@ router.delete("/:id/columns/:colId", async (req: Request, res: Response) => {
 // Reorder all columns at once: body = { columns: [{ id, title, position }] }
 
 router.put("/:id/columns-order", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { columns } = req.body as { columns: { id: string; title: string; position: number }[] };
   if (!columns || !Array.isArray(columns)) { res.status(400).json({ error: "columns array required" }); return; }
 
   await Promise.all(
     columns.map(c =>
-      db.update(columnsTable).set({ title: c.title, position: c.position }).where(eq(columnsTable.id, c.id))
+      db.update(columnsTable).set({ title: c.title, position: c.position }).where(and(eq(columnsTable.id, c.id), eq(columnsTable.projectId, id)))
     )
   );
   res.json({ success: true });
@@ -326,6 +387,9 @@ const createTaskSchema = z.object({
 router.post("/:id/tasks", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = createTaskSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
@@ -351,13 +415,17 @@ const updateTaskSchema = z.object({
 });
 
 router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
   const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = updateTaskSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
   // Get current state for activity log comparison
-  const [currentTask] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId)).limit(1);
+  const [currentTask] = await db.select().from(tasksTable).where(and(eq(tasksTable.id, taskId), eq(tasksTable.projectId, projectId))).limit(1);
   if (!currentTask) { res.status(404).json({ error: "Task not found" }); return; }
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -408,7 +476,11 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response) =>
 // ─── DELETE /api/projects/:projectId/tasks/:taskId ────────────────────────────
 
 router.delete("/:projectId/tasks/:taskId", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   // Delete related data first (cascade order)
   await db.delete(taskAssigneesTable).where(eq(taskAssigneesTable.taskId, taskId));
@@ -416,7 +488,7 @@ router.delete("/:projectId/tasks/:taskId", async (req: Request, res: Response) =
   await db.delete(subtasksTable).where(eq(subtasksTable.taskId, taskId));
   await db.delete(commentsTable).where(eq(commentsTable.taskId, taskId));
   await db.delete(activityLogsTable).where(eq(activityLogsTable.taskId, taskId));
-  await db.delete(tasksTable).where(eq(tasksTable.id, taskId));
+  await db.delete(tasksTable).where(and(eq(tasksTable.id, taskId), eq(tasksTable.projectId, projectId)));
 
   res.json({ success: true });
 });
@@ -426,6 +498,9 @@ router.delete("/:projectId/tasks/:taskId", async (req: Request, res: Response) =
 router.get("/:projectId/tasks/:taskId", async (req: Request, res: Response) => {
   const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   const [task] = await db.select().from(tasksTable).where(and(eq(tasksTable.id, taskId), eq(tasksTable.projectId, projectId))).limit(1);
   if (!task) { res.status(404).json({ error: "Task not found" }); return; }
@@ -462,32 +537,47 @@ router.get("/:projectId/tasks/:taskId", async (req: Request, res: Response) => {
 // ─── POST /api/projects/:projectId/tasks/:taskId/assignees ────────────────────
 
 router.post("/:projectId/tasks/:taskId/assignees", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
-  const { userId } = req.body;
-  if (!userId) { res.status(400).json({ error: "userId is required" }); return; }
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
+  const { userId: targetUserId } = req.body;
+  if (!targetUserId) { res.status(400).json({ error: "userId is required" }); return; }
 
   // Prevent duplicate
-  const existing = await db.select({ id: taskAssigneesTable.id }).from(taskAssigneesTable).where(and(eq(taskAssigneesTable.taskId, taskId), eq(taskAssigneesTable.userId, userId))).limit(1);
+  const existing = await db.select({ id: taskAssigneesTable.id }).from(taskAssigneesTable).where(and(eq(taskAssigneesTable.taskId, taskId), eq(taskAssigneesTable.userId, targetUserId))).limit(1);
   if (existing.length > 0) { res.status(409).json({ error: "Already assigned" }); return; }
 
-  await db.insert(taskAssigneesTable).values({ taskId, userId });
-  const [user] = await db.select({ id: usersTable.id, name: usersTable.name, avatarUrl: usersTable.avatarUrl }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  await db.insert(taskAssigneesTable).values({ taskId, userId: targetUserId });
+  const [user] = await db.select({ id: usersTable.id, name: usersTable.name, avatarUrl: usersTable.avatarUrl }).from(usersTable).where(eq(usersTable.id, targetUserId)).limit(1);
   res.status(201).json({ assignee: user });
 });
 
 // ─── DELETE /api/projects/:projectId/tasks/:taskId/assignees/:userId ──────────
 
-router.delete("/:projectId/tasks/:taskId/assignees/:userId", async (req: Request, res: Response) => {
+router.delete("/:projectId/tasks/:taskId/assignees/:targetUserId", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
-  const userId = req.params.userId as string;
-  await db.delete(taskAssigneesTable).where(and(eq(taskAssigneesTable.taskId, taskId), eq(taskAssigneesTable.userId, userId)));
+  const targetUserId = req.params.targetUserId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
+  await db.delete(taskAssigneesTable).where(and(eq(taskAssigneesTable.taskId, taskId), eq(taskAssigneesTable.userId, targetUserId)));
   res.status(204).end();
 });
 
 // ─── POST /api/projects/:projectId/tasks/:taskId/tags ────────────────────────
 
 router.post("/:projectId/tasks/:taskId/tags", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { tagId } = req.body;
   if (!tagId) { res.status(400).json({ error: "tagId is required" }); return; }
 
@@ -501,8 +591,13 @@ router.post("/:projectId/tasks/:taskId/tags", async (req: Request, res: Response
 // ─── DELETE /api/projects/:projectId/tasks/:taskId/tags/:tagId ───────────────
 
 router.delete("/:projectId/tasks/:taskId/tags/:tagId", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
   const tagId = req.params.tagId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   await db.delete(taskTagsTable).where(and(eq(taskTagsTable.taskId, taskId), eq(taskTagsTable.tagId, tagId)));
   res.status(204).end();
 });
@@ -511,6 +606,10 @@ router.delete("/:projectId/tasks/:taskId/tags/:tagId", async (req: Request, res:
 
 router.get("/:id/tags", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const tags = await db.select().from(tagsTable).where(eq(tagsTable.projectId, id)).orderBy(asc(tagsTable.createdAt));
   res.json({ tags });
 });
@@ -524,6 +623,10 @@ const createTagSchema = z.object({
 
 router.post("/:id/tags", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = createTagSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
@@ -539,7 +642,12 @@ const updateTagSchema = z.object({
 });
 
 router.put("/:id/tags/:tagId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
   const tagId = req.params.tagId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = updateTagSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed" }); return; }
 
@@ -547,15 +655,20 @@ router.put("/:id/tags/:tagId", async (req: Request, res: Response) => {
   if (parsed.data.label !== undefined) updates.label = parsed.data.label;
   if (parsed.data.color !== undefined) updates.color = parsed.data.color;
 
-  const [tag] = await db.update(tagsTable).set(updates as any).where(eq(tagsTable.id, tagId)).returning();
+  const [tag] = await db.update(tagsTable).set(updates as any).where(and(eq(tagsTable.id, tagId), eq(tagsTable.projectId, id))).returning();
   res.json({ tag });
 });
 
 // ─── DELETE /api/projects/:id/tags/:tagId ────────────────────────────────────
 
 router.delete("/:id/tags/:tagId", async (req: Request, res: Response) => {
+  const id = req.params.id as string;
   const tagId = req.params.tagId as string;
-  await db.delete(tagsTable).where(eq(tagsTable.id, tagId));
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
+  await db.delete(tagsTable).where(and(eq(tagsTable.id, tagId), eq(tagsTable.projectId, id)));
   res.json({ success: true });
 });
 
@@ -564,15 +677,15 @@ router.delete("/:id/tags/:tagId", async (req: Request, res: Response) => {
 
 router.get("/:id/members", async (req: Request, res: Response) => {
   const id = req.params.id as string;
-
-  const [project] = await db.select({ workspaceId: projectsTable.workspaceId }).from(projectsTable).where(eq(projectsTable.id, id)).limit(1);
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
 
   const members = await db
     .select({ id: usersTable.id, name: usersTable.name, avatarUrl: usersTable.avatarUrl, role: workspaceMembersTable.role })
     .from(workspaceMembersTable)
     .innerJoin(usersTable, eq(workspaceMembersTable.userId, usersTable.id))
-    .where(eq(workspaceMembersTable.workspaceId, project.workspaceId))
+    .where(eq(workspaceMembersTable.workspaceId, access.project.workspaceId))
     .orderBy(asc(usersTable.name));
 
   res.json({ members });
@@ -586,11 +699,20 @@ const moveTaskSchema = z.object({
 });
 
 router.post("/:projectId/tasks/:taskId/move", async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string;
   const taskId = req.params.taskId as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(projectId, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = moveTaskSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Validation failed", issues: parsed.error.issues }); return; }
 
   const { targetColumnId, targetIndex } = parsed.data;
+
+  // Verify targetColumn belongs to this project
+  const [col] = await db.select({ id: columnsTable.id }).from(columnsTable).where(and(eq(columnsTable.id, targetColumnId), eq(columnsTable.projectId, projectId))).limit(1);
+  if (!col) { res.status(404).json({ error: "Coluna de destino não encontrada no projeto." }); return; }
 
   // Get all tasks in target column (excluding the moved task)
   const columnTasks = await db
@@ -616,6 +738,9 @@ router.post("/:projectId/tasks/:taskId/move", async (req: Request, res: Response
 
 router.get("/:id/files", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
   
   // Get all tasks for this project
   const tasks = await db.select({ id: tasksTable.id, title: tasksTable.title })
@@ -659,6 +784,9 @@ router.get("/:id/files", async (req: Request, res: Response) => {
 
 router.get("/:id/messages", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
   
   const messages = await db
     .select({
@@ -688,6 +816,8 @@ const createProjectMessageSchema = z.object({
 router.post("/:id/messages", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
   const id = req.params.id as string;
+  const access = await getProjectAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
   
   const parsed = createProjectMessageSchema.safeParse(req.body);
   if (!parsed.success) {

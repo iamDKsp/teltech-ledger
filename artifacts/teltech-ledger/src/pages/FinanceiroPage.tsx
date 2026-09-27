@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext, useCallback, useRef } from "react";
 import { useAuth } from "../lib/auth-context";
+import { useIsMobile } from "../hooks/use-mobile";
 import { API } from "../lib/api";
 import { AppContext } from "../TeltechLedger";
 import {
@@ -595,20 +596,22 @@ export function FinanceiroPage() {
       const m = selectedMonth;
       const y = selectedYear;
 
+      const results = await Promise.allSettled([
+        API.get(`/finance/dashboard?month=${m}&year=${y}`),
+        API.get(`/finance/transactions?month=${m}&year=${y}`),
+        API.get(`/finance/categories`),
+        API.get(`/finance/accounts`),
+        API.get(`/finance/clients`),
+        API.get(`/finance/dre?month=${m}&year=${y}`),
+        API.get(`/finance/project-profitability?month=${m}&year=${y}`),
+        API.get(`/finance/partners?month=${m}&year=${y}`),
+        API.get(`/finance/budgets?month=${m}&year=${y}`),
+        API.get(`/finance/approvals`),
+        API.get(`/projects`),
+      ]);
+
       const [dashRes, txRes, catRes, accRes, clRes, dreRes, profRes, partRes, budRes, appRes, projRes] =
-        await Promise.all([
-          API.get(`/finance/dashboard?month=${m}&year=${y}`),
-          API.get(`/finance/transactions?month=${m}&year=${y}`),
-          API.get(`/finance/categories`),
-          API.get(`/finance/accounts`),
-          API.get(`/finance/clients`),
-          API.get(`/finance/dre?month=${m}&year=${y}`),
-          API.get(`/finance/project-profitability?month=${m}&year=${y}`),
-          API.get(`/finance/partners?month=${m}&year=${y}`),
-          API.get(`/finance/budgets?month=${m}&year=${y}`),
-          API.get(`/finance/approvals`),
-          API.get(`/projects`),
-        ]);
+        results.map(r => (r.status === "fulfilled" ? (r as PromiseFulfilledResult<any>).value : null));
 
       if (dashRes?.dashboard) setDashboard(dashRes.dashboard);
       if (txRes?.transactions) setTransactions(txRes.transactions);
@@ -652,10 +655,30 @@ export function FinanceiroPage() {
     }
   };
 
-  const handleExportCSV = () => {
-    const token = localStorage.getItem("teltech_token") || localStorage.getItem("token") || "";
-    const baseUrl = API.baseUrl || (import.meta.env.DEV ? "http://localhost:5000" : "");
-    window.open(`${baseUrl}/api/finance/export?month=${selectedMonth}&year=${selectedYear}&token=${token}`, "_blank");
+  const handleExportCSV = async () => {
+    try {
+      const token = localStorage.getItem("teltech_token") || localStorage.getItem("token") || "";
+      const baseUrl = API.baseUrl || (import.meta.env.DEV ? "http://localhost:5000" : "");
+      const res = await fetch(`${baseUrl}/api/finance/export?month=${selectedMonth}&year=${selectedYear}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (!res.ok) throw new Error("Erro ao exportar dados.");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `teltech-financeiro-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Exportação concluída com sucesso.");
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao exportar relatório CSV.");
+    }
   };
 
   const handleApprove = async (id: string) => {
@@ -889,6 +912,8 @@ export function FinanceiroPage() {
           background: "#141417",
           padding: "0 16px",
           overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
         }}
       >
         {[
@@ -1873,6 +1898,7 @@ function TransactionsLedgerView({
   onDeleteTx: (id: string) => void;
   onExportCSV: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("all");
 
@@ -2071,168 +2097,289 @@ function TransactionsLedgerView({
         </select>
       </div>
 
-      {/* ─── Ledger Accounting Table ──────────────────────────────────────── */}
+      {/* ─── Ledger Accounting Table / Mobile Cards ───────────────────────── */}
       {filtered.length > 0 ? (
-        <div style={{ background: "#18181c", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "rgba(255,255,255,0.02)", borderBottom: "1px solid rgba(255,255,255,0.08)", color: "#888", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
-                  <th style={{ padding: "12px 16px" }}>Vencimento</th>
-                  <th style={{ padding: "12px 16px" }}>Descrição & Contrato</th>
-                  <th style={{ padding: "12px 16px" }}>Projeto / Centro</th>
-                  <th style={{ padding: "12px 16px" }}>Categoria / CPV</th>
-                  <th style={{ padding: "12px 16px" }}>Conta</th>
-                  <th style={{ padding: "12px 16px" }}>Status</th>
-                  <th style={{ padding: "12px 16px", textAlign: "right" }}>Valor</th>
-                  <th style={{ padding: "12px 16px", textAlign: "center" }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((tx) => {
-                  const isInflow = tx.type === "inflow";
-                  return (
-                    <tr
-                      key={tx.id}
-                      style={{
-                        borderBottom: "1px solid rgba(255,255,255,0.05)",
-                        transition: "background 0.15s ease",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      {/* Vencimento */}
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
-                        <div style={{ fontWeight: 600, color: "#fff" }}>{formatDate(tx.dueDate)}</div>
-                        {tx.paidAt && (
-                          <div style={{ fontSize: 11, color: "#10B981" }}>Pago em {formatDate(tx.paidAt)}</div>
-                        )}
-                      </td>
-
-                      {/* Descrição & Tags */}
-                      <td style={{ padding: "14px 16px" }}>
-                        <div style={{ fontWeight: 700, color: "#fafafa" }}>{tx.description}</div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
-                          {tx.clientName && (
-                            <span style={{ fontSize: 11, color: "#3B82F6", fontWeight: 600 }}>
-                              Cliente: {tx.clientName}
-                            </span>
-                          )}
-                          {tx.partnerName && (
-                            <span style={{ fontSize: 11, color: "#8B5CF6", fontWeight: 600 }}>
-                              Sócio: {tx.partnerName}
-                            </span>
-                          )}
-                          {tx.installmentsTotal && tx.installmentsTotal > 1 && (
-                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "#aaa" }}>
-                              Parcela {tx.installmentNumber}/{tx.installmentsTotal}
-                            </span>
-                          )}
-                          {tx.isRecurring && (
-                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(139,92,246,0.15)", color: "#A78BFA" }}>
-                              Recorrente
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Projeto */}
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
-                        {tx.projectName ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: tx.projectColor || "#ccc" }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: tx.projectColor || "#888" }} />
-                            {tx.projectName}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 11, color: "#666" }}>Geral Teltech</span>
-                        )}
-                      </td>
-
-                      {/* Categoria & CPV */}
-                      <td style={{ padding: "14px 16px" }}>
-                        <div style={{ fontSize: 12, color: "#ddd", fontWeight: 500, marginBottom: 4 }}>
-                          {tx.categoryName || "Sem categoria"}
-                        </div>
-                        <CostTypeBadge type={tx.costType} />
-                      </td>
-
-                      {/* Conta */}
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 12, color: "#aaa" }}>{tx.accountName || "Conta Geral"}</span>
-                      </td>
-
-                      {/* Status */}
-                      <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+        isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {filtered.map((tx) => {
+              const isInflow = tx.type === "inflow";
+              return (
+                <div
+                  key={tx.id}
+                  style={{
+                    background: "#18181c",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 12,
+                    padding: 14,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: "#fafafa", fontSize: 14, wordBreak: "break-word" }}>{tx.description}</div>
+                      <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                        Venc: {formatDate(tx.dueDate)}
+                        {tx.paidAt && <span style={{ color: "#10B981", marginLeft: 6 }}>• Pago {formatDate(tx.paidAt)}</span>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{
+                        fontSize: 15,
+                        fontWeight: 800,
+                        color: isInflow ? "#10B981" : "#fafafa",
+                      }}>
+                        {isInflow ? "+" : "-"} {formatBRL(tx.amount)}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
                         <StatusBadge status={tx.status} approvalStatus={tx.approvalStatus} />
-                      </td>
+                      </div>
+                    </div>
+                  </div>
 
-                      {/* Valor */}
-                      <td style={{ padding: "14px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: isInflow ? "#10B981" : "#fafafa" }}>
-                          {isInflow ? "+" : "-"} {formatBRL(tx.amount)}
-                        </span>
-                      </td>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", fontSize: 11 }}>
+                    {tx.clientName && (
+                      <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(59,130,246,0.12)", color: "#93c5fd" }}>
+                        Cliente: {tx.clientName}
+                      </span>
+                    )}
+                    {tx.partnerName && (
+                      <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(139,92,246,0.12)", color: "#c4b5fd" }}>
+                        Sócio: {tx.partnerName}
+                      </span>
+                    )}
+                    {tx.projectName && (
+                      <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: tx.projectColor || "#ccc" }}>
+                        {tx.projectName}
+                      </span>
+                    )}
+                    {tx.categoryName && (
+                      <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(255,255,255,0.04)", color: "#a1a1aa" }}>
+                        {tx.categoryName}
+                      </span>
+                    )}
+                    {tx.accountName && (
+                      <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(255,255,255,0.04)", color: "#a1a1aa" }}>
+                        {tx.accountName}
+                      </span>
+                    )}
+                  </div>
 
-                      {/* Ações */}
-                      <td style={{ padding: "14px 16px", textAlign: "center", whiteSpace: "nowrap" }}>
-                        <div style={{ display: "inline-flex", gap: 6 }}>
-                          {tx.status !== "paid" && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                    {tx.status !== "paid" && (
+                      <button
+                        onClick={() => onMarkPaid(tx)}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 6,
+                          background: "rgba(16,185,129,0.15)",
+                          border: "1px solid rgba(16,185,129,0.3)",
+                          color: "#10B981",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Baixar
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onEditTx(tx)}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 6,
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        color: "#ccc",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => onDeleteTx(tx.id)}
+                      title="Excluir lançamento"
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        background: "rgba(239,68,68,0.1)",
+                        border: "1px solid rgba(239,68,68,0.25)",
+                        color: "#EF4444",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <X style={{ width: 14, height: 14 }} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ background: "#18181c", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "rgba(255,255,255,0.02)", borderBottom: "1px solid rgba(255,255,255,0.08)", color: "#888", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
+                    <th style={{ padding: "12px 16px" }}>Vencimento</th>
+                    <th style={{ padding: "12px 16px" }}>Descrição & Contrato</th>
+                    <th style={{ padding: "12px 16px" }}>Projeto / Centro</th>
+                    <th style={{ padding: "12px 16px" }}>Categoria / CPV</th>
+                    <th style={{ padding: "12px 16px" }}>Conta</th>
+                    <th style={{ padding: "12px 16px" }}>Status</th>
+                    <th style={{ padding: "12px 16px", textAlign: "right" }}>Valor</th>
+                    <th style={{ padding: "12px 16px", textAlign: "center" }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((tx) => {
+                    const isInflow = tx.type === "inflow";
+                    return (
+                      <tr
+                        key={tx.id}
+                        style={{
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
+                          transition: "background 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        {/* Vencimento */}
+                        <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+                          <div style={{ fontWeight: 600, color: "#fff" }}>{formatDate(tx.dueDate)}</div>
+                          {tx.paidAt && (
+                            <div style={{ fontSize: 11, color: "#10B981" }}>Pago em {formatDate(tx.paidAt)}</div>
+                          )}
+                        </td>
+
+                        {/* Descrição & Tags */}
+                        <td style={{ padding: "14px 16px" }}>
+                          <div style={{ fontWeight: 700, color: "#fafafa" }}>{tx.description}</div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
+                            {tx.clientName && (
+                              <span style={{ fontSize: 11, color: "#3B82F6", fontWeight: 600 }}>
+                                Cliente: {tx.clientName}
+                              </span>
+                            )}
+                            {tx.partnerName && (
+                              <span style={{ fontSize: 11, color: "#8B5CF6", fontWeight: 600 }}>
+                                Sócio: {tx.partnerName}
+                              </span>
+                            )}
+                            {tx.installmentsTotal && tx.installmentsTotal > 1 && (
+                              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "#aaa" }}>
+                                Parcela {tx.installmentNumber}/{tx.installmentsTotal}
+                              </span>
+                            )}
+                            {tx.isRecurring && (
+                              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(139,92,246,0.15)", color: "#A78BFA" }}>
+                                Recorrente
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Projeto */}
+                        <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+                          {tx.projectName ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: tx.projectColor || "#ccc" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: tx.projectColor || "#888" }} />
+                              {tx.projectName}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, color: "#666" }}>Geral Teltech</span>
+                          )}
+                        </td>
+
+                        {/* Categoria & CPV */}
+                        <td style={{ padding: "14px 16px" }}>
+                          <div style={{ fontSize: 12, color: "#ddd", fontWeight: 500, marginBottom: 4 }}>
+                            {tx.categoryName || "Sem categoria"}
+                          </div>
+                          <CostTypeBadge type={tx.costType} />
+                        </td>
+
+                        {/* Conta */}
+                        <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 12, color: "#aaa" }}>{tx.accountName || "Conta Geral"}</span>
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
+                          <StatusBadge status={tx.status} approvalStatus={tx.approvalStatus} />
+                        </td>
+
+                        {/* Valor */}
+                        <td style={{ padding: "14px 16px", textAlign: "right", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: isInflow ? "#10B981" : "#fafafa" }}>
+                            {isInflow ? "+" : "-"} {formatBRL(tx.amount)}
+                          </span>
+                        </td>
+
+                        {/* Ações */}
+                        <td style={{ padding: "14px 16px", textAlign: "center", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "inline-flex", gap: 6 }}>
+                            {tx.status !== "paid" && (
+                              <button
+                                onClick={() => onMarkPaid(tx)}
+                                title="Dar baixa / Marcar como pago"
+                                style={{
+                                  padding: "4px 8px",
+                                  borderRadius: 6,
+                                  background: "rgba(16,185,129,0.15)",
+                                  border: "1px solid rgba(16,185,129,0.3)",
+                                  color: "#10B981",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Baixar
+                              </button>
+                            )}
                             <button
-                              onClick={() => onMarkPaid(tx)}
-                              title="Dar baixa / Marcar como pago"
+                              onClick={() => onEditTx(tx)}
+                              title="Editar lançamento"
                               style={{
                                 padding: "4px 8px",
                                 borderRadius: 6,
-                                background: "rgba(16,185,129,0.15)",
-                                border: "1px solid rgba(16,185,129,0.3)",
-                                color: "#10B981",
+                                background: "rgba(255,255,255,0.05)",
+                                border: "1px solid rgba(255,255,255,0.1)",
+                                color: "#ccc",
                                 fontSize: 11,
-                                fontWeight: 700,
                                 cursor: "pointer",
                               }}
                             >
-                              Baixar
+                              Editar
                             </button>
-                          )}
-                          <button
-                            onClick={() => onEditTx(tx)}
-                            title="Editar lançamento"
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 6,
-                              background: "rgba(255,255,255,0.05)",
-                              border: "1px solid rgba(255,255,255,0.1)",
-                              color: "#ccc",
-                              fontSize: 11,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            onClick={() => onDeleteTx(tx.id)}
-                            title="Excluir lançamento"
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 6,
-                              background: "rgba(239,68,68,0.1)",
-                              border: "1px solid rgba(239,68,68,0.25)",
-                              color: "#EF4444",
-                              fontSize: 11,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <X style={{ width: 12, height: 12 }} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            <button
+                              onClick={() => onDeleteTx(tx.id)}
+                              title="Excluir lançamento"
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 6,
+                                background: "rgba(239,68,68,0.1)",
+                                border: "1px solid rgba(239,68,68,0.25)",
+                                color: "#EF4444",
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <X style={{ width: 12, height: 12 }} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <EmptyState
           icon={FileText}

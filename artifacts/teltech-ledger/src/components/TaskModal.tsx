@@ -1,6 +1,7 @@
 import { useState, useEffect, useContext, useRef, useCallback } from "react";
 import { AppContext, FaceAvatar, TAG_STYLES, Task, TagColor } from "../TeltechLedger";
 import { useAuth } from "../lib/auth-context";
+import { useIsMobile } from "../hooks/use-mobile";
 import { Loader } from "./Loader";
 import { ArrowDown, Flag, ArrowUp, AlertTriangle, X, Paperclip, Check } from "lucide-react";
 
@@ -95,6 +96,7 @@ export interface TaskModalProps { task: Task; colId: string; onClose: () => void
 export function TaskModal({ task: initialTask, colId: initialColId, onClose, onSave }: TaskModalProps) {
   const { activeProject } = useContext(AppContext);
   const { token, user } = useAuth();
+  const isMobile = useIsMobile();
   
   // State UI
   const [activeTab, setActiveTab] = useState<"descricao"|"comentarios"|"atividades">("descricao");
@@ -437,29 +439,58 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
   return (
     <div
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", backdropFilter:"blur(3px)", animation:"fadeIn 0.18s ease" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.65)",
+        zIndex: 10000,
+        display: "flex",
+        alignItems: isMobile ? "flex-end" : "center",
+        justifyContent: "center",
+        backdropFilter: "blur(3px)",
+        animation: "fadeIn 0.18s ease"
+      }}
     >
-      <div style={{ width: 900, maxHeight:"88vh", background:"#1a1a1f", borderRadius:16, border:"1px solid rgba(255,255,255,0.07)", boxShadow:"0 32px 80px rgba(0,0,0,0.8)", display:"flex", flexDirection:"column", overflow:"hidden", animation:"slideUp 0.22s cubic-bezier(0.34,1.2,0.64,1)" }}>
+      <div style={{
+        width: isMobile ? "100vw" : 900,
+        maxWidth: "100vw",
+        height: isMobile ? "100dvh" : undefined,
+        maxHeight: isMobile ? "100dvh" : "88vh",
+        background: "#1a1a1f",
+        borderRadius: isMobile ? 0 : 16,
+        border: isMobile ? "none" : "1px solid rgba(255,255,255,0.07)",
+        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        animation: isMobile ? "slideUp 0.2s ease" : "slideUp 0.22s cubic-bezier(0.34,1.2,0.64,1)"
+      }}>
 
         {/* ── Top bar ── */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 18px 12px", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:11, color:"#555", fontWeight:500 }}>{activeProject?.name}</span>
-            <span style={{ color:"#333", fontSize:12 }}>›</span>
-            <span style={{ fontSize:11, color:"#555" }}>{currentColumn?.title || "Sem Título"}</span>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: isMobile ? "calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px" : "14px 18px 12px",
+          borderBottom: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "#555", fontWeight: 500 }}>{activeProject?.name}</span>
+            <span style={{ color: "#333", fontSize: 12 }}>›</span>
+            <span style={{ fontSize: 11, color: "#555" }}>{currentColumn?.title || "Sem Título"}</span>
           </div>
-          <div style={{ display:"flex", gap:6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
             <button
               onClick={() => setShowDeleteConfirm(true)}
-              style={{ width:28, height:28, borderRadius:7, background:"transparent", border:"1px solid rgba(255,255,255,0.06)", color:"#888", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}
+              style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "1px solid rgba(255,255,255,0.06)", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
               title="Excluir Tarefa"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
             <button
-              onMouseEnter={()=>setHoverClose(true)} onMouseLeave={()=>setHoverClose(false)}
+              onMouseEnter={() => setHoverClose(true)} onMouseLeave={() => setHoverClose(false)}
               onClick={onClose}
-              style={{ width:28, height:28, borderRadius:7, background: hoverClose?"rgba(239,68,68,0.15)":"transparent", border:"1px solid rgba(255,255,255,0.06)", color: hoverClose?"#ef4444":"#888", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.15s" }}>
+              style={{ width: 28, height: 28, borderRadius: 7, background: hoverClose ? "rgba(239,68,68,0.15)" : "transparent", border: "1px solid rgba(255,255,255,0.06)", color: hoverClose ? "#ef4444" : "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>
               <X size={15} />
             </button>
           </div>
@@ -467,23 +498,35 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
 
         {/* ── Body (Two Panels) ── */}
         {loading ? (
-          <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", color:"#888", fontSize:13 }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#888", fontSize: 13 }}>
             Carregando...
           </div>
         ) : (
-          <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: isMobile ? "column" : "row",
+            overflow: isMobile ? "auto" : "hidden",
+            WebkitOverflowScrolling: "touch"
+          }}>
             
             {/* Left Panel (Content) */}
-            <div style={{ flex:6, padding:"24px 28px", overflowY:"auto", borderRight:"1px solid rgba(255,255,255,0.05)" }}>
+            <div style={{
+              flex: isMobile ? "none" : 6,
+              padding: isMobile ? "16px" : "24px 28px",
+              overflowY: isMobile ? "visible" : "auto",
+              borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,0.05)",
+              borderBottom: isMobile ? "1px solid rgba(255,255,255,0.05)" : "none"
+            }}>
               {/* Title Input */}
               <input 
                 value={title} onChange={e=>setTitle(e.target.value)}
                 placeholder="Título da tarefa..."
-                style={{ width:"100%", background:"transparent", border:"none", outline:"none", fontSize:24, fontWeight:700, color:"#f0f0f0", marginBottom:12, fontFamily:"inherit" }}
+                style={{ width: "100%", background: "transparent", border: "none", outline: "none", fontSize: isMobile ? 18 : 24, fontWeight: 700, color: "#f0f0f0", marginBottom: 12, fontFamily: "inherit" }}
               />
 
               {/* Priority */}
-              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:24 }}>
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
                 {PRIORITY_ORDER.map(p => {
                   const info = PRIORITY_MAP[p];
                   const Icon = info.icon;
@@ -497,11 +540,11 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
               </div>
 
               {/* Tabs */}
-              <div style={{ display:"flex", gap:0, borderBottom:"1px solid rgba(255,255,255,0.05)", marginBottom:20 }}>
+              <div style={{ display: "flex", gap: 0, borderBottom: "1px solid rgba(255,255,255,0.05)", marginBottom: 20, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                 {(["descricao","comentarios","atividades"] as const).map(tab=>{
                   const labels = { descricao:"Descrição", comentarios:`Comentários (${comments.length})`, atividades:"Atividades" };
                   return (
-                    <button key={tab} onClick={()=>setActiveTab(tab)} style={{ padding:"10px 18px", background:"transparent", border:"none", borderBottom:`2px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#e0e0e0":"#555", fontWeight: activeTab===tab?600:400, fontSize:13, cursor:"pointer", transition:"all 0.12s", outline:"none" }}>
+                    <button key={tab} onClick={()=>setActiveTab(tab)} style={{ padding: "10px 14px", background:"transparent", border:"none", borderBottom:`2px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#e0e0e0":"#555", fontWeight: activeTab===tab?600:400, fontSize:13, cursor:"pointer", transition:"all 0.12s", outline:"none", whiteSpace: "nowrap" }}>
                       {labels[tab]}
                     </button>
                   );
@@ -520,7 +563,7 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
                     <textarea
                       id="task-description"
                       value={description} onChange={e=>setDescription(e.target.value)} placeholder="Adicionar descrição detalhada..."
-                      style={{ width:"100%", minHeight:120, background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, padding:"14px", fontSize:13, color:"#ccc", lineHeight:1.6, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }}
+                      style={{ width:"100%", minHeight:120, background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:8, padding:"14px", fontSize: isMobile ? 16 : 13, color:"#ccc", lineHeight:1.6, resize:"vertical", outline:"none", fontFamily:"inherit", boxSizing:"border-box" }}
                     />
                   </div>
 
@@ -541,7 +584,7 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
                         value={newSubtask} onChange={e=>setNewSubtask(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') handleAddSubtask(); }}
                         placeholder="Adicionar subtarefa... (Pressione Enter)"
-                        style={{ flex:1, background:"transparent", border:"none", outline:"none", fontSize:13, color:"#888", fontFamily:"inherit" }}
+                        style={{ flex:1, background:"transparent", border:"none", outline:"none", fontSize: isMobile ? 16 : 13, color:"#888", fontFamily:"inherit" }}
                       />
                     </div>
                   </div>
@@ -588,7 +631,7 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
                           value={newComment} onChange={e=>setNewComment(e.target.value)}
                           onKeyDown={e=>{ if(e.key==="Enter") handleAddComment(); }}
                           placeholder="Adicionar comentário..."
-                          style={{ flex:1, background:"transparent", border:"none", padding:"8px 10px", fontSize:13, color:"#ccc", outline:"none", fontFamily:"inherit" }}
+                          style={{ flex:1, background:"transparent", border:"none", padding:"8px 10px", fontSize: isMobile ? 16 : 13, color:"#ccc", outline:"none", fontFamily:"inherit" }}
                         />
                         <label style={{ background:"transparent", border:"none", color:"#888", cursor:"pointer", padding:"8px 6px", display:"flex", alignItems:"center", transition:"color 0.15s" }} title="Anexar Arquivo Local"
                           onMouseEnter={e => e.currentTarget.style.color = "#ccc"}
@@ -663,7 +706,12 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
             </div>
 
             {/* Right Panel (Metadata) */}
-            <div style={{ flex:4, padding:"24px", background:"rgba(0,0,0,0.15)", overflowY:"auto" }}>
+            <div style={{
+              flex: isMobile ? "none" : 4,
+              padding: isMobile ? "16px" : "24px",
+              background: "rgba(0,0,0,0.15)",
+              overflowY: isMobile ? "visible" : "auto"
+            }}>
               
               {/* Funil / Column Custom Dropdown */}
               <div style={{ marginBottom:24, position:"relative" }}>
@@ -871,7 +919,15 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
         )}
 
         {/* ── Footer ── */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 24px", borderTop:"1px solid rgba(255,255,255,0.05)", background:"#161619" }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: isMobile ? "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))" : "16px 24px",
+          borderTop: "1px solid rgba(255,255,255,0.05)",
+          background: "#161619",
+          flexShrink: 0
+        }}>
           <span style={{ fontSize:11, color:"#888", fontStyle:"italic", display:"inline-flex", alignItems:"center", gap:4 }}>
             Salvo automaticamente <Check size={12} style={{ color:"#10B981" }} />
           </span>

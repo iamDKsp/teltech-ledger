@@ -1,24 +1,54 @@
 import { Router, type Request, type Response } from "express";
-import { db, meetingsTable, meetingParticipantsTable, usersTable } from "@workspace/db";
-import { eq, asc, inArray } from "drizzle-orm";
+import { db, meetingsTable, meetingParticipantsTable, usersTable, workspaceMembersTable } from "@workspace/db";
+import { eq, asc, inArray, and } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/auth";
 import { z } from "zod";
 
 const router = Router();
 router.use(requireAuth);
 
+async function getMeetingAccess(meetingId: string, userId: string) {
+  const [meeting] = await db
+    .select()
+    .from(meetingsTable)
+    .where(eq(meetingsTable.id, meetingId))
+    .limit(1);
+
+  if (!meeting) return { status: 404, error: "Reunião não encontrada." } as const;
+
+  const [membership] = await db
+    .select({ id: workspaceMembersTable.id, role: workspaceMembersTable.role })
+    .from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, meeting.workspaceId), eq(workspaceMembersTable.userId, userId)))
+    .limit(1);
+
+  if (!membership) return { status: 403, error: "Sem acesso a esta reunião." } as const;
+
+  return { status: 200, meeting, membership } as const;
+}
+
 // ─── GET /api/meetings ────────────────────────────────────────────────────────
 
 router.get("/", async (req: Request, res: Response) => {
   const { userId } = (req as AuthenticatedRequest).user;
 
-  // Ideally, filter by workspace, for now we will get all meetings the user created or participates in, or from user's workspaces
-  // A simple approach: fetch all meetings (in a real app we'd filter by workspaceId)
-  
-  // Since we don't pass workspaceId in GET /api/meetings by default, let's fetch all meetings
-  // where the user is either the creator, or the user is a participant.
-  
-  const meetings = await db.select().from(meetingsTable).orderBy(asc(meetingsTable.startTime));
+  // Workspaces user belongs to
+  const memberships = await db
+    .select({ workspaceId: workspaceMembersTable.workspaceId })
+    .from(workspaceMembersTable)
+    .where(eq(workspaceMembersTable.userId, userId));
+
+  const wsIds = memberships.map(m => m.workspaceId);
+  if (wsIds.length === 0) {
+    res.json({ meetings: [] });
+    return;
+  }
+
+  const meetings = await db
+    .select()
+    .from(meetingsTable)
+    .where(inArray(meetingsTable.workspaceId, wsIds))
+    .orderBy(asc(meetingsTable.startTime));
 
   if (meetings.length === 0) {
     res.json({ meetings: [] });
@@ -70,6 +100,18 @@ router.post("/", async (req: Request, res: Response) => {
   }
   
   const data = parsed.data;
+
+  // Check that the user belongs to the requested workspace
+  const [membership] = await db
+    .select({ id: workspaceMembersTable.id })
+    .from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, data.workspaceId), eq(workspaceMembersTable.userId, userId)))
+    .limit(1);
+
+  if (!membership) {
+    res.status(403).json({ error: "Forbidden", message: "Usuário não pertence ao workspace informado." });
+    return;
+  }
   
   const [meeting] = await db.insert(meetingsTable).values({
     workspaceId: data.workspaceId,
@@ -109,8 +151,11 @@ const updateMeetingSchema = z.object({
 
 router.put("/:id", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getMeetingAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const parsed = updateMeetingSchema.safeParse(req.body);
-  
   if (!parsed.success) {
     res.status(400).json({ error: "Validation failed" });
     return;
@@ -132,6 +177,11 @@ router.put("/:id", async (req: Request, res: Response) => {
 
 router.delete("/:id", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId } = (req as AuthenticatedRequest).user;
+  const access = await getMeetingAccess(id, userId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
+  await db.delete(meetingParticipantsTable).where(eq(meetingParticipantsTable.meetingId, id));
   await db.delete(meetingsTable).where(eq(meetingsTable.id, id));
   res.json({ success: true });
 });
@@ -140,6 +190,10 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
 router.post("/:id/participants", async (req: Request, res: Response) => {
   const id = req.params.id as string;
+  const { userId: requestingUserId } = (req as AuthenticatedRequest).user;
+  const access = await getMeetingAccess(id, requestingUserId);
+  if (access.status !== 200) { res.status(access.status).json({ error: access.error }); return; }
+
   const { userId } = req.body;
   
   if (!userId) {

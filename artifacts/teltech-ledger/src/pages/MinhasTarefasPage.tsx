@@ -3,6 +3,7 @@ import { API } from "../lib/api";
 import { CheckCircle2, Clock, Calendar, AlertCircle } from "lucide-react";
 import { format, isToday, isThisWeek, isBefore, startOfDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { TaskModal } from "../components/TaskModal";
 
 interface Task {
   id: string;
@@ -24,6 +25,7 @@ export default function MinhasTarefasPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterType>("todas");
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<{ task: any; colId: string } | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -157,6 +159,19 @@ export default function MinhasTarefasPage() {
           {filteredTasks.map((task) => (
             <div
               key={task.id}
+              onClick={() => setSelectedTask({
+                task: {
+                  id: task.id,
+                  title: task.title,
+                  tags: [],
+                  assignees: 0,
+                  timerState: "idle",
+                  timerValue: "00:00",
+                  progress: task.subtasksTotal > 0 ? Math.round((task.subtasksCompleted / task.subtasksTotal) * 100) : 0,
+                  estTime: ""
+                },
+                colId: ""
+              })}
               onMouseEnter={() => setHoveredTaskId(task.id)}
               onMouseLeave={() => setHoveredTaskId(null)}
               style={{
@@ -168,7 +183,8 @@ export default function MinhasTarefasPage() {
                 display: "flex",
                 flexDirection: "column",
                 gap: "0.75rem",
-                cursor: "pointer"
+                cursor: "pointer",
+                WebkitTapHighlightColor: "transparent"
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -242,6 +258,17 @@ export default function MinhasTarefasPage() {
             </div>
           ))}
         </div>
+      )}
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask.task}
+          colId={selectedTask.colId}
+          onClose={() => setSelectedTask(null)}
+          onSave={() => {
+            fetchTasks();
+            setSelectedTask(null);
+          }}
+        />
       )}
     </div>
   );

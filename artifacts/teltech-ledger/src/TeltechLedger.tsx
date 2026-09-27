@@ -158,6 +158,8 @@ interface DragCtx {
   onCardClick: (task: Task) => void;
   onDeleteClick: (task: Task) => void;
   loadBoard: () => void;
+  columns?: Column[];
+  onMoveTaskDirect?: (taskId: string, targetColId: string) => void;
 }
 
 const DragContext = createContext<DragCtx>({
@@ -169,6 +171,8 @@ const DragContext = createContext<DragCtx>({
   onCardClick: () => {},
   onDeleteClick: () => {},
   loadBoard: () => {},
+  columns: [],
+  onMoveTaskDirect: () => {},
 });
 
 // ─── Colors ───────────────────────────────────────────────────────────────────
@@ -517,8 +521,10 @@ export function ProgressBar({ progress, state }: { progress:number; state:TimerS
 // ─── Task Card ────────────────────────────────────────────────────────────────
 
 function TaskCard({ task, ghost=false }: { task:Task; ghost?:boolean }) {
-  const { drag, startDrag, cardRefs, justDropped, onCardClick, onDeleteClick } = useContext(DragContext);
+  const { drag, startDrag, cardRefs, justDropped, onCardClick, onDeleteClick, columns, onMoveTaskDirect } = useContext(DragContext);
+  const { isMobile } = useContext(AppContext);
   const [hovered, setHovered] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const isDragging = drag?.taskId === task.id && drag.active;
   const isJustDropped = justDropped === task.id;
@@ -545,7 +551,8 @@ function TaskCard({ task, ghost=false }: { task:Task; ghost?:boolean }) {
   return (
     <div
       ref={cardRef}
-      onMouseDown={!ghost ? handleMouseDown : undefined}
+      onMouseDown={!ghost && !isMobile ? handleMouseDown : undefined}
+      onClick={!ghost && isMobile ? () => onCardClick(task) : undefined}
       onMouseEnter={()=>setHovered(true)}
       onMouseLeave={()=>setHovered(false)}
       style={{
@@ -555,8 +562,9 @@ function TaskCard({ task, ghost=false }: { task:Task; ghost?:boolean }) {
         boxShadow: ghost ? "none" : hovered ? "0 6px 20px rgba(0,0,0,0.45)" : "0 1px 3px rgba(0,0,0,0.3)",
         border: ghost ? "1.5px dashed rgba(124,90,194,0.5)" : "none",
         opacity: ghost ? 1 : 1,
-        cursor: ghost ? "default" : "grab",
+        cursor: ghost ? "default" : isMobile ? "pointer" : "grab",
         userSelect: "none",
+        WebkitTapHighlightColor: "transparent",
         transform: dropped ? "scale(1)" : undefined,
         animation: dropped ? "cardDrop 0.35s cubic-bezier(0.34,1.56,0.64,1)" : undefined,
         transition: ghost ? "none" : "box-shadow 0.15s, transform 0.15s",
@@ -576,14 +584,85 @@ function TaskCard({ task, ghost=false }: { task:Task; ghost?:boolean }) {
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0, marginTop:1 }}>
                 {task.date && <span style={{ fontSize:10, color:"#555", whiteSpace:"nowrap" }}>{task.date}</span>}
-                <div style={{ display:"flex", gap:2 }}>
+                <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                  {isMobile && columns && columns.length > 1 && (
+                    <div style={{ position: "relative" }}>
+                      <button
+                        onMouseDown={e=>e.stopPropagation()}
+                        onClick={e => {
+                          e.stopPropagation();
+                          setShowMoveMenu(!showMoveMenu);
+                        }}
+                        style={{
+                          background: "rgba(255,255,255,0.08)",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          padding: "2px 6px",
+                          display: "flex",
+                          alignItems: "center",
+                          color: "#d4d4d8",
+                          fontSize: 10,
+                          fontWeight: 500
+                        }}
+                        title="Mover de etapa"
+                      >
+                        Mover
+                      </button>
+                      {showMoveMenu && (
+                        <>
+                          <div
+                            style={{ position: "fixed", inset: 0, zIndex: 100 }}
+                            onClick={(e) => { e.stopPropagation(); setShowMoveMenu(false); }}
+                          />
+                          <div style={{
+                            position: "absolute",
+                            top: "calc(100% + 4px)",
+                            right: 0,
+                            background: "#1e1e24",
+                            border: "1px solid rgba(255,255,255,0.14)",
+                            borderRadius: 8,
+                            padding: 4,
+                            zIndex: 101,
+                            minWidth: 150,
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.75)"
+                          }}>
+                            {columns.map(c => (
+                              <button
+                                key={c.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowMoveMenu(false);
+                                  onMoveTaskDirect?.(task.id, c.id);
+                                }}
+                                style={{
+                                  display: "block",
+                                  width: "100%",
+                                  textAlign: "left",
+                                  padding: "7px 9px",
+                                  borderRadius: 5,
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#f4f4f5",
+                                  fontSize: 12,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                {c.title}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                   <button
                     onMouseDown={e=>e.stopPropagation()}
                     onClick={e=>{ e.stopPropagation(); onCardClick(task); }}
                     style={{ background:"transparent", border:"none", cursor:"pointer", padding:2 }}
                     title="Abrir Tarefa"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: hovered ? 0.7 : 0.2, transition:"opacity 0.15s", color:"#888" }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: isMobile ? 0.75 : hovered ? 0.7 : 0.2, transition:"opacity 0.15s", color:"#888" }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                   </button>
                   <button
                     onMouseDown={e=>e.stopPropagation()}
@@ -591,7 +670,7 @@ function TaskCard({ task, ghost=false }: { task:Task; ghost?:boolean }) {
                     style={{ background:"transparent", border:"none", cursor:"pointer", padding:2 }}
                     title="Excluir Tarefa"
                   >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ opacity: hovered ? 0.7 : 0.2, transition:"opacity 0.15s" }}>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ opacity: isMobile ? 0.75 : hovered ? 0.7 : 0.2, transition:"opacity 0.15s" }}>
                       <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4M6 7v5M10 7v5M3 4l.9 9a1.5 1.5 0 001.5 1.35h5.2A1.5 1.5 0 0012.1 13L13 4" stroke="#ef4444" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </button>
@@ -797,7 +876,7 @@ export function RenameColumnModal({ colTitle, onConfirm, onClose }: { colTitle: 
 
 function BoardColumn({ col, onTaskCreated }: { col: Column; onTaskCreated?: (task: Task, colId: string) => void }) {
   const { drag, colRefs, loadBoard } = useContext(DragContext);
-  const { activeProject } = useContext(AppContext);
+  const { activeProject, isMobile } = useContext(AppContext);
   const { token } = useAuth();
   const colRef = useRef<HTMLDivElement>(null);
   const [showRename, setShowRename] = useState(false);
@@ -898,7 +977,19 @@ function BoardColumn({ col, onTaskCreated }: { col: Column; onTaskCreated?: (tas
       <div
         ref={colRef}
         data-colid={col.id}
-        style={{ minWidth:220, width:220, display:"flex", flexDirection:"column", gap:10, flexShrink:0, transition:"background 0.2s", borderRadius:10, padding:isTarget ? "6px" : "0", background: isTarget ? "rgba(124,90,194,0.04)" : "transparent" }}
+        style={{
+          minWidth: isMobile ? "calc(100vw - 32px)" : 220,
+          width: isMobile ? "calc(100vw - 32px)" : 220,
+          maxWidth: isMobile ? "100%" : 220,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          flexShrink: 0,
+          transition: "background 0.2s",
+          borderRadius: 10,
+          padding: isTarget ? "6px" : "0",
+          background: isTarget ? "rgba(124,90,194,0.04)" : "transparent"
+        }}
       >
         <div style={{ display:"flex", alignItems:"center", gap:6, padding: isTarget ? "0 2px 6px" : "0 2px 6px", paddingTop: isTarget ? 2 : 0 }}>
           <span style={{ fontSize:13, fontWeight:600, color:"#d0d0d4" }}>{col.title}</span>
@@ -991,9 +1082,10 @@ function moveTask(columns: Column[], taskId: string, srcColId: string, tgtColId:
 // ─── Board ────────────────────────────────────────────────────────────────────
 
 function Board() {
-  const { activeProject } = useContext(AppContext);
+  const { activeProject, isMobile } = useContext(AppContext);
   const { token } = useAuth();
   const [columns, setColumns] = useState<Column[]>([]);
+  const [selectedMobileColId, setSelectedMobileColId] = useState<string>("all");
   const [loadingBoard, setLoadingBoard] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -1005,6 +1097,26 @@ function Board() {
   const dragRef = useRef<DragState | null>(null);
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
+
+  const onMoveTaskDirect = useCallback(async (taskId: string, targetColId: string) => {
+    const srcCol = columnsRef.current.find(c => c.tasks.some(t => t.id === taskId));
+    if (!srcCol || srcCol.id === targetColId) return;
+    const targetCol = columnsRef.current.find(c => c.id === targetColId);
+    const targetIdx = targetCol ? targetCol.tasks.length : 0;
+    const newCols = moveTask(columnsRef.current, taskId, srcCol.id, targetColId, targetIdx);
+    setColumns(newCols);
+    if (activeProject) {
+      try {
+        await fetch(`${API}/api/projects/${activeProject.id}/tasks/${taskId}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ targetColumnId: targetColId, targetIndex: targetIdx })
+        });
+      } catch (e) {
+        console.error("Erro ao mover task:", e);
+      }
+    }
+  }, [activeProject, token]);
 
   const loadBoard = async () => {
     if (!activeProject) return;
@@ -1219,21 +1331,86 @@ function Board() {
   const dragTask = drag ? allTasks.find(t=>t.id===drag.taskId) ?? findTask(drag.taskId) : null;
 
   return (
-    <DragContext.Provider value={{ drag, startDrag, colRefs, cardRefs, justDropped, onCardClick, onDeleteClick, loadBoard }}>
-      <div
-        style={{ flex:1, overflowX:"auto", overflowY:"auto", padding:"18px 20px", display:"flex", gap:16, alignItems:"flex-start", background:"#111111", position:"relative" }}
-        onMouseLeave={()=>{}}
-      >
-        {showLoader ? (
-          <div style={{ flex: 1, display: "flex", minHeight: 300 }}>
-            <Loader isReady={!loadingBoard} onFinish={() => setShowLoader(false)} />
+    <DragContext.Provider value={{ drag, startDrag, colRefs, cardRefs, justDropped, onCardClick, onDeleteClick, loadBoard, columns, onMoveTaskDirect }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", position: "relative" }}>
+        {isMobile && columns.length > 0 && (
+          <div style={{
+            display: "flex",
+            gap: 6,
+            padding: "10px 14px 6px",
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "none",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            background: "#16161a",
+            flexShrink: 0
+          }}>
+            <button
+              onClick={() => setSelectedMobileColId("all")}
+              style={{
+                padding: "5px 12px",
+                borderRadius: 20,
+                border: selectedMobileColId === "all" ? "1px solid #7C5AC2" : "1px solid rgba(255,255,255,0.1)",
+                background: selectedMobileColId === "all" ? "rgba(124,90,194,0.22)" : "rgba(255,255,255,0.04)",
+                color: selectedMobileColId === "all" ? "#f4f4f5" : "#a1a1aa",
+                fontSize: 12,
+                fontWeight: selectedMobileColId === "all" ? 600 : 400,
+                cursor: "pointer",
+                whiteSpace: "nowrap"
+              }}
+            >
+              Todas ({columns.reduce((acc, c) => acc + c.tasks.length, 0)})
+            </button>
+            {columns.map(col => (
+              <button
+                key={col.id}
+                onClick={() => setSelectedMobileColId(col.id)}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 20,
+                  border: selectedMobileColId === col.id ? "1px solid #7C5AC2" : "1px solid rgba(255,255,255,0.1)",
+                  background: selectedMobileColId === col.id ? "rgba(124,90,194,0.22)" : "rgba(255,255,255,0.04)",
+                  color: selectedMobileColId === col.id ? "#f4f4f5" : "#a1a1aa",
+                  fontSize: 12,
+                  fontWeight: selectedMobileColId === col.id ? 600 : 400,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {col.title} ({col.tasks.length})
+              </button>
+            ))}
           </div>
-        ) : columns.length === 0 ? (
-          <div style={{ color: "#888", fontSize: 14, margin: "auto" }}>Nenhuma etapa neste projeto.</div>
-        ) : (
-          columns.map(col=><BoardColumn key={col.id} col={col} onTaskCreated={handleTaskCreated} />)
         )}
-        {drag?.active && dragTask && <FloatingCard drag={drag} task={dragTask}/>}
+        <div
+          style={{
+            flex: 1,
+            overflowX: isMobile && selectedMobileColId !== "all" ? "hidden" : "auto",
+            overflowY: "auto",
+            padding: isMobile ? "14px 16px" : "18px 20px",
+            display: "flex",
+            gap: 16,
+            alignItems: "flex-start",
+            background: "#111111",
+            position: "relative",
+            WebkitOverflowScrolling: "touch"
+          }}
+          onMouseLeave={()=>{}}
+        >
+          {showLoader ? (
+            <div style={{ flex: 1, display: "flex", minHeight: 300 }}>
+              <Loader isReady={!loadingBoard} onFinish={() => setShowLoader(false)} />
+            </div>
+          ) : columns.length === 0 ? (
+            <div style={{ color: "#888", fontSize: 14, margin: "auto" }}>Nenhuma etapa neste projeto.</div>
+          ) : (
+            (isMobile && selectedMobileColId !== "all"
+              ? columns.filter(c => c.id === selectedMobileColId)
+              : columns
+            ).map(col => <BoardColumn key={col.id} col={col} onTaskCreated={handleTaskCreated} />)
+          )}
+          {drag?.active && dragTask && <FloatingCard drag={drag} task={dragTask}/>}
+        </div>
       </div>
       {selectedTask && (
         <TaskModal
@@ -2287,14 +2464,16 @@ export function TeltechLedger() {
     }}>
       <style>{STYLES}</style>
       <div style={{ 
-        width:"100vw", 
-        height:"100vh", 
-        display:"flex", 
-        background:"#111111", 
-        fontFamily:"'Inter','SF Pro Display',-apple-system,'Segoe UI',sans-serif", 
-        overflow:"hidden", 
-        color:"#e0e0e0", 
-        fontSize:13 
+        width: "100%", 
+        maxWidth: "100vw", 
+        height: "100dvh", 
+        maxHeight: "100dvh", 
+        display: "flex", 
+        background: "#111111", 
+        fontFamily: "'Inter','SF Pro Display',-apple-system,'Segoe UI',sans-serif", 
+        overflow: "hidden", 
+        color: "#e0e0e0", 
+        fontSize: 13 
       }}>
         {!isMobile && <Sidebar/>}
         <div style={{ 

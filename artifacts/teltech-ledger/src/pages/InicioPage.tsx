@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useContext } from "react";
+import { useLocation } from "wouter";
 import { API } from "../lib/api";
 import { 
   CalendarCheck, 
@@ -27,7 +28,8 @@ interface DashboardData {
 }
 
 export function InicioPage() {
-  const { setSidebarModule } = useContext(AppContext);
+  const [, navigate] = useLocation();
+  const { setSidebarModule, projects } = useContext(AppContext);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -152,7 +154,13 @@ export function InicioPage() {
           </button>
           
           <button 
-            onClick={() => setSidebarModule("Projetos")}
+            onClick={() => {
+              if (projects && projects.length > 0) {
+                navigate(`/projetos/${projects[0].id}/quadros`);
+              } else {
+                navigate("/projetos");
+              }
+            }}
             style={{
             display: "flex",
             alignItems: "center",
@@ -174,7 +182,7 @@ export function InicioPage() {
           </button>
 
           <button 
-            onClick={() => setSidebarModule("Minhas Tarefas")}
+            onClick={() => navigate("/minhas-tarefas")}
             style={{
             display: "flex",
             alignItems: "center",

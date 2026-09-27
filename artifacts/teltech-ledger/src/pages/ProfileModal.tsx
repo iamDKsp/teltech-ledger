@@ -1,10 +1,12 @@
 import React, { useState, useRef } from "react";
 import { useAuth } from "../lib/auth-context";
+import { useIsMobile } from "../hooks/use-mobile";
 import { API_BASE } from "../lib/api";
 import { Camera } from "lucide-react";
 
 export function ProfileModal({ onClose }: { onClose: () => void }) {
   const { user, token } = useAuth();
+  const isMobile = useIsMobile();
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -110,8 +112,8 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ width: 400, background: "rgba(25,25,28,0.95)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ width: isMobile ? "100vw" : 400, maxWidth: "100vw", maxHeight: isMobile ? "92dvh" : "85vh", overflowY: "auto", background: "rgba(25,25,28,0.98)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: isMobile ? "16px 16px 0 0" : 12, padding: isMobile ? "20px 16px" : 24, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
         <h2 style={{ margin: "0 0 20px 0", fontSize: 18, color: "#fff", textAlign: "center" }}>Editar Perfil</h2>
         
         {/* Avatar Upload Section */}
@@ -142,22 +144,22 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
           <div>
             <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Nome</label>
             <input value={name} onChange={e => setName(e.target.value)} required
-              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "10px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box", fontSize: isMobile ? 16 : 13 }} />
           </div>
           <div>
             <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>E-mail</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "10px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box", fontSize: isMobile ? 16 : 13 }} />
           </div>
           <div>
             <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Senha Atual (necessária para alterar a senha)</label>
             <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Digite sua senha atual"
-              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "10px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box", fontSize: isMobile ? 16 : 13 }} />
           </div>
           <div>
             <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Nova Senha</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Deixe em branco para não alterar"
-              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "10px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box", fontSize: isMobile ? 16 : 13 }} />
           </div>
 
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 10 }}>
