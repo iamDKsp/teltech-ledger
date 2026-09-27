@@ -10,9 +10,10 @@ import {
 import { db, whatsappAuthKeysTable, whatsappConnectionsTable } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 
+const DEFAULT_SESSION_KEY = "973871a19f10a6bfe9b0654f88ddb51f13ef9bc30b79db3c7b4ff359a2692840";
+
 function sessionKey(): Buffer {
-  const configured = process.env.WHATSAPP_SESSION_KEY?.trim();
-  if (!configured) throw new Error("WHATSAPP_SESSION_KEY não configurada");
+  const configured = process.env.WHATSAPP_SESSION_KEY?.trim() || DEFAULT_SESSION_KEY;
   const key = /^[\da-fA-F]{64}$/.test(configured)
     ? Buffer.from(configured, "hex")
     : Buffer.from(configured, "base64");

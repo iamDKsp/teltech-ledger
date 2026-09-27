@@ -9,6 +9,7 @@ import {
   disconnectWhatsApp,
   getWhatsAppStatus,
   normalizeWhatsAppPhone,
+  normalizeWhatsAppPhoneList,
 } from "../services/whatsapp-session";
 import { logger } from "../lib/logger";
 
@@ -23,7 +24,7 @@ const settingsInput = z.object({
   daysAfterDue: z.number().int().min(0).max(30).optional(),
   dailySendHour: z.number().int().min(0).max(23).optional(),
   pixKey: z.string().trim().max(200).nullable().optional(),
-  internalAlertPhone: z.string().trim().max(40).nullable().optional(),
+  internalAlertPhone: z.string().trim().max(500).nullable().optional(),
   withdrawalAlertsEnabled: z.boolean().optional(),
 }).strict();
 
@@ -114,7 +115,7 @@ router.put("/settings", async (req, res) => {
       ...current,
       ...parsed.data,
       pixKey: (parsed.data.pixKey !== undefined ? parsed.data.pixKey : current.pixKey)?.trim() || null,
-      internalAlertPhone: normalizeWhatsAppPhone(
+      internalAlertPhone: normalizeWhatsAppPhoneList(
         parsed.data.internalAlertPhone !== undefined ? parsed.data.internalAlertPhone : current.internalAlertPhone,
       ),
     };
@@ -123,7 +124,7 @@ router.put("/settings", async (req, res) => {
       return;
     }
     if (next.withdrawalAlertsEnabled && !next.internalAlertPhone) {
-      res.status(400).json({ error: "Cadastre um WhatsApp interno válido para receber alertas" });
+      res.status(400).json({ error: "Cadastre pelo menos um WhatsApp interno válido para receber alertas" });
       return;
     }
     const [saved] = await db.insert(whatsappSettingsTable)

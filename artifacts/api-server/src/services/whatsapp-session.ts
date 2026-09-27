@@ -41,6 +41,15 @@ export function normalizeWhatsAppPhone(raw: string | null | undefined): string |
   return digits;
 }
 
+/** Parses and normalizes a list of phone numbers separated by comma, semicolon, space or line break */
+export function normalizeWhatsAppPhoneList(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const parts = raw.split(/[,;\n\r\t]+/).map(p => p.trim()).filter(Boolean);
+  const normalized = parts.map(p => normalizeWhatsAppPhone(p)).filter((p): p is string => Boolean(p));
+  const unique = Array.from(new Set(normalized));
+  return unique.length > 0 ? unique.join(", ") : null;
+}
+
 function isStopMessage(text: string): boolean {
   const command = text.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[.!?]+$/g, "").toUpperCase();

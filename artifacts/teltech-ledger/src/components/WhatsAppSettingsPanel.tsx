@@ -514,6 +514,9 @@ export function WhatsAppSettingsPanel() {
                 }))
               }
             />
+            <span className="mt-1 block text-[11px] font-normal text-muted-foreground">
+              Hora de envio diário (0h a 23h). Ex: 10 = 10:00 da manhã.
+            </span>
           </label>
         </div>
         <label className="flex cursor-pointer items-center gap-3 text-sm text-foreground">
@@ -580,11 +583,10 @@ export function WhatsAppSettingsPanel() {
             Avisar retiradas de pró-labore e sócios
           </label>
           <label className="mt-4 block text-xs font-semibold text-muted-foreground">
-            WhatsApp interno para avisos
+            WhatsApp interno para avisos (múltiplos números permitidos)
             <input
               className={fieldClass}
-              type="tel"
-              inputMode="tel"
+              type="text"
               value={settings.internalAlertPhone}
               onChange={(event) =>
                 setSettings((current) => ({
@@ -592,8 +594,11 @@ export function WhatsAppSettingsPanel() {
                   internalAlertPhone: event.target.value,
                 }))
               }
-              placeholder="55 11 99999-9999"
+              placeholder="Ex: 14998364338, 11999998888 (separe por vírgula)"
             />
+            <span className="mt-1 block text-[11px] font-normal text-muted-foreground">
+              Você pode cadastrar mais de um número (ex: todos os sócios e financeiro) separando por vírgula. Todos receberão o aviso simultaneamente.
+            </span>
           </label>
         </div>
         <div className="flex justify-end">

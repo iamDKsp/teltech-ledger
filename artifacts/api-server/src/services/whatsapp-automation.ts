@@ -187,9 +187,12 @@ export async function enqueueWithdrawalAlert(
   if (transaction.type !== "outflow" || transaction.costType !== "partner_withdrawal" || transaction.status !== "paid") return;
   const [settings] = await tx.select().from(whatsappSettingsTable)
     .where(eq(whatsappSettingsTable.workspaceId, workspaceId)).limit(1);
-  if (!settings?.withdrawalAlertsEnabled) return;
-  const recipient = normalizeWhatsAppPhone(settings.internalAlertPhone);
-  if (!recipient) return;
+  if (!settings?.withdrawalAlertsEnabled || !settings.internalAlertPhone) return;
+
+  const rawList = settings.internalAlertPhone.split(/[,;\n\r\t]+/).map((p: string) => p.trim()).filter(Boolean);
+  const recipients = Array.from(new Set(rawList.map((p: string) => normalizeWhatsAppPhone(p)).filter((p: string | null): p is string => Boolean(p))));
+  if (!recipients.length) return;
+
   const [partner] = transaction.partnerId
     ? await tx.select({ name: usersTable.name }).from(usersTable).where(eq(usersTable.id, transaction.partnerId)).limit(1)
     : [];
@@ -205,16 +208,23 @@ export async function enqueueWithdrawalAlert(
       .where(and(eq(workspaceMembersTable.workspaceId, workspaceId), eq(workspaceMembersTable.userId, actorUserId)))
       .limit(1)
     : [];
-  await tx.insert(whatsappMessagesTable).values({
-    workspaceId,
-    transactionId: transaction.id,
-    clientId: null,
-    dedupeKey: `${workspaceId}:withdrawal:${transaction.id}:paid`,
-    kind: "withdrawal_alert",
-    recipient,
-    body: [withdrawalBody(transaction, partner?.name ?? null, account ?? null),
-      actor ? `Registrado por: ${actor.name}` : null].filter(Boolean).join("\n"),
-  }).onConflictDoNothing();
+
+  const body = [
+    withdrawalBody(transaction, partner?.name ?? null, account ?? null),
+    actor ? `Registrado por: ${actor.name}` : null,
+  ].filter(Boolean).join("\n");
+
+  for (const recipient of recipients) {
+    await tx.insert(whatsappMessagesTable).values({
+      workspaceId,
+      transactionId: transaction.id,
+      clientId: null,
+      dedupeKey: `${workspaceId}:withdrawal:${transaction.id}:${recipient}:paid`,
+      kind: "withdrawal_alert",
+      recipient,
+      body,
+    }).onConflictDoNothing();
+  }
 }
 
 export async function enqueuePaymentReceipt(
