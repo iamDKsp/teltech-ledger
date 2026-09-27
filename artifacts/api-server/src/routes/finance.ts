@@ -16,7 +16,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
-import { enqueueWithdrawalAlert } from "../services/whatsapp-automation";
+import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
 import { normalizeWhatsAppPhone } from "../services/whatsapp-session";
 import { randomUUID } from "node:crypto";
 
@@ -656,6 +656,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       costType, notes, status, paymentMethod, paidAt, receiptUrl,
       isReimbursement, isRecurring, recurringInterval,
       installmentsTotal, isInstallmentBatch,
+      pauseBilling,
     } = req.body;
 
     if (!type || !description || !amount || !dueDate) {
@@ -716,6 +717,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
               installmentNumber: i,
               installmentsTotal: n,
               installmentGroupId: groupId,
+              pauseBilling: pauseBilling === true,
             })
             .returning();
 
@@ -729,6 +731,9 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
           await logAudit(tx, workspaceId, txRecord.id, userInfo?.userId ?? null, "created", { batch: true, installment: i, total: n });
           if (txRecord.type === "outflow" && txRecord.costType === "partner_withdrawal" && txRecord.status === "paid") {
             await enqueueWithdrawalAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null);
+          }
+          if (txRecord.type === "inflow" && txRecord.status === "paid" && txRecord.clientId) {
+            await enqueuePaymentReceipt(tx, workspaceId, txRecord);
           }
         }
         return list;
@@ -771,6 +776,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
           recurringInterval: recurringInterval || null,
           installmentNumber: req.body.installmentNumber ? parseInt(req.body.installmentNumber) : null,
           installmentsTotal: req.body.installmentsTotal ? parseInt(req.body.installmentsTotal) : null,
+          pauseBilling: pauseBilling === true,
         })
         .returning();
 
@@ -782,6 +788,9 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       await logAudit(tx, workspaceId, record.id, userInfo?.userId ?? null, "created", record);
       if (record.type === "outflow" && record.costType === "partner_withdrawal" && record.status === "paid") {
         await enqueueWithdrawalAlert(tx, workspaceId, record, userInfo?.userId ?? null);
+      }
+      if (record.type === "inflow" && record.status === "paid" && record.clientId) {
+        await enqueuePaymentReceipt(tx, workspaceId, record);
       }
       return record;
     });
@@ -814,6 +823,7 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
       costType, notes, status, paymentMethod, paidAt, receiptUrl,
       isReimbursement, reimbursementStatus,
       isRecurring, recurringInterval, installmentNumber, installmentsTotal,
+      pauseBilling,
     } = req.body;
 
     // Security: approvalStatus CANNOT be modified directly via PUT /transactions/:id
@@ -848,6 +858,7 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
     if (recurringInterval !== undefined) updateData.recurringInterval = recurringInterval;
     if (installmentNumber !== undefined) updateData.installmentNumber = installmentNumber;
     if (installmentsTotal !== undefined) updateData.installmentsTotal = installmentsTotal;
+    if (pauseBilling !== undefined) updateData.pauseBilling = Boolean(pauseBilling);
 
     const updated = await db.transaction(async (tx) => {
       const [transaction] = await tx
@@ -894,6 +905,10 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
       if (existing.status !== "paid" && transaction.status === "paid"
           && transaction.type === "outflow" && transaction.costType === "partner_withdrawal") {
         await enqueueWithdrawalAlert(tx, workspaceId, transaction, userInfo?.userId ?? null);
+      }
+      if (existing.status !== "paid" && transaction.status === "paid"
+          && transaction.type === "inflow" && transaction.clientId) {
+        await enqueuePaymentReceipt(tx, workspaceId, transaction);
       }
 
       return transaction;

@@ -524,6 +524,7 @@ export const financialTransactionsTable = pgTable("financial_transactions", {
   installmentNumber: integer("installment_number"),  // Ex: 2 (de 5)
   installmentsTotal: integer("installments_total"),  // Ex: 5
   installmentGroupId: text("installment_group_id"),
+  pauseBilling: boolean("pause_billing").notNull().default(false), // Pausa envio automático de cobrança via WhatsApp
 
   // Relations (all optional — allows standalone transactions)
   categoryId: uuid("category_id").references(() => financialCategoriesTable.id, { onDelete: "set null" }),

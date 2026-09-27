@@ -18,6 +18,7 @@ import {
   sendWhatsAppText,
   stopWhatsAppSessions,
 } from "./whatsapp-session";
+import { generatePixPayload } from "../lib/pix";
 
 const TIMEZONE = "America/Sao_Paulo";
 const MAX_DAILY_MESSAGES_PER_WORKSPACE = 100;
@@ -32,7 +33,7 @@ const clock = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
 });
 
-export type BillingKind = "billing_before" | "billing_due" | "billing_overdue" | "manual_billing";
+export type BillingKind = "billing_before" | "billing_due" | "billing_overdue" | "manual_billing" | "payment_receipt";
 
 function saoPauloNow(now = new Date()): { date: string; hour: number } {
   const parts = Object.fromEntries(clock.formatToParts(now).map((part) => [part.type, part.value]));
@@ -77,9 +78,35 @@ function billingBody(
     `Valor: ${formatter.format(transaction.amount / 100)}`,
     `Vencimento: ${readableDate(date)}`,
   ];
-  if (pixKey?.trim()) lines.push(`Chave Pix para pagamento: ${pixKey.trim()}`);
-  lines.push("Se já pagou, desconsidere esta mensagem. Para não receber avisos, responda PARAR.");
+  if (pixKey?.trim()) {
+    lines.push(`Chave Pix: ${pixKey.trim()}`);
+    const pixPayload = generatePixPayload({
+      pixKey: pixKey.trim(),
+      amountCents: transaction.amount,
+      txId: transaction.id.replace(/-/g, "").slice(0, 20),
+    });
+    if (pixPayload) {
+      lines.push("", "*Pix Copia e Cola:*", pixPayload);
+    }
+  }
+  lines.push("", "Se já efetuou o pagamento, favor desconsiderar este lembrete.");
   return lines.join("\n");
+}
+
+function receiptBody(
+  transaction: FinancialTransaction,
+  client: Pick<Client, "name">,
+): string {
+  const paidDate = readableDate(saoPauloNow(transaction.paidAt ?? new Date()).date);
+  return [
+    `Olá, ${client.name}!`,
+    "Confirmamos com sucesso o recebimento do seu pagamento:",
+    `${describeInstallment(transaction)}`,
+    `Valor: ${formatter.format(transaction.amount / 100)}`,
+    `Data do recebimento: ${paidDate}`,
+    "",
+    "Agradecemos pela pontualidade e pela parceria com a Teltech! 🤝",
+  ].join("\n");
 }
 
 function withdrawalBody(
@@ -190,6 +217,31 @@ export async function enqueueWithdrawalAlert(
   }).onConflictDoNothing();
 }
 
+export async function enqueuePaymentReceipt(
+  tx: any,
+  workspaceId: string,
+  transaction: FinancialTransaction,
+): Promise<void> {
+  if (transaction.type !== "inflow" || transaction.status !== "paid" || !transaction.clientId) return;
+  const [client] = await tx.select().from(clientsTable)
+    .where(and(eq(clientsTable.id, transaction.clientId), eq(clientsTable.workspaceId, workspaceId)))
+    .limit(1);
+  if (!client || client.status !== "active" || !client.whatsappOptIn) return;
+  const recipient = normalizeWhatsAppPhone(client.phone);
+  if (!recipient) return;
+
+  const dedupeKey = `${workspaceId}:receipt:${transaction.id}`;
+  await tx.insert(whatsappMessagesTable).values({
+    workspaceId,
+    transactionId: transaction.id,
+    clientId: client.id,
+    dedupeKey,
+    kind: "payment_receipt",
+    recipient,
+    body: receiptBody(transaction, client),
+  }).onConflictDoNothing();
+}
+
 async function enqueueDailyBilling(): Promise<void> {
   const { date: today, hour } = saoPauloNow();
   const settingsRows = await db.select().from(whatsappSettingsTable)
@@ -207,6 +259,7 @@ async function enqueueDailyBilling(): Promise<void> {
         eq(financialTransactionsTable.workspaceId, settings.workspaceId),
         eq(financialTransactionsTable.type, "inflow"),
         eq(financialTransactionsTable.status, "pending"),
+        eq(financialTransactionsTable.pauseBilling, false),
         gte(financialTransactionsTable.dueDate, earliestDue),
         lte(financialTransactionsTable.dueDate, latestDue),
         eq(clientsTable.workspaceId, settings.workspaceId),

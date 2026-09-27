@@ -87,6 +87,7 @@ interface Transaction {
   recurringInterval?: string;
   installmentNumber?: number;
   installmentsTotal?: number;
+  pauseBilling?: boolean;
   createdAt: string;
 }
 
@@ -752,6 +753,11 @@ export function FinanceiroPage() {
     if (selectedClient.status === "inactive") {
       toast.error("Este cliente está inativo. Revise a ficha antes de cobrar.");
       return;
+    }
+    if (selectedTx.pauseBilling) {
+      if (!confirm("Esta parcela está marcada como 'Cobrança Pausada'. Deseja realmente enviar a cobrança via WhatsApp?")) {
+        return;
+      }
     }
     if (sendingBillingId) return;
     setSendingBillingId(selectedTx.id);
@@ -3292,6 +3298,7 @@ function TransactionModal({
   const [installmentsCount, setInstallmentsCount] = useState(2);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringInterval, setRecurringInterval] = useState("monthly");
+  const [pauseBilling, setPauseBilling] = useState(tx?.pauseBilling === true);
 
   const [saving, setSaving] = useState(false);
 
@@ -3318,6 +3325,7 @@ function TransactionModal({
         costType: type === "outflow" ? costType : null,
         status,
         notes: notes.trim() || null,
+        pauseBilling,
       };
 
       if (!tx && isInstallment && installmentsCount > 1) {
@@ -3539,6 +3547,23 @@ function TransactionModal({
                   </select>
                 </div>
               )}
+            </div>
+          )}
+
+          {type === "inflow" && (
+            <div style={{ background: "hsl(240 3% 7% / 0.55)", border: "1px solid hsl(240 4% 20%)", borderRadius: 8, padding: "12px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={pauseBilling}
+                  onChange={(e) => setPauseBilling(e.target.checked)}
+                  style={{ accentColor: "hsl(265 85% 62%)" }}
+                />
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#fafafa" }}>Pausar régua de cobrança automática no WhatsApp</span>
+              </label>
+              <span style={{ fontSize: 11, color: "#888", marginLeft: 24 }}>
+                Ative para parcelas com renegociação ou quando um acordo prévio foi feito com o cliente.
+              </span>
             </div>
           )}
 
