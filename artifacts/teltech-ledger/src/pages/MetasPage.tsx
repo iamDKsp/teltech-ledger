@@ -27,8 +27,8 @@ export const MetasPage: React.FC = () => {
 
   const fetchGoals = async () => {
     try {
-      const { data } = await API.get('/api/goals');
-      setGoals(data);
+      const response = await API.get('/api/goals');
+      setGoals(Array.isArray(response) ? response : []);
     } catch (err) {
       console.error(err);
     } finally {

@@ -40,8 +40,8 @@ export const PainelPage: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const { data } = await API.get('/api/workspace/stats');
-      setStats(data);
+      const response = await API.get('/api/workspace/stats');
+      setStats(response);
     } catch (err) {
       console.error(err);
     } finally {
@@ -53,7 +53,12 @@ export const PainelPage: React.FC = () => {
     return <div style={{ padding: '40px', textAlign: 'center', color: '#a1a1aa' }}>Carregando painel...</div>;
   }
 
-  const { tasksOverview, tasksByMember, projectsSummary, weeklyTrend } = stats;
+  const {
+    tasksOverview,
+    tasksByMember = [],
+    projectsSummary = [],
+    weeklyTrend = [],
+  } = stats;
 
   const maxCompletions = Math.max(...weeklyTrend.map(d => d.completions), 10);
 

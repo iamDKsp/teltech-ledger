@@ -35,7 +35,7 @@ export function InicioPage() {
     async function loadData() {
       try {
         const response = await API.get("/dashboard");
-        setData(response.data);
+        setData(response);
       } catch (error) {
         console.error("Failed to load dashboard data", error);
       } finally {
