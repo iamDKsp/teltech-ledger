@@ -82,7 +82,7 @@ const btnSecondary: React.CSSProperties = { padding: "10px 20px", borderRadius: 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function MembersPage() {
-  const { token } = useAuth();
+  const { user, token } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLoader, setShowLoader] = useState(true);
@@ -98,6 +98,7 @@ export function MembersPage() {
   const [formPassword, setFormPassword] = useState("");
   const [formRole, setFormRole] = useState("ceo");
   const [formMustChange, setFormMustChange] = useState(false);
+  const [formCurrentPassword, setFormCurrentPassword] = useState("");
   const [formLoading, setFormLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -121,7 +122,7 @@ export function MembersPage() {
   );
 
   const openCreate = () => {
-    setFormName(""); setFormEmail(""); setFormPhone(""); setFormPassword(""); setFormRole("ceo"); setFormMustChange(false); setError(null);
+    setFormName(""); setFormEmail(""); setFormPhone(""); setFormPassword(""); setFormCurrentPassword(""); setFormRole("ceo"); setFormMustChange(false); setError(null);
     setModal("create");
   };
 
@@ -130,10 +131,10 @@ export function MembersPage() {
     setModal("edit");
   };
 
-  const openPassword = (m: Member) => { setSelected(m); setFormPassword(""); setError(null); setModal("password"); };
+  const openPassword = (m: Member) => { setSelected(m); setFormCurrentPassword(""); setFormPassword(""); setError(null); setModal("password"); };
   const openAvatar = (m: Member) => { setSelected(m); setError(null); setModal("avatar"); };
   const openDelete = (m: Member) => { setSelected(m); setError(null); setModal("delete"); };
-  const closeModal = () => { setModal(null); setSelected(null); setError(null); };
+  const closeModal = () => { setModal(null); setSelected(null); setError(null); setFormCurrentPassword(""); setFormPassword(""); };
 
   const handleCreate = async () => {
     setFormLoading(true); setError(null);
@@ -164,11 +165,21 @@ export function MembersPage() {
     if (!selected) return;
     setFormLoading(true); setError(null);
     try {
+      const isSelf = user?.id === selected.id;
+      if (isSelf && !formCurrentPassword) {
+        throw new Error("Senha atual é obrigatória para alterar sua própria senha");
+      }
       const res = await fetch(`${API}/api/members/${selected.id}/password`, {
         method: "PUT", headers: headers(),
-        body: JSON.stringify({ password: formPassword }),
+        body: JSON.stringify({
+          currentPassword: isSelf ? formCurrentPassword : undefined,
+          password: formPassword,
+        }),
       });
-      if (!res.ok) throw new Error("Erro ao alterar senha");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message ?? "Erro ao alterar senha");
+      }
       await fetchMembers(); closeModal();
     } catch (e) { setError(e instanceof Error ? e.message : "Erro"); } finally { setFormLoading(false); }
   };
@@ -400,10 +411,39 @@ export function MembersPage() {
         <Modal title={`Alterar Senha — ${selected.name}`} onClose={closeModal}>
           <ErrorBox />
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div><label style={labelStyle}>Nova Senha</label><input type="password" value={formPassword} onChange={e => setFormPassword(e.target.value)} style={inputStyle} placeholder="Digite a nova senha" autoFocus /></div>
+            {user?.id === selected.id && (
+              <div>
+                <label style={labelStyle}>Senha Atual</label>
+                <input
+                  type="password"
+                  value={formCurrentPassword}
+                  onChange={e => setFormCurrentPassword(e.target.value)}
+                  style={inputStyle}
+                  placeholder="Digite sua senha atual"
+                  autoFocus
+                />
+              </div>
+            )}
+            <div>
+              <label style={labelStyle}>Nova Senha</label>
+              <input
+                type="password"
+                value={formPassword}
+                onChange={e => setFormPassword(e.target.value)}
+                style={inputStyle}
+                placeholder="Digite a nova senha (mínimo 6 caracteres)"
+                autoFocus={user?.id !== selected.id}
+              />
+            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
               <button onClick={closeModal} style={btnSecondary}>Cancelar</button>
-              <button onClick={handleChangePassword} disabled={formLoading || !formPassword} style={btnPrimary}>{formLoading ? "Alterando..." : "Alterar Senha"}</button>
+              <button
+                onClick={handleChangePassword}
+                disabled={formLoading || !formPassword || (user?.id === selected.id && !formCurrentPassword)}
+                style={btnPrimary}
+              >
+                {formLoading ? "Alterando..." : "Alterar Senha"}
+              </button>
             </div>
           </div>
         </Modal>

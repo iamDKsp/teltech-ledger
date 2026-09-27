@@ -25,23 +25,40 @@ const router: IRouter = Router();
 async function getWorkspaceId(req: Request): Promise<string | null> {
   const userId = (req as AuthenticatedRequest).user?.userId;
   if (!userId) return null;
-  const member = await db
+  const requestedWsId = req.headers["x-workspace-id"] as string | undefined;
+  if (requestedWsId) {
+    const [member] = await db
+      .select({ workspaceId: workspaceMembersTable.workspaceId })
+      .from(workspaceMembersTable)
+      .where(and(eq(workspaceMembersTable.userId, userId), eq(workspaceMembersTable.workspaceId, requestedWsId)))
+      .limit(1);
+    if (member) return member.workspaceId;
+  }
+  const [member] = await db
     .select({ workspaceId: workspaceMembersTable.workspaceId })
     .from(workspaceMembersTable)
     .where(eq(workspaceMembersTable.userId, userId))
     .limit(1);
-  return member.length > 0 ? member[0].workspaceId : null;
+  return member?.workspaceId ?? null;
 }
 
-async function getUserInfo(req: Request): Promise<{ userId: string; role: string } | null> {
+async function getUserInfo(req: Request, wsId?: string | null): Promise<{ userId: string; role: string } | null> {
   const userId = (req as AuthenticatedRequest).user?.userId;
   if (!userId) return null;
-  const member = await db
+  if (wsId) {
+    const [member] = await db
+      .select({ role: workspaceMembersTable.role })
+      .from(workspaceMembersTable)
+      .where(and(eq(workspaceMembersTable.userId, userId), eq(workspaceMembersTable.workspaceId, wsId)))
+      .limit(1);
+    if (member) return { userId, role: member.role };
+  }
+  const [member] = await db
     .select({ role: workspaceMembersTable.role })
     .from(workspaceMembersTable)
     .where(eq(workspaceMembersTable.userId, userId))
     .limit(1);
-  return { userId, role: member.length > 0 ? member[0].role : "member" };
+  return { userId, role: member?.role ?? "member" };
 }
 
 function computeStatus(tx: { status: string; dueDate: Date }): string {
@@ -50,9 +67,9 @@ function computeStatus(tx: { status: string; dueDate: Date }): string {
   return "pending";
 }
 
-async function updateAccountBalance(accountId: string, deltaCents: number) {
+async function updateAccountBalance(tx: any, accountId: string, deltaCents: number) {
   if (!accountId || deltaCents === 0) return;
-  await db
+  await tx
     .update(financialAccountsTable)
     .set({
       currentBalance: sql`${financialAccountsTable.currentBalance} + ${deltaCents}`,
@@ -62,6 +79,7 @@ async function updateAccountBalance(accountId: string, deltaCents: number) {
 }
 
 async function logAudit(
+  tx: any,
   workspaceId: string,
   transactionId: string | null,
   userId: string | null,
@@ -69,7 +87,7 @@ async function logAudit(
   details: any
 ) {
   try {
-    await db.insert(financialAuditLogsTable).values({
+    await tx.insert(financialAuditLogsTable).values({
       workspaceId,
       transactionId,
       userId,
@@ -77,7 +95,8 @@ async function logAudit(
       details: typeof details === "string" ? details : JSON.stringify(details),
     });
   } catch (err) {
-    console.error("Failed to log audit:", err);
+    console.error("Failed to log audit in transaction:", err);
+    throw err; // Ensure audit failures fail the transaction to guarantee auditability
   }
 }
 
@@ -121,8 +140,23 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     const monthOutflowPending = monthTxs.filter(t => t.type === "outflow" && t.status === "pending").reduce((s, t) => s + t.amount, 0);
     const monthBalance = monthInflow - monthOutflow;
 
-    // ── MRR: Sum of inflow due this month (not cancelled)
-    const mrr = monthTxs.filter(t => t.type === "inflow" && t.status !== "cancelled").reduce((s, t) => s + t.amount, 0);
+    // ── MRR: Sum of contracted recurring inflow due this month (not cancelled)
+    const mrr = monthTxs.filter(t => t.type === "inflow" && t.isRecurring && t.status !== "cancelled").reduce((s, t) => s + t.amount, 0);
+
+    // ── Fluxo de Caixa Realizado no Mês (agrupado por paidAt com fallback para dueDate)
+    const cashRealizedInflow = transactions.filter(t => {
+      if (t.type !== "inflow" || t.status !== "paid") return false;
+      const d = new Date(t.paidAt ?? t.dueDate);
+      return d >= startOfMonth && d <= endOfMonth;
+    }).reduce((s, t) => s + t.amount, 0);
+
+    const cashRealizedOutflow = transactions.filter(t => {
+      if (t.type !== "outflow" || t.status !== "paid") return false;
+      const d = new Date(t.paidAt ?? t.dueDate);
+      return d >= startOfMonth && d <= endOfMonth;
+    }).reduce((s, t) => s + t.amount, 0);
+
+    const cashRealizedBalance = cashRealizedInflow - cashRealizedOutflow;
 
     // ── Overdue: pending transactions with dueDate < now
     const overdueAmount = transactions
@@ -141,7 +175,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
 
     // ── Burn Rate & Runway Calculation (based on last 3 months paid outflows)
     const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    const pastOutflows = transactions.filter(t => t.type === "outflow" && t.status === "paid" && new Date(t.dueDate) >= threeMonthsAgo);
+    const pastOutflows = transactions.filter(t => t.type === "outflow" && t.status === "paid" && new Date(t.paidAt ?? t.dueDate) >= threeMonthsAgo);
     const pastTotalOutflow = pastOutflows.reduce((s, t) => s + t.amount, 0);
     const burnRate = Math.round(pastTotalOutflow / 3) || monthOutflow || 0;
     const runwayMonths = burnRate > 0 ? Number((totalCash / burnRate).toFixed(1)) : null;
@@ -279,6 +313,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
         monthInflow, monthInflowPending,
         monthOutflow, monthOutflowPending,
         monthBalance,
+        cashRealizedInflow, cashRealizedOutflow, cashRealizedBalance,
         overdueAmount, overdueCount,
         totalCash,
         emergencyReserveTarget: settings.emergencyReserveTarget,
@@ -574,7 +609,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
   try {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
-    const userInfo = await getUserInfo(req);
+    const userInfo = await getUserInfo(req, workspaceId);
 
     const {
       type, description, amount, dueDate,
@@ -598,7 +633,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
     const maxAuto = rule?.maxAutoApprovalAmount ?? 50000;
     const isExec = userInfo?.role === "ceo" || userInfo?.role === "cto" || userInfo?.role === "owner" || userInfo?.role === "admin";
 
-    // ── CASE 1: Batch Installment Generation
+    // ── CASE 1: Batch Installment Generation (ACID Transaction)
     if (isInstallmentBatch && installmentsTotal && Number(installmentsTotal) > 1) {
       const n = parseInt(installmentsTotal);
       const groupId = randomUUID();
@@ -606,101 +641,111 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       const perInstallment = Math.floor(amount / n);
       const remainder = amount - perInstallment * n;
 
-      const createdList = [];
-      for (let i = 1; i <= n; i++) {
-        const instDueDate = new Date(baseDueDate);
-        instDueDate.setMonth(instDueDate.getMonth() + (i - 1));
+      const createdList = await db.transaction(async (tx) => {
+        const list = [];
+        for (let i = 1; i <= n; i++) {
+          const instDueDate = new Date(baseDueDate);
+          instDueDate.setMonth(instDueDate.getMonth() + (i - 1));
 
-        const instAmount = i === n ? perInstallment + remainder : perInstallment;
-        const requiresApproval = type === "outflow" && instAmount > maxAuto && !isExec;
-        const approvalStatus = requiresApproval ? "pending_approval" : "approved";
+          const instAmount = i === n ? perInstallment + remainder : perInstallment;
+          const requiresApproval = type === "outflow" && instAmount > maxAuto && !isExec;
+          const approvalStatus = requiresApproval ? "pending_approval" : "approved";
+          const isFirstPaid = i === 1 && status === "paid" && !requiresApproval;
 
-        const [tx] = await db
-          .insert(financialTransactionsTable)
-          .values({
-            workspaceId,
-            type,
-            description: `${description} (${i}/${n})`,
-            amount: instAmount,
-            dueDate: instDueDate,
-            categoryId: categoryId || null,
-            clientId: clientId || null,
-            projectId: projectId || null,
-            accountId: accountId || null,
-            partnerId: partnerId || null,
-            costType: costType || "fixed_operating",
-            notes: notes || null,
-            status: i === 1 && status === "paid" ? "paid" : "pending",
-            paymentMethod: paymentMethod || null,
-            paidAt: i === 1 && status === "paid" && paidAt ? new Date(paidAt) : null,
-            receiptUrl: receiptUrl || null,
-            approvalStatus,
-            isReimbursement: isReimbursement ?? false,
-            reimbursementStatus: isReimbursement ? "pending" : null,
-            isRecurring: false,
-            installmentNumber: i,
-            installmentsTotal: n,
-            installmentGroupId: groupId,
-          })
-          .returning();
+          const [txRecord] = await tx
+            .insert(financialTransactionsTable)
+            .values({
+              workspaceId,
+              type,
+              description: `${description} (${i}/${n})`,
+              amount: instAmount,
+              dueDate: instDueDate,
+              categoryId: categoryId || null,
+              clientId: clientId || null,
+              projectId: projectId || null,
+              accountId: accountId || null,
+              partnerId: partnerId || null,
+              costType: costType || "fixed_operating",
+              notes: notes || null,
+              status: isFirstPaid ? "paid" : "pending",
+              paymentMethod: paymentMethod || null,
+              paidAt: isFirstPaid && paidAt ? new Date(paidAt) : isFirstPaid ? new Date() : null,
+              receiptUrl: receiptUrl || null,
+              approvalStatus,
+              isReimbursement: isReimbursement ?? false,
+              reimbursementStatus: isReimbursement ? "pending" : null,
+              isRecurring: false,
+              installmentNumber: i,
+              installmentsTotal: n,
+              installmentGroupId: groupId,
+            })
+            .returning();
 
-        createdList.push(tx);
-        await logAudit(workspaceId, tx.id, userInfo?.userId ?? null, "created", { batch: true, installment: i, total: n });
+          list.push(txRecord);
 
-        if (i === 1 && status === "paid" && accountId) {
-          const delta = type === "inflow" ? instAmount : -instAmount;
-          await updateAccountBalance(accountId, delta);
+          if (isFirstPaid && accountId) {
+            const delta = type === "inflow" ? instAmount : -instAmount;
+            await updateAccountBalance(tx, accountId, delta);
+          }
+
+          await logAudit(tx, workspaceId, txRecord.id, userInfo?.userId ?? null, "created", { batch: true, installment: i, total: n });
         }
-      }
+        return list;
+      });
 
       res.status(201).json({ transactions: createdList });
       return;
     }
 
-    // ── CASE 2: Single Transaction
+    // ── CASE 2: Single Transaction (ACID Transaction)
     const requiresApproval = type === "outflow" && amount > maxAuto && !isExec;
     const approvalStatus = requiresApproval ? "pending_approval" : "approved";
+    const effectiveStatus = requiresApproval ? "pending" : (status ?? "pending");
+    const isPaid = effectiveStatus === "paid";
 
-    const [transaction] = await db
-      .insert(financialTransactionsTable)
-      .values({
-        workspaceId,
-        type,
-        description,
-        amount,
-        dueDate: new Date(dueDate),
-        categoryId: categoryId || null,
-        clientId: clientId || null,
-        projectId: projectId || null,
-        accountId: accountId || null,
-        partnerId: partnerId || null,
-        costType: costType || "fixed_operating",
-        notes: notes || null,
-        status: status ?? "pending",
-        paymentMethod: paymentMethod || null,
-        paidAt: paidAt ? new Date(paidAt) : null,
-        receiptUrl: receiptUrl || null,
-        approvalStatus,
-        isReimbursement: isReimbursement ?? false,
-        reimbursementStatus: isReimbursement ? "pending" : null,
-        isRecurring: isRecurring ?? false,
-        recurringInterval: recurringInterval || null,
-        installmentNumber: req.body.installmentNumber ? parseInt(req.body.installmentNumber) : null,
-        installmentsTotal: req.body.installmentsTotal ? parseInt(req.body.installmentsTotal) : null,
-      })
-      .returning();
+    const transaction = await db.transaction(async (tx) => {
+      const [record] = await tx
+        .insert(financialTransactionsTable)
+        .values({
+          workspaceId,
+          type,
+          description,
+          amount,
+          dueDate: new Date(dueDate),
+          categoryId: categoryId || null,
+          clientId: clientId || null,
+          projectId: projectId || null,
+          accountId: accountId || null,
+          partnerId: partnerId || null,
+          costType: costType || "fixed_operating",
+          notes: notes || null,
+          status: effectiveStatus,
+          paymentMethod: paymentMethod || null,
+          paidAt: isPaid && paidAt ? new Date(paidAt) : isPaid ? new Date() : null,
+          receiptUrl: receiptUrl || null,
+          approvalStatus,
+          isReimbursement: isReimbursement ?? false,
+          reimbursementStatus: isReimbursement ? "pending" : null,
+          isRecurring: isRecurring ?? false,
+          recurringInterval: recurringInterval || null,
+          installmentNumber: req.body.installmentNumber ? parseInt(req.body.installmentNumber) : null,
+          installmentsTotal: req.body.installmentsTotal ? parseInt(req.body.installmentsTotal) : null,
+        })
+        .returning();
 
-    if (status === "paid" && accountId) {
-      const delta = type === "inflow" ? amount : -amount;
-      await updateAccountBalance(accountId, delta);
-    }
+      if (isPaid && accountId) {
+        const delta = type === "inflow" ? amount : -amount;
+        await updateAccountBalance(tx, accountId, delta);
+      }
 
-    await logAudit(workspaceId, transaction.id, userInfo?.userId ?? null, "created", transaction);
+      await logAudit(tx, workspaceId, record.id, userInfo?.userId ?? null, "created", record);
+      return record;
+    });
 
     res.status(201).json({ transaction: { ...transaction, computedStatus: computeStatus(transaction) } });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (err: any) {
+    console.error("Transaction create error:", err);
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
@@ -708,7 +753,7 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
   try {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
-    const userInfo = await getUserInfo(req);
+    const userInfo = await getUserInfo(req, workspaceId);
     const id = req.params.id as string;
 
     const [existing] = await db
@@ -723,9 +768,19 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
       type, description, amount, dueDate,
       categoryId, clientId, projectId, accountId, partnerId,
       costType, notes, status, paymentMethod, paidAt, receiptUrl,
-      approvalStatus, isReimbursement, reimbursementStatus,
+      isReimbursement, reimbursementStatus,
       isRecurring, recurringInterval, installmentNumber, installmentsTotal,
     } = req.body;
+
+    // Security: approvalStatus CANNOT be modified directly via PUT /transactions/:id
+    // If expense requires approval and is pending, forbid marking as paid directly
+    if (existing.approvalStatus === "pending_approval" && status === "paid") {
+      res.status(400).json({
+        error: "Forbidden",
+        message: "Esta despesa requer aprovação de alçada formal antes de ser marcada como paga",
+      });
+      return;
+    }
 
     const updateData: Record<string, any> = { updatedAt: new Date() };
     if (type !== undefined) updateData.type = type;
@@ -743,7 +798,6 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
     if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod || null;
     if (paidAt !== undefined) updateData.paidAt = paidAt ? new Date(paidAt) : null;
     if (receiptUrl !== undefined) updateData.receiptUrl = receiptUrl || null;
-    if (approvalStatus !== undefined) updateData.approvalStatus = approvalStatus;
     if (isReimbursement !== undefined) updateData.isReimbursement = isReimbursement;
     if (reimbursementStatus !== undefined) updateData.reimbursementStatus = reimbursementStatus;
     if (isRecurring !== undefined) updateData.isRecurring = isRecurring;
@@ -751,40 +805,55 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
     if (installmentNumber !== undefined) updateData.installmentNumber = installmentNumber;
     if (installmentsTotal !== undefined) updateData.installmentsTotal = installmentsTotal;
 
-    const [transaction] = await db
-      .update(financialTransactionsTable)
-      .set(updateData)
-      .where(eq(financialTransactionsTable.id, id))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [transaction] = await tx
+        .update(financialTransactionsTable)
+        .set(updateData)
+        .where(eq(financialTransactionsTable.id, id))
+        .returning();
 
-    // Handle balance adjustment if paid status or amount changed
-    const targetAccountId = transaction.accountId || existing.accountId;
-    if (targetAccountId) {
-      const wasPaid = existing.status === "paid";
-      const isNowPaid = transaction.status === "paid";
+      // Precise balance adjustment accounting
+      const wasPaid = existing.status === "paid" && Boolean(existing.accountId);
+      const isNowPaid = transaction.status === "paid" && Boolean(transaction.accountId);
+      const oldAccId = existing.accountId;
+      const newAccId = transaction.accountId;
 
-      if (!wasPaid && isNowPaid) {
-        const delta = transaction.type === "inflow" ? transaction.amount : -transaction.amount;
-        await updateAccountBalance(targetAccountId, delta);
+      const revertOldDelta = existing.type === "inflow" ? -existing.amount : existing.amount;
+      const applyNewDelta = transaction.type === "inflow" ? transaction.amount : -transaction.amount;
+
+      if (wasPaid && isNowPaid) {
+        if (oldAccId === newAccId && oldAccId) {
+          const netDelta = (transaction.type === existing.type && transaction.amount === existing.amount)
+            ? 0
+            : revertOldDelta + applyNewDelta;
+          if (netDelta !== 0) {
+            await updateAccountBalance(tx, oldAccId, netDelta);
+          }
+        } else {
+          // Account was changed while paid: revert on old, credit/debit on new
+          if (oldAccId) await updateAccountBalance(tx, oldAccId, revertOldDelta);
+          if (newAccId) await updateAccountBalance(tx, newAccId, applyNewDelta);
+        }
       } else if (wasPaid && !isNowPaid) {
-        const delta = existing.type === "inflow" ? -existing.amount : existing.amount;
-        await updateAccountBalance(targetAccountId, delta);
-      } else if (wasPaid && isNowPaid && (transaction.amount !== existing.amount || transaction.type !== existing.type)) {
-        const revertDelta = existing.type === "inflow" ? -existing.amount : existing.amount;
-        const newDelta = transaction.type === "inflow" ? transaction.amount : -transaction.amount;
-        await updateAccountBalance(targetAccountId, revertDelta + newDelta);
+        // Was paid, now reverted to pending/cancelled: revert on old account
+        if (oldAccId) await updateAccountBalance(tx, oldAccId, revertOldDelta);
+      } else if (!wasPaid && isNowPaid) {
+        // Was pending, now paid: apply to new account
+        if (newAccId) await updateAccountBalance(tx, newAccId, applyNewDelta);
       }
-    }
 
-    await logAudit(workspaceId, transaction.id, userInfo?.userId ?? null, "updated", {
-      before: existing,
-      after: transaction,
+      await logAudit(tx, workspaceId, transaction.id, userInfo?.userId ?? null, "updated", {
+        before: existing,
+        after: transaction,
+      });
+
+      return transaction;
     });
 
-    res.json({ transaction: { ...transaction, computedStatus: computeStatus(transaction) } });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+    res.json({ transaction: { ...updated, computedStatus: computeStatus(updated) } });
+  } catch (err: any) {
+    console.error("Transaction update error:", err);
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
@@ -792,7 +861,7 @@ router.delete("/transactions/:id", requireAuth, async (req: Request, res: Respon
   try {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
-    const userInfo = await getUserInfo(req);
+    const userInfo = await getUserInfo(req, workspaceId);
 
     const id = req.params.id as string;
     const [existing] = await db
@@ -803,18 +872,20 @@ router.delete("/transactions/:id", requireAuth, async (req: Request, res: Respon
 
     if (!existing) { res.status(404).json({ error: "Transaction not found" }); return; }
 
-    if (existing.status === "paid" && existing.accountId) {
-      const delta = existing.type === "inflow" ? -existing.amount : existing.amount;
-      await updateAccountBalance(existing.accountId, delta);
-    }
+    await db.transaction(async (tx) => {
+      if (existing.status === "paid" && existing.accountId) {
+        const delta = existing.type === "inflow" ? -existing.amount : existing.amount;
+        await updateAccountBalance(tx, existing.accountId, delta);
+      }
 
-    await db.delete(financialTransactionsTable).where(eq(financialTransactionsTable.id, id));
-    await logAudit(workspaceId, id, userInfo?.userId ?? null, "deleted", existing);
+      await tx.delete(financialTransactionsTable).where(eq(financialTransactionsTable.id, id));
+      await logAudit(tx, workspaceId, id, userInfo?.userId ?? null, "deleted", existing);
+    });
 
     res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (err: any) {
+    console.error("Transaction delete error:", err);
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
@@ -864,27 +935,58 @@ router.post("/approvals/:id/approve", requireAuth, async (req: Request, res: Res
   try {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
-    const userInfo = await getUserInfo(req);
+    const userInfo = await getUserInfo(req, workspaceId);
     const id = req.params.id as string;
 
-    const [tx] = await db
-      .update(financialTransactionsTable)
-      .set({
-        approvalStatus: "approved",
-        approvedBy: userInfo?.userId,
-        approvedAt: new Date(),
-        updatedAt: new Date(),
-      })
+    const isExec = userInfo?.role === "ceo" || userInfo?.role === "cto" || userInfo?.role === "owner" || userInfo?.role === "admin";
+    if (!isExec) {
+      res.status(403).json({ error: "Forbidden", message: "Apenas membros da diretoria podem aprovar despesas" });
+      return;
+    }
+
+    const [existing] = await db
+      .select()
+      .from(financialTransactionsTable)
       .where(and(eq(financialTransactionsTable.id, id), eq(financialTransactionsTable.workspaceId, workspaceId)))
-      .returning();
+      .limit(1);
 
-    if (!tx) { res.status(404).json({ error: "Transaction not found" }); return; }
+    if (!existing) { res.status(404).json({ error: "Transaction not found" }); return; }
 
-    await logAudit(workspaceId, tx.id, userInfo?.userId ?? null, "approved", { approvedBy: userInfo?.userId });
-    res.json({ transaction: tx });
-  } catch (err) {
+    const [rule] = await db
+      .select()
+      .from(financialApprovalRulesTable)
+      .where(eq(financialApprovalRulesTable.workspaceId, workspaceId))
+      .limit(1);
+
+    const ceoThreshold = rule?.ceoThresholdAmount ?? 300000; // R$ 3.000,00
+    if (existing.amount > ceoThreshold && userInfo?.role !== "ceo" && userInfo?.role !== "owner") {
+      res.status(403).json({
+        error: "Forbidden",
+        message: `Despesas acima de R$ ${(ceoThreshold / 100).toFixed(2)} exigem aprovação exclusiva do CEO`,
+      });
+      return;
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [approvedTx] = await tx
+        .update(financialTransactionsTable)
+        .set({
+          approvalStatus: "approved",
+          approvedBy: userInfo?.userId,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(financialTransactionsTable.id, id))
+        .returning();
+
+      await logAudit(tx, workspaceId, approvedTx.id, userInfo?.userId ?? null, "approved", { approvedBy: userInfo?.userId });
+      return approvedTx;
+    });
+
+    res.json({ transaction: updated });
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
@@ -892,27 +994,39 @@ router.post("/approvals/:id/reject", requireAuth, async (req: Request, res: Resp
   try {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
-    const userInfo = await getUserInfo(req);
+    const userInfo = await getUserInfo(req, workspaceId);
     const id = req.params.id as string;
     const { reason } = req.body;
 
-    const [tx] = await db
-      .update(financialTransactionsTable)
-      .set({
-        approvalStatus: "rejected",
-        rejectionReason: reason || "Rejeitado pela diretoria",
-        updatedAt: new Date(),
-      })
-      .where(and(eq(financialTransactionsTable.id, id), eq(financialTransactionsTable.workspaceId, workspaceId)))
-      .returning();
+    const isExec = userInfo?.role === "ceo" || userInfo?.role === "cto" || userInfo?.role === "owner" || userInfo?.role === "admin";
+    if (!isExec) {
+      res.status(403).json({ error: "Forbidden", message: "Apenas membros da diretoria podem rejeitar despesas" });
+      return;
+    }
 
-    if (!tx) { res.status(404).json({ error: "Transaction not found" }); return; }
+    const updated = await db.transaction(async (tx) => {
+      const [rejectedTx] = await tx
+        .update(financialTransactionsTable)
+        .set({
+          approvalStatus: "rejected",
+          rejectionReason: reason || "Rejeitado pela diretoria",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(financialTransactionsTable.id, id), eq(financialTransactionsTable.workspaceId, workspaceId)))
+        .returning();
 
-    await logAudit(workspaceId, tx.id, userInfo?.userId ?? null, "rejected", { reason });
-    res.json({ transaction: tx });
-  } catch (err) {
+      if (!rejectedTx) return null;
+
+      await logAudit(tx, workspaceId, rejectedTx.id, userInfo?.userId ?? null, "rejected", { reason });
+      return rejectedTx;
+    });
+
+    if (!updated) { res.status(404).json({ error: "Transaction not found" }); return; }
+
+    res.json({ transaction: updated });
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 

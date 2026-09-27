@@ -33,6 +33,7 @@ router.get("/stats", async (req: Request, res: Response) => {
           id: tasksTable.id,
           projectId: tasksTable.projectId,
           dueDate: tasksTable.dueDate,
+          updatedAt: tasksTable.updatedAt,
           columnTitle: columnsTable.title,
         })
         .from(tasksTable)
@@ -101,14 +102,25 @@ router.get("/stats", async (req: Request, res: Response) => {
       };
     });
 
-    // Weekly trend (last 7 days based on day names)
+    // Weekly trend (last 7 days based on real completed tasks timestamps)
+    const completedTasksList = allTasks.filter(t => t.columnTitle.toLowerCase().includes("conclu"));
+
     const weeklyTrend = Array.from({ length: 7 }).map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
+      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
+      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59);
       const days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+      const completions = completedTasksList.filter(t => {
+        if (!t.updatedAt) return false;
+        const updated = new Date(t.updatedAt);
+        return updated >= dayStart && updated <= dayEnd;
+      }).length;
+
       return {
         label: days[d.getDay()],
-        completions: Math.floor(Math.random() * 15), // Would need activity log timestamps for real data
+        completions,
       };
     });
 

@@ -1,26 +1,19 @@
 import { Router, type IRouter } from "express";
-import { db, goalsTable, workspaceMembersTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
-import { requireAuth, type AuthenticatedRequest } from "../middlewares/auth";
+import { db, goalsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import { requireAuth, requireWorkspace, type AuthenticatedRequest } from "../middlewares/auth";
 import { type Request, type Response } from "express";
 
 const router: IRouter = Router();
-router.use(requireAuth);
+router.use(requireAuth, requireWorkspace);
 
 // ─── GET /api/goals ───────────────────────────────────────────────────────────
 
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const { userId } = (req as AuthenticatedRequest).user;
+    const wsId = (req as AuthenticatedRequest).user.workspaceId!;
 
-    // Get user's workspaces
-    const memberships = await db.select({ workspaceId: workspaceMembersTable.workspaceId })
-      .from(workspaceMembersTable)
-      .where(eq(workspaceMembersTable.userId, userId));
-    const wsIds = memberships.map(m => m.workspaceId);
-    if (wsIds.length === 0) { res.json([]); return; }
-
-    const allGoals = await db.select().from(goalsTable).where(inArray(goalsTable.workspaceId, wsIds));
+    const allGoals = await db.select().from(goalsTable).where(eq(goalsTable.workspaceId, wsId));
 
     // Group key results under objectives
     const objectives = allGoals.filter(g => g.type === "objective" && !g.parentId);
@@ -42,26 +35,38 @@ router.get("/", async (req: Request, res: Response) => {
 
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { userId } = (req as AuthenticatedRequest).user;
-
-    // Get first workspace
-    const [membership] = await db.select({ workspaceId: workspaceMembersTable.workspaceId })
-      .from(workspaceMembersTable)
-      .where(eq(workspaceMembersTable.userId, userId))
-      .limit(1);
-    if (!membership) { res.status(400).json({ error: "No workspace" }); return; }
+    const { userId, workspaceId } = (req as AuthenticatedRequest).user;
+    const wsId = workspaceId!;
 
     const { title, description, type, parentId, targetValue, currentValue, unit, startDate, endDate, status } = req.body;
 
+    if (!title || typeof title !== "string" || !title.trim()) {
+      res.status(400).json({ message: "Título é obrigatório" });
+      return;
+    }
+
+    // If parentId is provided, verify it exists in this workspace
+    if (parentId) {
+      const [parent] = await db
+        .select({ id: goalsTable.id })
+        .from(goalsTable)
+        .where(and(eq(goalsTable.id, parentId), eq(goalsTable.workspaceId, wsId)))
+        .limit(1);
+      if (!parent) {
+        res.status(400).json({ message: "Objetivo pai não encontrado no workspace" });
+        return;
+      }
+    }
+
     const [newGoal] = await db.insert(goalsTable).values({
-      workspaceId: membership.workspaceId,
+      workspaceId: wsId,
       ownerId: userId,
-      title,
-      description,
-      type: type || "objective",
+      title: title.trim(),
+      description: description ?? null,
+      type: type || (parentId ? "key_result" : "objective"),
       parentId: parentId || null,
-      targetValue: targetValue !== undefined ? targetValue : 100,
-      currentValue: currentValue !== undefined ? currentValue : 0,
+      targetValue: targetValue !== undefined ? Number(targetValue) : 100,
+      currentValue: currentValue !== undefined ? Number(currentValue) : 0,
       unit: unit || "%",
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
@@ -79,19 +84,27 @@ router.post("/", async (req: Request, res: Response) => {
 
 router.put("/:id", async (req: Request, res: Response) => {
   try {
+    const wsId = (req as AuthenticatedRequest).user.workspaceId!;
     const id = req.params.id as string;
-    const { title, description, currentValue, targetValue, status, unit } = req.body;
+    const { title, description, currentValue, targetValue, status, unit, startDate, endDate } = req.body;
 
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (title !== undefined) updates.title = title;
     if (description !== undefined) updates.description = description;
-    if (currentValue !== undefined) updates.currentValue = currentValue;
-    if (targetValue !== undefined) updates.targetValue = targetValue;
+    if (currentValue !== undefined) updates.currentValue = Number(currentValue);
+    if (targetValue !== undefined) updates.targetValue = Number(targetValue);
     if (status !== undefined) updates.status = status;
     if (unit !== undefined) updates.unit = unit;
+    if (startDate !== undefined) updates.startDate = startDate ? new Date(startDate) : null;
+    if (endDate !== undefined) updates.endDate = endDate ? new Date(endDate) : null;
 
-    const [updatedGoal] = await db.update(goalsTable).set(updates).where(eq(goalsTable.id, id)).returning();
-    if (!updatedGoal) { res.status(404).json({ message: "Goal not found" }); return; }
+    const [updatedGoal] = await db
+      .update(goalsTable)
+      .set(updates)
+      .where(and(eq(goalsTable.id, id), eq(goalsTable.workspaceId, wsId)))
+      .returning();
+
+    if (!updatedGoal) { res.status(404).json({ message: "Meta não encontrada" }); return; }
 
     res.json(updatedGoal);
   } catch (err) {
@@ -104,9 +117,18 @@ router.put("/:id", async (req: Request, res: Response) => {
 
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
+    const wsId = (req as AuthenticatedRequest).user.workspaceId!;
     const id = req.params.id as string;
-    const [deletedGoal] = await db.delete(goalsTable).where(eq(goalsTable.id, id)).returning();
-    if (!deletedGoal) { res.status(404).json({ message: "Goal not found" }); return; }
+
+    // Delete any key results under this objective first
+    await db.delete(goalsTable).where(and(eq(goalsTable.parentId, id), eq(goalsTable.workspaceId, wsId)));
+
+    const [deletedGoal] = await db
+      .delete(goalsTable)
+      .where(and(eq(goalsTable.id, id), eq(goalsTable.workspaceId, wsId)))
+      .returning();
+
+    if (!deletedGoal) { res.status(404).json({ message: "Meta não encontrada" }); return; }
     res.json({ success: true });
   } catch (err) {
     console.error("Failed to delete goal", err);

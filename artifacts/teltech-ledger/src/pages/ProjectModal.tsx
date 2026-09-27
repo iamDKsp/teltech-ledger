@@ -1,13 +1,11 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../lib/auth-context";
 import { X, Trash2 } from "lucide-react";
-
-const API = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ""
-  ? import.meta.env.VITE_API_URL
-  : (import.meta.env.DEV ? "http://localhost:5000" : "");
+import { API } from "../lib/api";
+import { getProjectChanges } from "../lib/project-changes";
 
 interface ProjectColumn { id: string; title: string; position: number; }
-interface Project { id: string; name: string; color: string; icon?: string; }
+interface Project { id: string; workspaceId: string; name: string; color: string; icon?: string | null; }
 
 const COLORS = ["#7C5AC2","#3B82F6","#14B8A6","#10B981","#F59E0B","#EF4444","#EC4899","#6366F1","#F97316","#8B5CF6"];
 
@@ -20,15 +18,17 @@ const inputStyle: React.CSSProperties = {
 export function ProjectModal({ project, onClose, onSaved }: {
   project: Project | null; // null = create mode
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedProject?: Project) => void | Promise<void>;
 }) {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const isEdit = !!project;
 
   const [name, setName] = useState(project?.name ?? "");
   const [color, setColor] = useState(project?.color ?? "#7C5AC2");
   const [icon, setIcon] = useState<string | null>(project?.icon ?? null);
   const [columns, setColumns] = useState<ProjectColumn[]>([]);
+  const [savedColumns, setSavedColumns] = useState<ProjectColumn[]>([]);
+  const [savedProject, setSavedProject] = useState(project);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -73,80 +73,80 @@ export function ProjectModal({ project, onClose, onSaved }: {
     reader.readAsDataURL(file);
   };
 
-  const headers = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
-
   // Load columns for existing project
   useEffect(() => {
     if (!project) return;
-    fetch(`${API}/api/projects/${project.id}/board`, { headers: headers() })
-      .then(r => r.json())
+    let active = true;
+    API.get<{ columns: ProjectColumn[] }>(`/projects/${project.id}/board`)
       .then(data => {
-        if (data.columns) setColumns(data.columns.map((c: any) => ({ id: c.id, title: c.title, position: c.position })));
-      });
-  }, [project]);
+        if (!active) return;
+        if (!Array.isArray(data.columns)) throw new Error("Não foi possível carregar as etapas do projeto.");
+        const loaded = data.columns.map(c => ({ id: c.id, title: c.title, position: c.position }));
+        setColumns(loaded);
+        setSavedColumns(loaded);
+      })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : "Erro ao carregar etapas"); });
+    return () => { active = false; };
+  }, [project?.id]);
 
   const handleSave = async () => {
     if (!name.trim()) { setError("Nome é obrigatório"); return; }
     setLoading(true); setError(null);
+    let projectWasSaved = false;
+    let confirmedProject: Project | undefined;
     try {
-      if (isEdit) {
-        // Update project
-        const updateRes = await fetch(`${API}/api/projects/${project!.id}`, {
-          method: "PUT", headers: headers(),
-          body: JSON.stringify({ name, color, icon }),
-        });
-        if (!updateRes.ok) {
-          const err = await updateRes.json().catch(() => ({}));
-          throw new Error(err.error || "Erro ao atualizar dados do projeto");
+      if (project && savedProject) {
+        // Renaming should not also rewrite unchanged color, icon or columns.
+        const changes = getProjectChanges(savedProject, { name, color, icon });
+        if (Object.keys(changes).length > 0) {
+          const result = await API.put<{ project: Project }>(`/projects/${project.id}`, changes);
+          if (!result.project) throw new Error("O servidor não confirmou a atualização do projeto.");
+          setSavedProject(result.project);
+          confirmedProject = result.project;
+          projectWasSaved = true;
         }
-        // Update columns order/titles
-        if (columns.length > 0) {
-          const colRes = await fetch(`${API}/api/projects/${project!.id}/columns-order`, {
-            method: "PUT", headers: headers(),
-            body: JSON.stringify({ columns: columns.map((c, i) => ({ ...c, position: i })) }),
-          });
-          if (!colRes.ok) {
-            const err = await colRes.json().catch(() => ({}));
-            throw new Error(err.error || "Erro ao atualizar colunas do projeto");
-          }
+        const columnsChanged = columns.length !== savedColumns.length || columns.some((column, index) =>
+          column.id !== savedColumns[index]?.id || column.title !== savedColumns[index]?.title
+        );
+        if (columnsChanged) {
+          const ordered = columns.map((column, position) => ({ ...column, position }));
+          await API.put(`/projects/${project.id}/columns-order`, { columns: ordered });
+          setSavedColumns(ordered);
         }
       } else {
-        // Create project — use workspaceId from authenticated user
-        const workspaceId = user?.workspaceId;
+        // The login response omits workspaceId; /auth/me includes it.
+        let workspaceId = user?.workspaceId;
         if (!workspaceId) {
-          // Fallback: try to get from existing projects
-          const projRes = await fetch(`${API}/api/projects`, { headers: headers() });
-          const projData = await projRes.json();
-          if (!projData.projects?.length) {
-            setError("Não foi possível determinar o workspace. Recarregue a página.");
-            setLoading(false);
-            return;
-          }
-          await fetch(`${API}/api/projects`, {
-            method: "POST", headers: headers(),
-            body: JSON.stringify({ workspaceId: projData.projects[0].workspaceId, name, color, icon }),
-          });
-        } else {
-          await fetch(`${API}/api/projects`, {
-            method: "POST", headers: headers(),
-            body: JSON.stringify({ workspaceId, name, color, icon }),
-          });
+          const session = await API.get<{ user: { workspaceId?: string | null } }>("/auth/me");
+          workspaceId = session.user.workspaceId;
         }
+        if (!workspaceId) throw new Error("Não foi possível determinar o workspace. Recarregue a página.");
+        const result = await API.post<{ project: Project }>("/projects", { workspaceId, name: name.trim(), color, icon });
+        if (!result.project) throw new Error("O servidor não confirmou a criação do projeto.");
+        confirmedProject = result.project;
+        projectWasSaved = true;
       }
-      onSaved();
+      await onSaved(confirmedProject);
       onClose();
-    } catch (e) { setError(e instanceof Error ? e.message : "Erro"); }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erro ao salvar projeto";
+      setError(projectWasSaved ? `Projeto salvo, mas a atualização das etapas ou da lista falhou: ${message}` : message);
+      if (projectWasSaved) {
+        try { await onSaved(confirmedProject); } catch { /* Keep the original error visible. */ }
+      }
+    }
     finally { setLoading(false); }
   };
 
   const handleDelete = async () => {
     if (!project) return;
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
-      await fetch(`${API}/api/projects/${project.id}`, { method: "DELETE", headers: headers() });
-      onSaved();
+      const result = await API.delete<{ success: boolean }>(`/projects/${project.id}`);
+      if (!result.success) throw new Error("O servidor não confirmou a exclusão do projeto.");
+      await onSaved();
       onClose();
-    } catch { setError("Erro ao excluir"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Erro ao excluir"); }
     finally { setLoading(false); }
   };
 
@@ -155,14 +155,11 @@ export function ProjectModal({ project, onClose, onSaved }: {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/projects/${project.id}/columns`, {
-        method: "POST", headers: headers(),
-        body: JSON.stringify({ title: "Nova Etapa" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao adicionar etapa");
+      const data = await API.post<{ column: ProjectColumn }>(`/projects/${project.id}/columns`, { title: "Nova Etapa" });
       if (data.column) {
-        setColumns(prev => [...prev, { id: data.column.id, title: data.column.title, position: data.column.position }]);
+        const added = { id: data.column.id, title: data.column.title, position: data.column.position };
+        setColumns(prev => [...prev, added]);
+        setSavedColumns(prev => [...prev, added]);
       } else {
         throw new Error("Formato de resposta inesperado do servidor.");
       }
@@ -175,8 +172,13 @@ export function ProjectModal({ project, onClose, onSaved }: {
 
   const deleteColumn = async (colId: string) => {
     if (!project) return;
-    await fetch(`${API}/api/projects/${project.id}/columns/${colId}`, { method: "DELETE", headers: headers() });
-    setColumns(prev => prev.filter(c => c.id !== colId));
+    setLoading(true); setError(null);
+    try {
+      await API.delete(`/projects/${project.id}/columns/${colId}`);
+      setColumns(prev => prev.filter(c => c.id !== colId));
+      setSavedColumns(prev => prev.filter(c => c.id !== colId));
+    } catch (e) { setError(e instanceof Error ? e.message : "Erro ao excluir etapa"); }
+    finally { setLoading(false); }
   };
 
   const updateColTitle = (colId: string, title: string) => {

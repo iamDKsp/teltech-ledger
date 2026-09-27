@@ -35,8 +35,22 @@ async function waitForPostgres() {
 
 await waitForPostgres();
 
-console.log('=== [Teltech API] Sincronizando schema do banco (Drizzle) ===');
-execSync('pnpm --filter @workspace/db run push-force', { stdio: 'inherit' });
-
+if (process.env.SKIP_DB_PUSH !== 'true') {
+  console.log('=== [Teltech API] Sincronizando schema do banco (Drizzle) ===');
+  const pushCmd = process.env.FORCE_DB_PUSH === 'true'
+    ? 'pnpm --filter @workspace/db run push-force'
+    : 'pnpm --filter @workspace/db run push';
+  try {
+    execSync(pushCmd, { stdio: 'inherit' });
+  } catch (err) {
+    console.error('Erro na sincronização de schema:', err.message);
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Falha crítica na sincronização de schema em produção. Abortando inicialização.');
+      process.exit(1);
+    }
+  }
+} else {
+  console.log('=== [Teltech API] Sincronização de schema ignorada (SKIP_DB_PUSH=true) ===');
+}
 console.log('=== [Teltech API] Iniciando servidor Teltech Ledger ===');
 await import('./artifacts/api-server/dist/index.mjs');

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useRef, useMemo, useCallback } 
 import { AppContext, Task, AvatarCluster, API } from "../TeltechLedger";
 import { useAuth } from "../lib/auth-context";
 import { TaskModal } from "./TaskModal";
+import { toast } from "sonner";
 import {
   Calendar,
   Clock,
@@ -448,7 +449,7 @@ export function ProjectTimeline() {
 
       const newDue = new Date(dragStartRef.current.originalDueMs + dayDelta * 86400000);
       try {
-        await fetch(`${API}/api/projects/${activeProject.id}/tasks/${task.id}`, {
+        const res = await fetch(`${API}/api/projects/${activeProject.id}/tasks/${task.id}`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -456,8 +457,24 @@ export function ProjectTimeline() {
           },
           body: JSON.stringify({ dueDate: newDue.toISOString() }),
         });
+        if (!res.ok) {
+          throw new Error("Erro na resposta do servidor");
+        }
+        toast.success("Prazo da tarefa atualizado");
       } catch (err) {
         console.error("Falha ao salvar novo prazo:", err);
+        toast.error("Não foi possível salvar o novo prazo. Alteração revertida.");
+        // Revert optimistic update
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id !== task.id) return t;
+            return {
+              ...t,
+              startDate: new Date(dragStartRef.current!.originalStartMs),
+              dueDate: new Date(dragStartRef.current!.originalDueMs),
+            };
+          })
+        );
       }
     };
 

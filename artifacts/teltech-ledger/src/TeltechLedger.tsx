@@ -44,14 +44,14 @@ import { API } from "./lib/api";
 export { API };
 
 
-export interface AppProject { id: string; name: string; color: string; workspaceId: string; icon?: string; isFavorite?: boolean; status?: string; }
+export interface AppProject { id: string; name: string; color: string; workspaceId: string; icon?: string | null; isFavorite?: boolean; status?: string; }
 
 export interface AppCtx {
   activeTab: string; setActiveTab: (t: string) => void;
   sidebarOpen: boolean; setSidebarOpen: (v: boolean) => void;
   sidebarModule: string; setSidebarModule: (m: string) => void;
   activeProject: AppProject | null; setActiveProject: (p: AppProject) => void;
-  projects: AppProject[]; refreshProjects: () => void;
+  projects: AppProject[]; refreshProjects: (savedProject?: AppProject) => void | Promise<void>;
   loadBoard?: () => void;
   isMobile?: boolean;
   mobileDrawerOpen?: boolean;
@@ -2215,12 +2215,19 @@ export function TeltechLedger() {
   const [activeProject, setActiveProject] = useState<AppProject | null>(null);
   const [projects, setProjects] = useState<AppProject[]>([]);
 
-  const fetchProjects = useCallback(async () => {
+  const fetchProjects = useCallback(async (savedProject?: AppProject) => {
     if (!token) return;
+    if (savedProject) {
+      setProjects(current => current.some(p => p.id === savedProject.id)
+        ? current.map(p => p.id === savedProject.id ? savedProject : p)
+        : [...current, savedProject]);
+      setActiveProject(current => current?.id === savedProject.id ? savedProject : current);
+    }
     try {
       const res = await fetch(`${API}/api/projects`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Não foi possível atualizar a lista de projetos (${res.status}).`);
       const data = await res.json();
-      if (data.projects) {
+      if (Array.isArray(data.projects)) {
         setProjects(data.projects);
       }
     } catch (e) { console.error("Failed to load projects", e); }

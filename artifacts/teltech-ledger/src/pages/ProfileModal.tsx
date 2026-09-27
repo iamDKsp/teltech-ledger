@@ -7,6 +7,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const { user, token } = useAuth();
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [loading, setLoading] = useState(false);
@@ -55,6 +56,16 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
     setLoading(true);
 
     try {
+      // Validate password change
+      if (password) {
+        if (!currentPassword) {
+          throw new Error("Informe a senha atual para alterar sua senha");
+        }
+        if (password.length < 6) {
+          throw new Error("A nova senha deve ter no mínimo 6 caracteres");
+        }
+      }
+
       // Update Name, Email and Avatar
       if (name !== user.name || email !== user.email || avatarUrl !== user.avatarUrl) {
         const res = await fetch(`${API_BASE}/api/members/${user.id}`, {
@@ -65,7 +76,10 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
           },
           body: JSON.stringify({ name, email, avatarUrl }),
         });
-        if (!res.ok) throw new Error("Erro ao atualizar dados do perfil");
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || "Erro ao atualizar dados do perfil");
+        }
       }
 
       // Update Password if provided
@@ -76,9 +90,12 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ currentPassword, newPassword: password }),
         });
-        if (!resPw.ok) throw new Error("Erro ao atualizar a senha");
+        if (!resPw.ok) {
+          const errData = await resPw.json().catch(() => ({}));
+          throw new Error(errData.message || "Erro ao atualizar a senha");
+        }
       }
 
       setSuccess("Perfil atualizado com sucesso!");
@@ -133,7 +150,12 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
               style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Nova Senha (opcional)</label>
+            <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Senha Atual (necessária para alterar a senha)</label>
+            <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Digite sua senha atual"
+              style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ display: "block", marginBottom: 6, fontSize: 12, color: "#aaa" }}>Nova Senha</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Deixe em branco para não alterar"
               style={{ width: "100%", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, outline: "none", boxSizing: "border-box" }} />
           </div>

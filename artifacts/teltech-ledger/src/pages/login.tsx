@@ -8,7 +8,7 @@ import { ShieldCheck, Sparkles, Eye, EyeOff } from "lucide-react";
 const API_BASE = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ""
   ? import.meta.env.VITE_API_URL
   : (import.meta.env.DEV ? "http://localhost:5000" : "");
-const REMEMBER_KEY = "teltech_remember";
+const REMEMBER_EMAIL_KEY = "teltech_remember_email";
 
 // ─── Team Profiles ─────────────────────────────────────────────────────────────
 
@@ -34,16 +34,39 @@ export function LoginPage() {
 
   const [profiles, setProfiles] = useState<Profile[]>(BASE_PROFILES);
   const [selected, setSelected] = useState<Profile>(BASE_PROFILES[0]);
+  const [isCustomEmail, setIsCustomEmail] = useState(false);
+  const [customEmail, setCustomEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
-  const [autoLogging, setAutoLogging] = useState(() => !!localStorage.getItem(REMEMBER_KEY));
-  const [autoReady, setAutoReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Security: Clean up any legacy plain-text password from previous versions
+  useEffect(() => {
+    try {
+      localStorage.removeItem("teltech_remember");
+    } catch {}
+  }, []);
+
+  // Pre-fill remembered email if present
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem(REMEMBER_EMAIL_KEY);
+      if (savedEmail) {
+        const found = profiles.find(p => p.email === savedEmail);
+        if (found) {
+          setSelected(found);
+          setIsCustomEmail(false);
+        } else {
+          setIsCustomEmail(true);
+          setCustomEmail(savedEmail);
+        }
+      }
+    } catch {}
+  }, [profiles]);
 
   // Fetch real avatars from API
   useEffect(() => {
@@ -62,49 +85,24 @@ export function LoginPage() {
       .catch(() => {});
   }, []);
 
-  // Auto-login from "remember me"
-  useEffect(() => {
-    const saved = localStorage.getItem(REMEMBER_KEY);
-    if (saved) {
-      try {
-        const { email, password: savedPass } = JSON.parse(saved);
-        login(email, savedPass).catch(() => {
-          localStorage.removeItem(REMEMBER_KEY);
-          setAutoReady(true);
-        });
-        return;
-      } catch {
-        localStorage.removeItem(REMEMBER_KEY);
-      }
-    }
-    setAutoReady(true);
-  }, [login]);
-
   // Focus input when profile changes
   useEffect(() => {
     setError(null);
     setTimeout(() => inputRef.current?.focus(), 80);
-  }, [selected]);
-
-  if (autoLogging) {
-    return (
-      <div style={{ width: "100vw", height: "100vh", background: "#0d0d0d" }}>
-        <Loader isReady={autoReady} onFinish={() => setAutoLogging(false)} />
-      </div>
-    );
-  }
+  }, [selected, isCustomEmail]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading || !password) return;
+    const emailToUse = isCustomEmail ? customEmail.trim() : selected.email;
+    if (loading || !password || !emailToUse) return;
     setError(null);
     setLoading(true);
     try {
-      await login(selected.email, password);
+      await login(emailToUse, password);
       if (remember) {
-        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email: selected.email, password }));
+        localStorage.setItem(REMEMBER_EMAIL_KEY, emailToUse);
       } else {
-        localStorage.removeItem(REMEMBER_KEY);
+        localStorage.removeItem(REMEMBER_EMAIL_KEY);
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Credenciais inválidas";
@@ -189,84 +187,161 @@ export function LoginPage() {
           </header>
 
           {/* ── Greeting ── */}
-          <div key={selected.email} style={{ marginBottom: 24, animation: "tg-fade-up 0.5s ease both" }}>
-            <h2 style={{ margin: 0, fontSize: 26, fontWeight: 700, letterSpacing: "-0.5px", color: "#f0f0f8" }}>
-              E aí!?{" "}
-              <span style={{
-                background: `linear-gradient(135deg, ${PRIMARY}, ${PRIMARY_GLOW})`,
-                WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-              }}>
-                {selected.name}
-              </span>
-              {" "}<span style={{ display: "inline-block", animation: "tg-wave 1.6s ease-in-out", transformOrigin: "70% 70%" }}>
-                <Sparkles size={22} style={{ color: "hsl(265 85% 62%)", verticalAlign: "middle" }} />
-              </span>
+          {/* ── Greeting ── */}
+          <div key={isCustomEmail ? "custom" : selected.email} style={{ marginBottom: 24, animation: "tg-fade-up 0.5s ease both" }}>
+            <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, letterSpacing: "-0.5px", color: "#f0f0f8" }}>
+              {isCustomEmail ? (
+                <>
+                  Entrar no{" "}
+                  <span style={{
+                    background: `linear-gradient(135deg, ${PRIMARY}, ${PRIMARY_GLOW})`,
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                  }}>
+                    Teltech Ledger
+                  </span>
+                </>
+              ) : (
+                <>
+                  E aí!?{" "}
+                  <span style={{
+                    background: `linear-gradient(135deg, ${PRIMARY}, ${PRIMARY_GLOW})`,
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                  }}>
+                    {selected.name}
+                  </span>
+                  {" "}<span style={{ display: "inline-block", animation: "tg-wave 1.6s ease-in-out", transformOrigin: "70% 70%" }}>
+                    <Sparkles size={22} style={{ color: "hsl(265 85% 62%)", verticalAlign: "middle" }} />
+                  </span>
+                </>
+              )}
             </h2>
             <p style={{ margin: "8px 0 0", fontSize: 13, fontStyle: "italic", color: "rgba(255,255,255,0.38)", letterSpacing: "0.01em" }}>
-              {selected.tagline}
+              {isCustomEmail ? "Digite seu e-mail corporativo e senha de acesso" : selected.tagline}
             </p>
           </div>
 
-          {/* ── Profile selector ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 24 }}>
-            {profiles.map(p => {
-              const active = p.email === selected.email;
-              return (
-                <button
-                  key={p.email}
-                  type="button"
-                  onClick={() => setSelected(p)}
-                  style={{
-                    position: "relative",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-                    padding: "12px 8px 10px",
-                    border: active ? "1.5px solid hsl(265 85% 62% / 0.6)" : `1px solid ${BORDER}`,
-                    borderRadius: 16,
-                    background: active ? "hsl(265 85% 62% / 0.1)" : "rgba(255,255,255,0.03)",
-                    cursor: "pointer", fontFamily: "inherit",
-                    transition: "all 0.25s ease",
-                    transform: active ? "scale(1.03)" : "scale(1)",
-                    boxShadow: active ? "0 0 50px hsl(265 85% 62% / 0.35)" : "none",
-                  }}
-                  onMouseEnter={e => { if (!active) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.transform = ""; e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}}
-                >
-                  {/* Avatar */}
-                  <div style={{
-                    position: "relative", width: 48, height: 48, borderRadius: "50%",
-                    background: `linear-gradient(135deg, ${p.color}, hsl(270 90% 72%))`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 14, fontWeight: 700, color: "#fff",
-                    transition: "transform 0.3s",
-                    transform: active ? "scale(1.1)" : "scale(1)",
-                    overflow: "hidden",
-                  }}>
-                    {p.avatarUrl
-                      ? <img src={p.avatarUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      : p.initials
-                    }
-                    {active && (
-                      <span style={{
-                        position: "absolute", inset: 0, borderRadius: "50%",
-                        animation: "tg-pulse-ring 1.8s ease-out infinite",
-                      }} />
-                    )}
-                  </div>
+          {/* ── Profile selector (if not custom email) ── */}
+          {!isCustomEmail ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 16 }}>
+                {profiles.map(p => {
+                  const active = p.email === selected.email;
+                  return (
+                    <button
+                      key={p.email}
+                      type="button"
+                      onClick={() => { setSelected(p); setIsCustomEmail(false); }}
+                      style={{
+                        position: "relative",
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+                        padding: "12px 8px 10px",
+                        border: active ? "1.5px solid hsl(265 85% 62% / 0.6)" : `1px solid ${BORDER}`,
+                        borderRadius: 16,
+                        background: active ? "hsl(265 85% 62% / 0.1)" : "rgba(255,255,255,0.03)",
+                        cursor: "pointer", fontFamily: "inherit",
+                        transition: "all 0.25s ease",
+                        transform: active ? "scale(1.02)" : "scale(1)",
+                        boxShadow: active ? "0 0 50px hsl(265 85% 62% / 0.35)" : "none",
+                      }}
+                      onMouseEnter={e => { if (!active) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}}
+                      onMouseLeave={e => { if (!active) { e.currentTarget.style.transform = ""; e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}}
+                    >
+                      {/* Avatar */}
+                      <div style={{
+                        position: "relative", width: 44, height: 44, borderRadius: "50%",
+                        background: `linear-gradient(135deg, ${p.color}, hsl(270 90% 72%))`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 14, fontWeight: 700, color: "#fff",
+                        transition: "transform 0.3s",
+                        transform: active ? "scale(1.05)" : "scale(1)",
+                        overflow: "hidden",
+                      }}>
+                        {p.avatarUrl
+                          ? <img src={p.avatarUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : p.initials
+                        }
+                        {active && (
+                          <span style={{
+                            position: "absolute", inset: 0, borderRadius: "50%",
+                            animation: "tg-pulse-ring 1.8s ease-out infinite",
+                          }} />
+                        )}
+                      </div>
 
-                  <div style={{ textAlign: "center", lineHeight: 1.3 }}>
-                    <div style={{ fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "#f0f0f8" : "rgba(255,255,255,0.7)" }}>
-                      {p.name}
-                    </div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{p.role}</div>
-                  </div>
+                      <div style={{ textAlign: "center", lineHeight: 1.3 }}>
+                        <div style={{ fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "#f0f0f8" : "rgba(255,255,255,0.7)" }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{p.role}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomEmail(true)}
+                  style={{
+                    background: "none", border: "none", color: "rgba(255,255,255,0.45)",
+                    fontSize: 11, cursor: "pointer", textDecoration: "underline",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = "rgba(255,255,255,0.8)"}
+                  onMouseLeave={e => e.currentTarget.style.color = "rgba(255,255,255,0.45)"}
+                >
+                  Entrar com outro e-mail de integrante →
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ textAlign: "right", marginBottom: 14 }}>
+              <button
+                type="button"
+                onClick={() => setIsCustomEmail(false)}
+                style={{
+                  background: "none", border: "none", color: "hsl(265 85% 62%)",
+                  fontSize: 11, cursor: "pointer", fontWeight: 500,
+                }}
+              >
+                ← Voltar para perfis rápidos
+              </button>
+            </div>
+          )}
 
           {/* ── Form ── */}
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }} noValidate>
+            {/* Custom Email input if active */}
+            {isCustomEmail && (
+              <div>
+                <label htmlFor="gateway-email" style={{ display: "flex", alignItems: "center", marginBottom: 6, fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.45)" }}>
+                  <span>E-mail corporativo</span>
+                </label>
+                <div style={{
+                  position: "relative", display: "flex", alignItems: "center",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.04)",
+                  transition: "all 0.3s",
+                }}>
+                  <input
+                    id="gateway-email"
+                    type="email"
+                    value={customEmail}
+                    onChange={e => setCustomEmail(e.target.value)}
+                    placeholder="voce@teltech.com.br"
+                    autoComplete="email"
+                    style={{
+                      flex: 1, background: "transparent", border: "none", outline: "none",
+                      padding: "13px 16px", fontSize: 14, color: "#f0f0f8",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Password */}
             <div>
               <label htmlFor="gateway-password" style={{ display: "flex", alignItems: "center", marginBottom: 6, fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.45)" }}>

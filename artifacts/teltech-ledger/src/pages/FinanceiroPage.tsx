@@ -2452,10 +2452,10 @@ function AccountsView({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff" }}>
-            Contas Bancárias & Conciliação
+            Contas Bancárias & Saldos do Sistema
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
-            Saldo consolidado em bancos parceiros (Inter, Cora e Caixa Reserva) com conciliação automática
+            Saldo consolidado registrado no sistema Teltech Ledger (conciliação com extrato bancário externo em breve)
           </p>
         </div>
         <button
@@ -2483,7 +2483,7 @@ function AccountsView({
           <span style={{ fontSize: 12, fontWeight: 600, color: "#A78BFA", textTransform: "uppercase" }}>Patrimônio Líquido em Caixa</span>
           <div style={{ fontSize: 30, fontWeight: 900, color: "#fff", marginTop: 2 }}>{formatBRL(totalBalance)}</div>
         </div>
-        <span style={{ fontSize: 12, color: "#ccc" }}>{accounts.length} contas bancárias ativas e conciliadas</span>
+        <span style={{ fontSize: 12, color: "#ccc" }}>{accounts.length} contas bancárias ativas registradas</span>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
@@ -2515,14 +2515,14 @@ function AccountsView({
               </div>
 
               <div>
-                <span style={{ fontSize: 11, color: "#777" }}>Saldo Atual:</span>
+                <span style={{ fontSize: 11, color: "#777" }}>Saldo Registrado:</span>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#10B981" }}>{formatBRL(acc.currentBalance)}</div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
                 <span>Saldo Inicial: {formatBRL(acc.initialBalance)}</span>
                 <span style={{ color: pendingCount > 0 ? "#F59E0B" : "#10B981" }}>
-                  {pendingCount > 0 ? `${pendingCount} a conciliar` : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12} /> 100% Conciliado</span>}
+                  {pendingCount > 0 ? `${pendingCount} a realizar` : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12} /> Saldo interno em dia</span>}
                 </span>
               </div>
             </div>
