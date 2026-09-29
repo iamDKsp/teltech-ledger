@@ -172,8 +172,21 @@ export function LoginPage() {
         >
           {/* ── Brand ── */}
           <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 30 }}>
+            <img 
+              src="/teltech-logo.png" 
+              alt="Teltech" 
+              style={{ 
+                width: 42, 
+                height: 42, 
+                borderRadius: 10, 
+                objectFit: "cover", 
+                flexShrink: 0,
+                boxShadow: "0 0 20px hsl(265 85% 62% / 0.4)",
+                border: "1px solid rgba(255,255,255,0.1)"
+              }} 
+            />
             <div style={{ lineHeight: 1.25 }}>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#f0f0f8", letterSpacing: "-0.5px" }}>Teltech Leadger</h1>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#f0f0f8", letterSpacing: "-0.5px" }}>Teltech Ledger</h1>
               <p style={{ margin: "3px 0 0", fontSize: 13, color: "rgba(255,255,255,0.45)" }}>Workspace inteligente</p>
             </div>
             <span style={{

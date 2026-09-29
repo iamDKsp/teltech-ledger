@@ -22,7 +22,6 @@ import { ConfiguracoesPage } from "./pages/ConfiguracoesPage";
 import { 
   Settings, 
   Check, 
-  Zap, 
   Home, 
   FolderKanban, 
   CheckSquare, 
@@ -1685,15 +1684,59 @@ function Sidebar() {
     <>
     <div style={{ width: w, minWidth: w, height: "100%", background: "#1A1A1A", borderRight: "1px solid #252525", display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden", flexShrink: 0, transition: "width 0.2s ease" }}>
       {/* Logo + toggle */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "space-between" : "center", padding: sidebarOpen ? "14px 14px 10px" : "14px 0 10px" }}>
-        {sidebarOpen && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 28, height: 28, background: "linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}><Zap size={15} fill="currentColor" /></div>
+      <div style={{ 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: sidebarOpen ? "space-between" : "center", 
+        padding: sidebarOpen ? "14px 14px 10px" : "14px 0 10px",
+        flexDirection: sidebarOpen ? "row" : "column",
+        gap: sidebarOpen ? 0 : 8
+      }}>
+        {sidebarOpen ? (
+          <div 
+            onClick={() => navigate("/")}
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}
+            title="Ir para o Início"
+          >
+            <img 
+              src="/teltech-logo.png" 
+              alt="Teltech" 
+              style={{ 
+                width: 28, 
+                height: 28, 
+                borderRadius: 7, 
+                objectFit: "cover", 
+                flexShrink: 0,
+                boxShadow: "0 0 14px rgba(124, 90, 194, 0.4)",
+                border: "1px solid rgba(255,255,255,0.08)"
+              }} 
+            />
             <span style={{ fontSize: 14, fontWeight: 700, color: "#f0f0f0", letterSpacing: "-0.3px" }}>Teltech</span>
+          </div>
+        ) : (
+          <div
+            onClick={() => setSidebarOpen(true)}
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            title="Expandir menu lateral"
+          >
+            <img 
+              src="/teltech-logo.png" 
+              alt="Teltech" 
+              style={{ 
+                width: 28, 
+                height: 28, 
+                borderRadius: 7, 
+                objectFit: "cover", 
+                flexShrink: 0,
+                boxShadow: "0 0 14px rgba(124, 90, 194, 0.4)",
+                border: "1px solid rgba(255,255,255,0.08)"
+              }} 
+            />
           </div>
         )}
         <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", padding: 4, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onMouseEnter={e=>e.currentTarget.style.color="#bbb"} onMouseLeave={e=>e.currentTarget.style.color="#555"}>
+          onMouseEnter={e=>e.currentTarget.style.color="#bbb"} onMouseLeave={e=>e.currentTarget.style.color="#555"}
+          title={sidebarOpen ? "Recolher barra lateral" : "Expandir barra lateral"}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
         </button>
       </div>
@@ -1997,19 +2040,20 @@ function MobileDrawer({
           borderBottom: "1px solid rgba(255,255,255,0.06)"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
-              width: 32,
-              height: 32,
-              background: "linear-gradient(135deg,#4f2d8a,#7C5AC2)",
-              borderRadius: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff"
-            }}>
-              <Zap size={18} fill="currentColor" />
-            </div>
-            <span style={{ fontSize: 16, fontWeight: 700, color: "#fafafa" }}>Teltech</span>
+            <img 
+              src="/teltech-logo.png" 
+              alt="Teltech" 
+              style={{ 
+                width: 32, 
+                height: 32, 
+                borderRadius: 8, 
+                objectFit: "cover", 
+                flexShrink: 0,
+                boxShadow: "0 0 16px rgba(124, 90, 194, 0.4)",
+                border: "1px solid rgba(255,255,255,0.08)"
+              }} 
+            />
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#fafafa", letterSpacing: "-0.3px" }}>Teltech</span>
           </div>
 
           <button 

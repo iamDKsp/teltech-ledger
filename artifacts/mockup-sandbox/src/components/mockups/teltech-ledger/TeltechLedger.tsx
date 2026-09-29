@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, createContext, useContext } from "react";
-import { ArrowDown, Flag, ArrowUp, AlertTriangle, X, Zap } from "lucide-react";
+import { ArrowDown, Flag, ArrowUp, AlertTriangle, X } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1073,8 +1073,20 @@ function Sidebar() {
     <div style={{ width:200, minWidth:200, height:"100%", background:"#1A1A1A", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", overflowY:"auto", flexShrink:0 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 14px 10px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ width:28, height:28, background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" }}><Zap size={15} fill="currentColor" /></div>
-          <span style={{ fontSize:14, fontWeight:700, color:"#f0f0f0", letterSpacing:"-0.3px" }}>brandux</span>
+          <img 
+            src="/teltech-logo.png" 
+            alt="Teltech" 
+            style={{ 
+              width: 28, 
+              height: 28, 
+              borderRadius: 7, 
+              objectFit: "cover", 
+              flexShrink: 0,
+              boxShadow: "0 0 14px rgba(124, 90, 194, 0.4)",
+              border: "1px solid rgba(255,255,255,0.08)"
+            }} 
+          />
+          <span style={{ fontSize:14, fontWeight:700, color:"#f0f0f0", letterSpacing:"-0.3px" }}>Teltech</span>
         </div>
         <button style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", padding:2 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
