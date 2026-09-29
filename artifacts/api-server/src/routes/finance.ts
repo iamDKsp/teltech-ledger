@@ -409,15 +409,52 @@ router.put("/accounts/:id", requireAuth, async (req: Request, res: Response) => 
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
     const id = req.params.id as string;
 
-    const { name, type, color, currentBalance } = req.body;
+    const { name, type, color } = req.body;
     const [account] = await db
       .update(financialAccountsTable)
-      .set({ name, type, color, currentBalance, updatedAt: new Date() })
+      .set({
+        ...(name ? { name } : {}),
+        ...(type ? { type } : {}),
+        ...(color ? { color } : {}),
+        updatedAt: new Date(),
+      })
       .where(and(eq(financialAccountsTable.id, id), eq(financialAccountsTable.workspaceId, workspaceId)))
       .returning();
 
     if (!account) { res.status(404).json({ error: "Account not found" }); return; }
     res.json({ account });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const id = req.params.id as string;
+
+    // Governança Contábil: verificar se existem lançamentos vinculados
+    const [txCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(financialTransactionsTable)
+      .where(eq(financialTransactionsTable.accountId, id));
+
+    if (txCount && txCount.count > 0) {
+      // Se possui lançamentos, NUNCA exclui fisicamente para manter o histórico e a auditoria
+      await db
+        .update(financialAccountsTable)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(financialAccountsTable.id, id), eq(financialAccountsTable.workspaceId, workspaceId)));
+      res.json({ success: true, archived: true, message: "Conta bancária desativada (histórico contábil preservado)." });
+    } else {
+      // Se não possui nenhum lançamento (conta de teste ou criada por engano), remoção limpa
+      await db
+        .delete(financialAccountsTable)
+        .where(and(eq(financialAccountsTable.id, id), eq(financialAccountsTable.workspaceId, workspaceId)));
+      res.json({ success: true, archived: false, message: "Conta removida com sucesso." });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });

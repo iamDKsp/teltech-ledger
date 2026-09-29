@@ -1,5 +1,5 @@
 import { db, usersTable, workspacesTable, workspaceMembersTable, financialCategoriesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
 
 export async function bootstrapWorkspace() {
@@ -123,7 +123,7 @@ export async function bootstrapWorkspace() {
 async function seedDemoData(workspaceId: string) {
   if (process.env.NODE_ENV === "production") return;
 
-  const { financialAccountsTable, financialApprovalRulesTable, financialSettingsTable, financialBudgetsTable, clientsTable } = await import("@workspace/db");
+  const { financialAccountsTable, financialApprovalRulesTable, financialSettingsTable, financialBudgetsTable, clientsTable, financialTransactionsTable } = await import("@workspace/db");
 
   // Approval rules default
   const existingRules = await db.select({ id: financialApprovalRulesTable.id }).from(financialApprovalRulesTable).where(eq(financialApprovalRulesTable.workspaceId, workspaceId)).limit(1);
@@ -145,14 +145,26 @@ async function seedDemoData(workspaceId: string) {
     });
   }
 
-  // Bank accounts (DEV ONLY)
-  const existingAccounts = await db.select({ id: financialAccountsTable.id }).from(financialAccountsTable).where(eq(financialAccountsTable.workspaceId, workspaceId)).limit(1);
-  if (existingAccounts.length === 0) {
-    await db.insert(financialAccountsTable).values([
-      { workspaceId, name: "Banco Inter PJ", type: "checking", color: "#FF7A00", initialBalance: 2500000, currentBalance: 2500000 },
-      { workspaceId, name: "Conta Cora PJ", type: "checking", color: "#FE3E6D", initialBalance: 1500000, currentBalance: 1500000 },
-      { workspaceId, name: "Caixa Reserva Teltech", type: "cash", color: "#10B981", initialBalance: 1000000, currentBalance: 1000000 },
-    ]);
+  // Cleanup initial mock/dev bank accounts if they have no transactions registered
+  const mockNames = ["Banco Inter PJ", "Conta Cora PJ", "Caixa Reserva Teltech"];
+  for (const name of mockNames) {
+    const mockAccounts = await db
+      .select({ id: financialAccountsTable.id })
+      .from(financialAccountsTable)
+      .where(and(eq(financialAccountsTable.workspaceId, workspaceId), eq(financialAccountsTable.name, name)));
+
+    for (const mockAcc of mockAccounts) {
+      const [tx] = await db
+        .select({ id: financialTransactionsTable.id })
+        .from(financialTransactionsTable)
+        .where(eq(financialTransactionsTable.accountId, mockAcc.id))
+        .limit(1);
+
+      if (!tx) {
+        await db.delete(financialAccountsTable).where(eq(financialAccountsTable.id, mockAcc.id));
+        console.log(`  🧹 [Cleanup] Removida conta de teste mock: "${name}"`);
+      }
+    }
   }
 
   // Monthly budgets (DEV ONLY)

@@ -579,7 +579,10 @@ export function FinanceiroPage() {
   // Modals
   const [showTxModal, setShowTxModal] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [txInitialClientId, setTxInitialClientId] = useState<string | null>(null);
+  const [txInitialType, setTxInitialType] = useState<TxType | null>(null);
   const [showAccountModal, setShowAccountModal] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -899,6 +902,8 @@ export function FinanceiroPage() {
             <button
               onClick={() => {
                 setEditingTx(null);
+                setTxInitialClientId(null);
+                setTxInitialType(null);
                 setShowTxModal(true);
               }}
               style={{
@@ -1022,10 +1027,14 @@ export function FinanceiroPage() {
                 setQuickFilter={setQuickFilter}
                 onNewTx={() => {
                   setEditingTx(null);
+                  setTxInitialClientId(null);
+                  setTxInitialType(null);
                   setShowTxModal(true);
                 }}
                 onEditTx={(tx) => {
                   setEditingTx(tx);
+                  setTxInitialClientId(null);
+                  setTxInitialType(null);
                   setShowTxModal(true);
                 }}
                 onMarkPaid={handleMarkPaid}
@@ -1043,7 +1052,9 @@ export function FinanceiroPage() {
                 onSendWhatsApp={handleSendWhatsAppPix}
                 sendingBillingId={sendingBillingId}
                 onNewTxForClient={(clientId) => {
-                  setEditingTx({ clientId } as unknown as Transaction);
+                  setEditingTx(null);
+                  setTxInitialClientId(clientId);
+                  setTxInitialType("inflow");
                   setShowTxModal(true);
                 }}
               />
@@ -1053,7 +1064,14 @@ export function FinanceiroPage() {
               <AccountsView
                 accounts={accounts}
                 transactions={transactions}
-                onNewAccount={() => setShowAccountModal(true)}
+                onNewAccount={() => {
+                  setEditingAccount(null);
+                  setShowAccountModal(true);
+                }}
+                onManageAccount={(acc) => {
+                  setEditingAccount(acc);
+                  setShowAccountModal(true);
+                }}
                 onNewTx={() => setShowTxModal(true)}
               />
             )}
@@ -1095,6 +1113,8 @@ export function FinanceiroPage() {
       {showTxModal && (
         <TransactionModal
           tx={editingTx}
+          initialClientId={txInitialClientId ?? undefined}
+          initialType={txInitialType ?? undefined}
           categories={categories}
           accounts={accounts}
           clients={clients}
@@ -1103,10 +1123,14 @@ export function FinanceiroPage() {
           onClose={() => {
             setShowTxModal(false);
             setEditingTx(null);
+            setTxInitialClientId(null);
+            setTxInitialType(null);
           }}
           onSaved={() => {
             setShowTxModal(false);
             setEditingTx(null);
+            setTxInitialClientId(null);
+            setTxInitialType(null);
             loadAllData();
           }}
         />
@@ -1114,9 +1138,14 @@ export function FinanceiroPage() {
 
       {showAccountModal && (
         <AccountModal
-          onClose={() => setShowAccountModal(false)}
+          account={editingAccount}
+          onClose={() => {
+            setShowAccountModal(false);
+            setEditingAccount(null);
+          }}
           onSaved={() => {
             setShowAccountModal(false);
+            setEditingAccount(null);
             loadAllData();
           }}
         />
@@ -2630,11 +2659,13 @@ function AccountsView({
   accounts,
   transactions,
   onNewAccount,
+  onManageAccount,
   onNewTx,
 }: {
   accounts: BankAccount[];
   transactions: Transaction[];
   onNewAccount: () => void;
+  onManageAccount: (acc: BankAccount) => void;
   onNewTx: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -2676,52 +2707,115 @@ function AccountsView({
           <span style={{ fontSize: 12, fontWeight: 600, color: "#A78BFA", textTransform: "uppercase" }}>Patrimônio Líquido em Caixa</span>
           <div style={{ fontSize: isMobile ? 22 : 30, fontWeight: 900, color: "#fff", marginTop: 2 }}>{formatBRL(totalBalance)}</div>
         </div>
-        <span style={{ fontSize: 12, color: "#ccc" }}>{accounts.length} contas bancárias ativas registradas</span>
+        <span style={{ fontSize: 12, color: "#ccc" }}>{accounts.length} {accounts.length === 1 ? "conta bancária ativa" : "contas bancárias ativas"}</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
-        {accounts.map((acc) => {
-          const accTxs = transactions.filter(t => t.accountId === acc.id);
-          const pendingCount = accTxs.filter(t => t.status === "pending").length;
+      {accounts.length === 0 ? (
+        <div
+          style={{
+            padding: "48px 24px",
+            textAlign: "center",
+            background: "rgba(255,255,255,0.02)",
+            border: "1px dashed rgba(255,255,255,0.12)",
+            borderRadius: 14,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <Wallet style={{ width: 38, height: 38, color: "#8B5CF6", opacity: 0.8 }} />
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>Nenhuma conta bancária cadastrada</div>
+          <p style={{ fontSize: 13, color: "#888", maxWidth: 460, margin: 0, lineHeight: 1.5 }}>
+            Cadastre suas contas bancárias reais oficiais para registrar movimentações e apurar saldos com total conformidade e auditoria.
+          </p>
+          <button
+            onClick={onNewAccount}
+            style={{
+              marginTop: 6,
+              padding: "9px 20px",
+              borderRadius: 8,
+              background: "#8B5CF6",
+              border: "none",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Plus style={{ width: 16, height: 16 }} /> Cadastrar Primeira Conta
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+          {accounts.map((acc) => {
+            const accTxs = transactions.filter(t => t.accountId === acc.id);
+            const pendingCount = accTxs.filter(t => t.status === "pending").length;
 
-          return (
-            <div
-              key={acc.id}
-              style={{
-                background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
-                border: `1px solid ${acc.color}40`,
-                borderRadius: 14,
-                padding: "20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: acc.color }} />
-                  <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{acc.name}</span>
+            return (
+              <div
+                key={acc.id}
+                style={{
+                  background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
+                  border: `1px solid ${acc.color}40`,
+                  borderRadius: 14,
+                  padding: "20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: acc.color }} />
+                    <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{acc.name}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 10, textTransform: "uppercase", padding: "2px 7px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "#aaa" }}>
+                      {acc.type}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onManageAccount(acc)}
+                      title="Gerenciar dados cadastrais ou desativar conta"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 6,
+                        padding: "3px 8px",
+                        color: "#ccc",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <SlidersHorizontal size={12} /> Gerenciar
+                    </button>
+                  </div>
                 </div>
-                <span style={{ fontSize: 10, textTransform: "uppercase", padding: "2px 7px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "#aaa" }}>
-                  {acc.type}
-                </span>
-              </div>
 
-              <div>
-                <span style={{ fontSize: 11, color: "#777" }}>Saldo Registrado:</span>
-                <div style={{ fontSize: 24, fontWeight: 800, color: "#10B981" }}>{formatBRL(acc.currentBalance)}</div>
-              </div>
+                <div>
+                  <span style={{ fontSize: 11, color: "#777" }}>Saldo Registrado:</span>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: "#10B981" }}>{formatBRL(acc.currentBalance)}</div>
+                </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
-                <span>Saldo Inicial: {formatBRL(acc.initialBalance)}</span>
-                <span style={{ color: pendingCount > 0 ? "#F59E0B" : "#10B981" }}>
-                  {pendingCount > 0 ? `${pendingCount} a realizar` : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12} /> Saldo interno em dia</span>}
-                </span>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
+                  <span>Saldo Inicial: {formatBRL(acc.initialBalance)}</span>
+                  <span style={{ color: pendingCount > 0 ? "#F59E0B" : "#10B981" }}>
+                    {pendingCount > 0 ? `${pendingCount} a realizar` : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Check size={12} /> Saldo interno em dia</span>}
+                  </span>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -3262,6 +3356,8 @@ function PartnersView({
 
 function TransactionModal({
   tx,
+  initialClientId,
+  initialType,
   categories,
   accounts,
   clients,
@@ -3271,6 +3367,8 @@ function TransactionModal({
   onSaved,
 }: {
   tx: Transaction | null;
+  initialClientId?: string;
+  initialType?: TxType;
   categories: Category[];
   accounts: BankAccount[];
   clients: Client[];
@@ -3280,14 +3378,18 @@ function TransactionModal({
   onSaved: () => void;
 }) {
   const isMobile = useIsMobile();
-  const [type, setType] = useState<TxType>(tx?.type || "outflow");
+  const [type, setType] = useState<TxType>(tx?.type || initialType || "outflow");
   const [description, setDescription] = useState(tx?.description || "");
-  const [amountInput, setAmountInput] = useState(tx ? (tx.amount / 100).toFixed(2).replace(".", ",") : "");
-  const [dueDate, setDueDate] = useState(tx ? tx.dueDate.split("T")[0] : new Date().toISOString().split("T")[0]);
+  const [amountInput, setAmountInput] = useState(
+    tx && typeof tx.amount === "number" ? (tx.amount / 100).toFixed(2).replace(".", ",") : ""
+  );
+  const [dueDate, setDueDate] = useState(
+    tx?.dueDate ? tx.dueDate.split("T")[0] : new Date().toISOString().split("T")[0]
+  );
   const [categoryId, setCategoryId] = useState(tx?.categoryId || "");
   const [accountId, setAccountId] = useState(tx?.accountId || (accounts[0]?.id ?? ""));
   const [projectId, setProjectId] = useState(tx?.projectId || "");
-  const [clientId, setClientId] = useState(tx?.clientId || "");
+  const [clientId, setClientId] = useState(tx?.clientId || initialClientId || "");
   const [partnerId, setPartnerId] = useState(tx?.partnerId || "");
   const [costType, setCostType] = useState<CostType>(tx?.costType || "fixed_operating");
   const [status, setStatus] = useState<TxStatus>(tx?.status || "pending");
@@ -3358,7 +3460,7 @@ function TransactionModal({
       <div style={{ width: "100%", maxWidth: 560, maxHeight: "90dvh", overflowY: "auto", background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
-            {tx ? "Editar Lançamento" : "Novo Lançamento Financeiro"}
+            {tx ? "Editar Lançamento" : initialClientId ? "Faturar Cliente (A Receber)" : "Novo Lançamento Financeiro"}
           </h3>
           <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer" }}>
             <X style={{ width: 20, height: 20 }} />
@@ -3593,56 +3695,107 @@ function TransactionModal({
 // MODAL: BANK ACCOUNT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AccountModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState("checking");
+function AccountModal({
+  account,
+  onClose,
+  onSaved,
+}: {
+  account?: BankAccount | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(account?.name ?? "");
+  const [type, setType] = useState<"checking" | "credit_card" | "investment" | "cash">(account?.type ?? "checking");
   const [balanceInput, setBalanceInput] = useState("");
-  const [color, setColor] = useState("#8B5CF6");
+  const [color, setColor] = useState(account?.color ?? "#8B5CF6");
   const [saving, setSaving] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     try {
       setSaving(true);
-      await API.post("/finance/accounts", {
-        name: name.trim(),
-        type,
-        color,
-        initialBalance: parseBRL(balanceInput),
-      });
+      if (account) {
+        // Atualiza apenas informações cadastrais (nome, tipo, cor)
+        await API.put(`/finance/accounts/${account.id}`, {
+          name: name.trim(),
+          type,
+          color,
+        });
+        toast.success("Dados cadastrais da conta atualizados.");
+      } else {
+        // Nova conta com saldo inicial de abertura
+        await API.post("/finance/accounts", {
+          name: name.trim(),
+          type,
+          color,
+          initialBalance: parseBRL(balanceInput),
+        });
+        toast.success("Nova conta bancária cadastrada.");
+      }
       onSaved();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Erro ao criar conta.");
+      toast.error(err?.message || "Erro ao salvar conta bancária.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async () => {
+    if (!account) return;
+    const confirmMsg = `Deseja realmente desativar a conta "${account.name}"?\n\n- Se não houver movimentações, ela será removida do sistema.\n- Se houver movimentações, ela será arquivada preservando todo o histórico contábil e auditoria.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setDeactivating(true);
+      const res = await API.delete(`/finance/accounts/${account.id}`);
+      toast.success(res?.message || "Conta processada com sucesso.");
+      onSaved();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Erro ao desativar conta.");
+    } finally {
+      setDeactivating(false);
     }
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
       <div style={{ width: "100%", maxWidth: 440, background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>Nova Conta Bancária</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
+            {account ? "Gerenciar Conta Bancária" : "Nova Conta Bancária"}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Nome da Conta *</label>
             <input
               type="text"
               required
-              placeholder="Ex: Banco Inter PJ / Conta Cora..."
+              placeholder="Ex: Banco Inter PJ / Itaú Empresas..."
               value={name}
               onChange={(e) => setName(e.target.value)}
               style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: account ? "1fr" : "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Tipo</label>
               <select
                 value={type}
-                onChange={(e) => setType(e.target.value)}
+                onChange={(e) => setType(e.target.value as "checking" | "credit_card" | "investment" | "cash")}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
               >
                 <option value="checking">Conta Corrente</option>
@@ -3651,25 +3804,67 @@ function AccountModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
                 <option value="credit_card">Cartão Corporativo</option>
               </select>
             </div>
-            <div>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Saldo Inicial (R$)</label>
-              <input
-                type="text"
-                placeholder="0,00"
-                value={balanceInput}
-                onChange={(e) => setBalanceInput(e.target.value)}
-                style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-              />
-            </div>
+            {!account && (
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Saldo Inicial (R$)</label>
+                <input
+                  type="text"
+                  placeholder="0,00"
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(e.target.value)}
+                  style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+            )}
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-            <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12 }}>
-              Cancelar
-            </button>
-            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700 }}>
-              {saving ? "Salvando..." : "Salvar Conta"}
-            </button>
+          {account && (
+            <div style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.22)", borderRadius: 8, padding: "10px 12px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <ShieldCheck style={{ width: 16, height: 16, color: "#A78BFA", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 11, color: "#ccc", lineHeight: 1.4 }}>
+                <strong>Saldo Registrado Atual: {formatBRL(account.currentBalance)}</strong>
+                <br />
+                Por integridade e governança contábil, o saldo é apurado exclusivamente através dos lançamentos de receitas e despesas no Livro Caixa, impedindo manipulações indevidas.
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: account ? "space-between" : "flex-end", alignItems: "center", gap: 10, marginTop: 8 }}>
+            {account && (
+              <button
+                type="button"
+                onClick={handleDeactivate}
+                disabled={deactivating}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "rgba(239,68,68,0.1)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  color: "#EF4444",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {deactivating ? "Processando..." : "Desativar Conta"}
+              </button>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                {saving ? "Salvando..." : account ? "Salvar Alterações" : "Salvar Conta"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
