@@ -4,6 +4,7 @@ import {
   financialTransactionsTable,
   financialCategoriesTable,
   clientsTable,
+  clientContractsTable,
   workspaceMembersTable,
   projectsTable,
   usersTable,
@@ -12,8 +13,9 @@ import {
   financialBudgetsTable,
   financialAuditLogsTable,
   financialSettingsTable,
+  whatsappMessagesTable,
 } from "@workspace/db";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
 import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
@@ -529,11 +531,22 @@ router.get("/clients", requireAuth, async (req: Request, res: Response) => {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
 
-    const clients = await db
-      .select()
+    const rows = await db
+      .select({
+        client: clientsTable,
+        projectName: projectsTable.name,
+        projectColor: projectsTable.color,
+      })
       .from(clientsTable)
+      .leftJoin(projectsTable, eq(clientsTable.projectId, projectsTable.id))
       .where(eq(clientsTable.workspaceId, workspaceId))
       .orderBy(clientsTable.name);
+
+    const clients = rows.map(r => ({
+      ...r.client,
+      projectName: r.projectName ?? undefined,
+      projectColor: r.projectColor ?? undefined,
+    }));
 
     res.json({ clients });
   } catch (err) {
@@ -547,7 +560,7 @@ router.post("/clients", requireAuth, async (req: Request, res: Response) => {
     const workspaceId = await getWorkspaceId(req);
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
 
-    const { name, document, email, phone, notes, whatsappOptIn } = req.body;
+    const { name, document, email, phone, notes, whatsappOptIn, projectId } = req.body;
     if (!name) { res.status(400).json({ error: "name is required" }); return; }
     if (whatsappOptIn !== undefined && typeof whatsappOptIn !== "boolean") {
       res.status(400).json({ error: "whatsappOptIn must be a boolean" }); return;
@@ -559,6 +572,7 @@ router.post("/clients", requireAuth, async (req: Request, res: Response) => {
         workspaceId, name, document, email, phone, notes,
         whatsappOptIn: whatsappOptIn === true,
         whatsappOptInAt: whatsappOptIn === true ? new Date() : null,
+        projectId: projectId || null,
       })
       .returning();
 
@@ -575,7 +589,7 @@ router.put("/clients/:id", requireAuth, async (req: Request, res: Response) => {
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
     const id = req.params.id as string;
 
-    const { name, document, email, phone, notes, status, whatsappOptIn } = req.body;
+    const { name, document, email, phone, notes, status, whatsappOptIn, projectId } = req.body;
     if (whatsappOptIn !== undefined && typeof whatsappOptIn !== "boolean") {
       res.status(400).json({ error: "whatsappOptIn must be a boolean" }); return;
     }
@@ -598,7 +612,12 @@ router.put("/clients/:id", requireAuth, async (req: Request, res: Response) => {
       };
     const [client] = await db
       .update(clientsTable)
-      .set({ name, document, email, phone, notes, status, ...optInUpdate, updatedAt: new Date() })
+      .set({
+        name, document, email, phone, notes, status,
+        projectId: projectId ?? undefined,
+        ...optInUpdate,
+        updatedAt: new Date(),
+      })
       .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)))
       .returning();
 
@@ -616,15 +635,316 @@ router.delete("/clients/:id", requireAuth, async (req: Request, res: Response) =
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
     const id = req.params.id as string;
 
-    // Soft-delete by setting status to 'inactive'
     const [client] = await db
-      .update(clientsTable)
-      .set({ status: "inactive", updatedAt: new Date() })
+      .select({ id: clientsTable.id, name: clientsTable.name })
+      .from(clientsTable)
       .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)))
-      .returning();
+      .limit(1);
 
+    if (!client) { res.status(404).json({ error: "Cliente não encontrado" }); return; }
+
+    // Verifica se possui transações vinculadas no Livro Caixa
+    const [txCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(financialTransactionsTable)
+      .where(and(eq(financialTransactionsTable.clientId, id), eq(financialTransactionsTable.workspaceId, workspaceId)));
+
+    const hasTransactions = Boolean(txCount && txCount.count > 0);
+
+    if (hasTransactions) {
+      // Governança Contábil: mantém o histórico fiscal, cancela o contrato e inativa o cliente
+      await db.transaction(async (tx) => {
+        await tx
+          .update(clientsTable)
+          .set({ status: "inactive", whatsappOptIn: false, whatsappOptInAt: null, updatedAt: new Date() })
+          .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)));
+
+        await tx
+          .update(clientContractsTable)
+          .set({ status: "cancelled", updatedAt: new Date() })
+          .where(and(eq(clientContractsTable.clientId, id), eq(clientContractsTable.workspaceId, workspaceId)));
+
+        await tx
+          .update(whatsappMessagesTable)
+          .set({ status: "skipped", lastError: "Contrato cancelado / cliente inativado", updatedAt: new Date() })
+          .where(and(
+            eq(whatsappMessagesTable.workspaceId, workspaceId),
+            eq(whatsappMessagesTable.clientId, id),
+            inArray(whatsappMessagesTable.status, ["queued", "retry"])
+          ));
+      });
+
+      res.json({
+        ok: true,
+        archived: true,
+        message: `Contrato de "${client.name}" cancelado com sucesso. Histórico financeiro preservado e cobranças suspensas.`,
+      });
+    } else {
+      // Cliente sem faturas vinculadas: remoção completa e definitiva
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(clientContractsTable)
+          .where(and(eq(clientContractsTable.clientId, id), eq(clientContractsTable.workspaceId, workspaceId)));
+
+        await tx
+          .delete(whatsappMessagesTable)
+          .where(and(eq(whatsappMessagesTable.clientId, id), eq(whatsappMessagesTable.workspaceId, workspaceId)));
+
+        await tx
+          .delete(clientsTable)
+          .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)));
+      });
+
+      res.json({
+        ok: true,
+        deleted: true,
+        message: `Cliente "${client.name}" excluído definitivamente com sucesso.`,
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/clients/:id/reactivate", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const id = req.params.id as string;
+
+    const [client] = await db
+      .select({ id: clientsTable.id, name: clientsTable.name })
+      .from(clientsTable)
+      .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (!client) { res.status(404).json({ error: "Cliente não encontrado" }); return; }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(clientsTable)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(and(eq(clientsTable.id, id), eq(clientsTable.workspaceId, workspaceId)));
+
+      await tx
+        .update(clientContractsTable)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(and(eq(clientContractsTable.clientId, id), eq(clientContractsTable.workspaceId, workspaceId)));
+    });
+
+    res.json({
+      ok: true,
+      message: `Cliente "${client.name}" e contrato reativados com sucesso.`,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLIENT CONTRACTS — Configuração de faturamento por cliente/produto
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /finance/projects/:projectId/clients — clientes de um projeto com contrato
+router.get("/projects/:projectId/clients", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const projectId = req.params.projectId as string;
+
+    const clients = await db
+      .select()
+      .from(clientsTable)
+      .where(and(
+        eq(clientsTable.workspaceId, workspaceId),
+        sql`${clientsTable.projectId} = ${projectId}`,
+      ))
+      .orderBy(clientsTable.name);
+
+    // Para cada cliente, busca o contrato ativo
+    const contracts = await db
+      .select()
+      .from(clientContractsTable)
+      .where(and(
+        eq(clientContractsTable.workspaceId, workspaceId),
+        eq(clientContractsTable.projectId, projectId),
+      ));
+
+    const contractByClientId = new Map(contracts.map(c => [c.clientId, c]));
+
+    const result = clients.map(c => ({
+      ...c,
+      contract: contractByClientId.get(c.id) ?? null,
+    }));
+
+    res.json({ clients: result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /finance/clients/:id/contract — contrato vigente de um cliente
+router.get("/clients/:id/contract", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const id = req.params.id as string;
+
+    const [contract] = await db
+      .select()
+      .from(clientContractsTable)
+      .where(and(eq(clientContractsTable.clientId, id), eq(clientContractsTable.workspaceId, workspaceId)))
+      .orderBy(desc(clientContractsTable.createdAt))
+      .limit(1);
+
+    res.json({ contract: contract ?? null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /finance/clients/:id/contract — criar ou atualizar contrato de um cliente
+router.put("/clients/:id/contract", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const clientId = req.params.id as string;
+
+    const {
+      projectId, monthlyAmount, billingDay, billingCycleMonths,
+      contractStartDate, contractEndDate, totalInstallments, notes,
+    } = req.body;
+
+    if (!projectId) { res.status(400).json({ error: "projectId is required" }); return; }
+    if (monthlyAmount === undefined || monthlyAmount < 0) {
+      res.status(400).json({ error: "monthlyAmount must be >= 0" }); return;
+    }
+
+    // Verifica se o cliente pertence ao workspace
+    const [client] = await db
+      .select({ id: clientsTable.id })
+      .from(clientsTable)
+      .where(and(eq(clientsTable.id, clientId), eq(clientsTable.workspaceId, workspaceId)))
+      .limit(1);
     if (!client) { res.status(404).json({ error: "Client not found" }); return; }
-    res.json({ ok: true, client });
+
+    // Upsert: busca contrato existente para aquele cliente/projeto
+    const [existing] = await db
+      .select({ id: clientContractsTable.id })
+      .from(clientContractsTable)
+      .where(and(
+        eq(clientContractsTable.clientId, clientId),
+        eq(clientContractsTable.projectId, projectId),
+        eq(clientContractsTable.workspaceId, workspaceId),
+      ))
+      .limit(1);
+
+    let contract;
+    const payload = {
+      monthlyAmount: Math.round(monthlyAmount),
+      billingDay: billingDay ?? 1,
+      billingCycleMonths: billingCycleMonths ?? 1,
+      contractStartDate: contractStartDate ? new Date(contractStartDate) : null,
+      contractEndDate: contractEndDate ? new Date(contractEndDate) : null,
+      totalInstallments: totalInstallments ?? null,
+      notes: notes ?? null,
+      status: "active" as const,
+      updatedAt: new Date(),
+    };
+
+    if (existing) {
+      [contract] = await db
+        .update(clientContractsTable)
+        .set(payload)
+        .where(eq(clientContractsTable.id, existing.id))
+        .returning();
+    } else {
+      [contract] = await db
+        .insert(clientContractsTable)
+        .values({ workspaceId, clientId, projectId, ...payload })
+        .returning();
+    }
+
+    // Garante que o cliente está vinculado ao projeto
+    await db
+      .update(clientsTable)
+      .set({ projectId, updatedAt: new Date() })
+      .where(eq(clientsTable.id, clientId));
+
+    res.json({ contract });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /finance/clients/:id/contract/generate-installments — gera parcelas/faturas automáticas
+router.post("/clients/:id/contract/generate-installments", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+    const clientId = req.params.id as string;
+    const { months = 3 } = req.body; // quantos meses gerar, default 3
+
+    // Busca contrato ativo
+    const [contract] = await db
+      .select()
+      .from(clientContractsTable)
+      .where(and(
+        eq(clientContractsTable.clientId, clientId),
+        eq(clientContractsTable.workspaceId, workspaceId),
+        eq(clientContractsTable.status, "active"),
+      ))
+      .limit(1);
+
+    if (!contract) { res.status(404).json({ error: "No active contract found for this client" }); return; }
+
+    const [clientData] = await db
+      .select({ name: clientsTable.name })
+      .from(clientsTable)
+      .where(eq(clientsTable.id, clientId))
+      .limit(1);
+
+    const created: any[] = [];
+    const now = new Date();
+
+    for (let i = 0; i < months; i++) {
+      const dueDate = new Date(now.getFullYear(), now.getMonth() + i, contract.billingDay);
+      // Ajusta para dia válido no mês
+      while (dueDate.getDate() !== contract.billingDay) {
+        dueDate.setDate(dueDate.getDate() - 1);
+      }
+
+      const description = `${clientData?.name ?? "Cliente"} — Mensalidade ${String(dueDate.getMonth() + 1).padStart(2, "0")}/${dueDate.getFullYear()}`;
+
+      const [tx] = await db
+        .insert(financialTransactionsTable)
+        .values({
+          workspaceId,
+          type: "inflow",
+          status: "pending",
+          description,
+          amount: contract.monthlyAmount,
+          dueDate,
+          costType: "fixed_operating",
+          clientId,
+          projectId: contract.projectId,
+          isRecurring: contract.totalInstallments === null,
+          recurringInterval: contract.totalInstallments === null ? "monthly" : null,
+          installmentNumber: contract.totalInstallments ? (contract.installmentsPaid + i + 1) : null,
+          installmentsTotal: contract.totalInstallments ?? null,
+          approvalStatus: "approved",
+        })
+        .returning();
+
+      created.push(tx);
+    }
+
+    res.json({ created, count: created.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });

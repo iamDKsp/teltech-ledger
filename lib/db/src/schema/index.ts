@@ -92,6 +92,8 @@ export const tasksTable = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
   columnId: uuid("column_id").notNull().references(() => columnsTable.id, { onDelete: "cascade" }),
   projectId: uuid("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+  // Cliente específico dentro do projeto (opcional — filtragem por cliente)
+  clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
   title: text("title").notNull().default(""),
   description: text("description"),
   priority: priorityEnum("priority").notNull().default("normal"),
@@ -321,6 +323,8 @@ export const projectsRelations = relations(projectsTable, ({ one, many }) => ({
   tasks: many(tasksTable),
   tags: many(tagsTable),
   meetings: many(meetingsTable),
+  clients: many(clientsTable),
+  contracts: many(clientContractsTable),
 }));
 
 export const columnsRelations = relations(columnsTable, ({ one, many }) => ({
@@ -331,6 +335,7 @@ export const columnsRelations = relations(columnsTable, ({ one, many }) => ({
 export const tasksRelations = relations(tasksTable, ({ one, many }) => ({
   column: one(columnsTable, { fields: [tasksTable.columnId], references: [columnsTable.id] }),
   project: one(projectsTable, { fields: [tasksTable.projectId], references: [projectsTable.id] }),
+  client: one(clientsTable, { fields: [tasksTable.clientId], references: [clientsTable.id] }),
   creator: one(usersTable, { fields: [tasksTable.createdBy], references: [usersTable.id] }),
   assignees: many(taskAssigneesTable),
   tags: many(taskTagsTable),
@@ -407,6 +412,8 @@ export const clientsTable = pgTable("clients", {
   whatsappOptInAt: timestamp("whatsapp_opt_in_at"),
   status: text("status").notNull().default("active"), // 'active' | 'inactive'
   notes: text("notes"),
+  // Vínculo com Projeto (produto/sistema contratado pelo cliente)
+  projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -414,6 +421,41 @@ export const clientsTable = pgTable("clients", {
 export const insertClientSchema = createInsertSchema(clientsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertClient = z.infer<typeof insertClientSchema>;
 export type Client = typeof clientsTable.$inferSelect;
+
+// ─── Client Contracts ─────────────────────────────────────────────────────────
+// Contrato de faturamento de um cliente dentro de um projeto (produto)
+// Ex: StrataScratch paga R$2.500/mês pelo LEADGER, todo dia 10
+
+export const clientContractsTable = pgTable("client_contracts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projectsTable.id, { onDelete: "cascade" }),
+
+  // Valor e Ciclo de Cobrança
+  monthlyAmount: integer("monthly_amount").notNull().default(0), // em centavos
+  billingDay: integer("billing_day").notNull().default(1),        // dia do vencimento (1-28)
+  billingCycleMonths: integer("billing_cycle_months").notNull().default(1), // 1=mensal, 3=trimestral, 12=anual
+
+  // Duração do Contrato
+  contractStartDate: timestamp("contract_start_date"),
+  contractEndDate: timestamp("contract_end_date"),
+
+  // Parcelamento (null = recorrente indefinido)
+  totalInstallments: integer("total_installments"),
+  installmentsPaid: integer("installments_paid").notNull().default(0),
+
+  // Status do contrato
+  status: text("status").notNull().default("active"), // 'active' | 'paused' | 'cancelled'
+  notes: text("notes"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertClientContractSchema = createInsertSchema(clientContractsTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertClientContract = z.infer<typeof insertClientContractSchema>;
+export type ClientContract = typeof clientContractsTable.$inferSelect;
 
 // ─── Financial Accounts ───────────────────────────────────────────────────────
 
@@ -619,7 +661,16 @@ export const financialCategoriesRelations = relations(financialCategoriesTable, 
 
 export const clientsRelations = relations(clientsTable, ({ one, many }) => ({
   workspace: one(workspacesTable, { fields: [clientsTable.workspaceId], references: [workspacesTable.id] }),
+  project: one(projectsTable, { fields: [clientsTable.projectId], references: [projectsTable.id] }),
   transactions: many(financialTransactionsTable),
+  contracts: many(clientContractsTable),
+  tasks: many(tasksTable),
+}));
+
+export const clientContractsRelations = relations(clientContractsTable, ({ one }) => ({
+  workspace: one(workspacesTable, { fields: [clientContractsTable.workspaceId], references: [workspacesTable.id] }),
+  client: one(clientsTable, { fields: [clientContractsTable.clientId], references: [clientsTable.id] }),
+  project: one(projectsTable, { fields: [clientContractsTable.projectId], references: [projectsTable.id] }),
 }));
 
 export const financialTransactionsRelations = relations(financialTransactionsTable, ({ one, many }) => ({

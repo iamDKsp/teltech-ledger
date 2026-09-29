@@ -35,7 +35,9 @@ import {
   Users, 
   LogOut, 
   Plus, 
-  ChevronRight 
+  ChevronRight,
+  ChevronDown,
+  UserCircle,
 } from "lucide-react";
 import { useIsMobile } from "./hooks/use-mobile";
 // ─── App Context ──────────────────────────────────────────────────────────────
@@ -1487,6 +1489,11 @@ function Sidebar() {
   const [hovNav, setHovNav] = useState<string|null>(null);
   const [editProject, setEditProject] = useState<AppProject|null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  // Mapa de projectId → bool (expandido ou não)
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  // Mapa de projectId → clientes carregados
+  const [projectClients, setProjectClients] = useState<Record<string, any[]>>({});
+  const [loadingClients, setLoadingClients] = useState<Record<string, boolean>>({});
   const ctx = useContext(AppContext);
   const { sidebarOpen, setSidebarOpen, sidebarModule, activeProject, setActiveProject, projects, refreshProjects, setActiveTab } = ctx;
   const w = sidebarOpen ? 200 : 52;
@@ -1506,18 +1513,186 @@ function Sidebar() {
     navigate(`/projetos/${p.id}/quadros`);
   };
 
-  return (
-    <>
-    <div style={{ width:w, minWidth:w, height:"100%", background:"#1A1A1A", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", overflowY:"auto", overflowX:"hidden", flexShrink:0, transition:"width 0.2s ease" }}>
-      {/* Logo + toggle */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent: sidebarOpen ? "space-between" : "center", padding: sidebarOpen ? "14px 14px 10px" : "14px 0 10px" }}>
-        {sidebarOpen && (
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <div style={{ width:28, height:28, background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" }}><Zap size={15} fill="currentColor" /></div>
-            <span style={{ fontSize:14, fontWeight:700, color:"#f0f0f0", letterSpacing:"-0.3px" }}>Teltech</span>
+  const toggleProjectExpand = async (proj: AppProject, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const isExpanded = expandedProjects[proj.id];
+    setExpandedProjects(prev => ({ ...prev, [proj.id]: !isExpanded }));
+
+    if (!isExpanded && !projectClients[proj.id]) {
+      setLoadingClients(prev => ({ ...prev, [proj.id]: true }));
+      try {
+        const res = await API.get(`/finance/projects/${proj.id}/clients`);
+        setProjectClients(prev => ({ ...prev, [proj.id]: res?.clients ?? [] }));
+      } catch {
+        setProjectClients(prev => ({ ...prev, [proj.id]: [] }));
+      } finally {
+        setLoadingClients(prev => ({ ...prev, [proj.id]: false }));
+      }
+    }
+  };
+
+  const handleClientClick = (proj: AppProject, client: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Navega para o financeiro abrindo a ficha do cliente
+    navigate(`/financeiro`);
+  };
+
+  const handleAddClientToProject = (proj: AppProject, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/financeiro`);
+  };
+
+  const refreshProjectClients = async (projectId: string) => {
+    try {
+      const res = await API.get(`/finance/projects/${projectId}/clients`);
+      setProjectClients(prev => ({ ...prev, [projectId]: res?.clients ?? [] }));
+    } catch {}
+  };
+
+  const renderProjectItem = (proj: AppProject) => {
+    const isActive = activeProject?.id === proj.id && sidebarModule === "project";
+    const isExpanded = expandedProjects[proj.id] ?? false;
+    const clients = projectClients[proj.id] ?? [];
+    const isLoadingC = loadingClients[proj.id] ?? false;
+
+    return (
+      <div key={proj.id}>
+        {/* Linha do projeto */}
+        <div
+          title={!sidebarOpen ? proj.name : undefined}
+          style={{
+            display: "flex", alignItems: "center",
+            justifyContent: sidebarOpen ? "flex-start" : "center",
+            gap: 6, padding: sidebarOpen ? "5px 8px" : "6px",
+            borderRadius: 6, cursor: "pointer", fontSize: 12,
+            color: isActive ? "#e0e0e0" : "#777",
+            background: isActive ? "#242424" : "transparent",
+            transition: "all 0.12s",
+          }}
+          onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "#1e1e1e"; e.currentTarget.style.color = "#bbb"; }}}
+          onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#777"; }}}
+          onClick={() => handleProjectClick(proj)}
+        >
+          {/* Avatar do projeto */}
+          <div style={{
+            width: sidebarOpen ? 18 : 24, height: sidebarOpen ? 18 : 24, borderRadius: 5,
+            background: proj.icon ? `url(${proj.icon}) center/cover` : proj.color,
+            flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: sidebarOpen ? 9 : 12, fontWeight: 700, color: "rgba(255,255,255,0.9)",
+          }}>
+            {!proj.icon && proj.name[0]}
+          </div>
+
+          {sidebarOpen && (
+            <>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400 }}>
+                {proj.name}
+              </span>
+
+              {/* Botão expandir clientes */}
+              <button
+                onClick={(e) => toggleProjectExpand(proj, e)}
+                title={isExpanded ? "Recolher clientes" : "Ver clientes"}
+                style={{
+                  background: "transparent", border: "none", color: isExpanded ? "#A78BFA" : "#555",
+                  cursor: "pointer", padding: 2, display: "flex", alignItems: "center",
+                  opacity: 0.8, transition: "all 0.15s", flexShrink: 0,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#A78BFA"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "0.8"; e.currentTarget.style.color = isExpanded ? "#A78BFA" : "#555"; }}
+              >
+                <ChevronDown size={11} style={{ transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.2s" }} />
+              </button>
+
+              {/* Settings */}
+              <button
+                onClick={e => { e.stopPropagation(); setEditProject(proj); }}
+                title="Configurações do projeto"
+                style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", padding: 2, display: "flex", alignItems: "center", opacity: 0.6, transition: "all 0.15s", flexShrink: 0 }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#e0e0e0"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "0.6"; e.currentTarget.style.color = "#555"; }}
+              >
+                <Settings size={11} />
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Lista de clientes expandida */}
+        {sidebarOpen && isExpanded && (
+          <div style={{ paddingLeft: 26, display: "flex", flexDirection: "column", gap: 1, marginBottom: 2 }}>
+            {isLoadingC ? (
+              <div style={{ fontSize: 11, color: "#555", padding: "4px 8px" }}>Carregando...</div>
+            ) : clients.length === 0 ? (
+              <div style={{ fontSize: 11, color: "#555", padding: "3px 8px", fontStyle: "italic" }}>Sem clientes vinculados</div>
+            ) : (
+              clients.map((client: any) => {
+                // Verifica se há parcela em atraso
+                const hasOverdue = client.contract && client.pendingOverdue;
+                const statusColor = client.status === "inactive" ? "#555" : "#10B981";
+                const statusLabel = client.status === "inactive" ? "Inativo" : "Em Dia";
+
+                return (
+                  <div
+                    key={client.id}
+                    onClick={(e) => handleClientClick(proj, client, e)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "4px 8px", borderRadius: 5, cursor: "pointer",
+                      fontSize: 11, color: "#999", transition: "all 0.1s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "#1a1a1e"; e.currentTarget.style.color = "#ddd"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#999"; }}
+                  >
+                    <UserCircle size={12} style={{ flexShrink: 0, color: "#666" }} />
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {client.name}
+                    </span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 8,
+                      background: hasOverdue ? "rgba(239,68,68,0.12)" : "rgba(16,185,129,0.12)",
+                      color: hasOverdue ? "#EF4444" : statusColor,
+                      flexShrink: 0,
+                    }}>
+                      {hasOverdue ? "Atraso" : statusLabel}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+
+            {/* Botão + Adicionar Cliente */}
+            <div
+              onClick={(e) => handleAddClientToProject(proj, e)}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                padding: "4px 8px", borderRadius: 5, cursor: "pointer",
+                fontSize: 11, color: "#555", transition: "all 0.1s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = "#A78BFA"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "#555"; }}
+            >
+              <Plus size={10} />
+              <span>Adicionar Cliente</span>
+            </div>
           </div>
         )}
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", padding:4, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center" }}
+      </div>
+    );
+  };
+
+  return (
+    <>
+    <div style={{ width: w, minWidth: w, height: "100%", background: "#1A1A1A", borderRight: "1px solid #252525", display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden", flexShrink: 0, transition: "width 0.2s ease" }}>
+      {/* Logo + toggle */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "space-between" : "center", padding: sidebarOpen ? "14px 14px 10px" : "14px 0 10px" }}>
+        {sidebarOpen && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 28, height: 28, background: "linear-gradient(135deg,#4f2d8a,#7C5AC2)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}><Zap size={15} fill="currentColor" /></div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#f0f0f0", letterSpacing: "-0.3px" }}>Teltech</span>
+          </div>
+        )}
+        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", padding: 4, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
           onMouseEnter={e=>e.currentTarget.style.color="#bbb"} onMouseLeave={e=>e.currentTarget.style.color="#555"}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
         </button>
@@ -1539,14 +1714,14 @@ function Sidebar() {
       </nav>
 
       {/* Projects section */}
-      <div style={{ height:8 }}/>
-      <div style={{ padding: sidebarOpen ? "0 6px" : "0", flex:1, display:"flex", flexDirection:"column", alignItems: sidebarOpen ? "stretch" : "center", gap: 4 }}>
+      <div style={{ height: 8 }}/>
+      <div style={{ padding: sidebarOpen ? "0 6px" : "0", flex: 1, display: "flex", flexDirection: "column", alignItems: sidebarOpen ? "stretch" : "center", gap: 2 }}>
         {sidebarOpen ? (
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"5px 8px" }}>
-            <span style={{ fontSize:11, fontWeight:600, color:"#555", letterSpacing:"0.04em" }}>Projetos</span>
-            <div style={{ display:"flex", gap:4 }}>
-              <button onClick={() => setShowNewProject(true)} style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:15, lineHeight:1 }} title="Novo Projeto">+</button>
-              <button onClick={()=>setProjOpen(!projOpen)} style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 8px" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#555", letterSpacing: "0.04em" }}>Projetos</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => setShowNewProject(true)} style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer", fontSize: 15, lineHeight: 1 }} title="Novo Projeto">+</button>
+              <button onClick={()=>setProjOpen(!projOpen)} style={{ background: "transparent", border: "none", color: "#555", cursor: "pointer" }}>
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: projOpen?"rotate(0)":"rotate(-90deg)", transition:"0.2s" }}><path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>
@@ -1559,61 +1734,15 @@ function Sidebar() {
           <>
             {/* Favoritos */}
             {sidebarOpen && projects.some((p: any) => p.isFavorite) && (
-              <div style={{ fontSize:10, fontWeight:700, color:"#444", letterSpacing:"0.08em", padding:"4px 8px", marginTop:4 }}>FAVORITOS</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#444", letterSpacing: "0.08em", padding: "4px 8px", marginTop: 4 }}>FAVORITOS</div>
             )}
-            {projects.filter((p: any) => p.isFavorite).map(proj => {
-              const isActive = activeProject?.id === proj.id && sidebarModule === "project";
-              return (
-                <div key={proj.id} title={!sidebarOpen ? proj.name : undefined}
-                  onClick={() => handleProjectClick(proj)}
-                  style={{ display:"flex", alignItems:"center", justifyContent: sidebarOpen ? "flex-start" : "center", gap:8, padding: sidebarOpen ? "5px 8px" : "6px", borderRadius:6, cursor:"pointer", fontSize:12, color: isActive ? "#e0e0e0" : "#777", background: isActive ? "#242424" : "transparent", transition:"all 0.12s" }}
-                  onMouseEnter={e=>{ if(!isActive){ e.currentTarget.style.background="#1e1e1e"; e.currentTarget.style.color="#bbb"; }}}
-                  onMouseLeave={e=>{ if(!isActive){ e.currentTarget.style.background="transparent"; e.currentTarget.style.color="#777"; }}}>
-                  <div style={{ width: sidebarOpen ? 18 : 24, height: sidebarOpen ? 18 : 24, borderRadius:5, background: proj.icon ? `url(${proj.icon}) center/cover` : proj.color, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize: sidebarOpen ? 9 : 12, fontWeight:700, color:"rgba(255,255,255,0.9)" }}>{!proj.icon && proj.name[0]}</div>
-                  {sidebarOpen && (
-                    <>
-                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{proj.name}</span>
-                      <button onClick={e => { e.stopPropagation(); setEditProject(proj); }}
-                        title="Configurações do projeto"
-                        style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", padding:2, display:"flex", alignItems:"center", opacity:0.6, transition:"all 0.15s" }}
-                        onMouseEnter={e=>{ e.currentTarget.style.opacity="1"; e.currentTarget.style.color="#e0e0e0"; }}
-                        onMouseLeave={e=>{ e.currentTarget.style.opacity="0.6"; e.currentTarget.style.color="#555"; }}>
-                        <Settings size={13} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
+            {projects.filter((p: any) => p.isFavorite).map(proj => renderProjectItem(proj))}
 
             {/* Outros */}
             {sidebarOpen && projects.some((p: any) => !p.isFavorite) && (
-              <div style={{ fontSize:10, fontWeight:700, color:"#444", letterSpacing:"0.08em", padding:"4px 8px", marginTop:8 }}>GERAL</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#444", letterSpacing: "0.08em", padding: "4px 8px", marginTop: 8 }}>GERAL</div>
             )}
-            {projects.filter((p: any) => !p.isFavorite).map(proj => {
-              const isActive = activeProject?.id === proj.id && sidebarModule === "project";
-              return (
-                <div key={proj.id} title={!sidebarOpen ? proj.name : undefined}
-                  onClick={() => handleProjectClick(proj)}
-                  style={{ display:"flex", alignItems:"center", justifyContent: sidebarOpen ? "flex-start" : "center", gap:8, padding: sidebarOpen ? "5px 8px" : "6px", borderRadius:6, cursor:"pointer", fontSize:12, color: isActive ? "#e0e0e0" : "#777", background: isActive ? "#242424" : "transparent", transition:"all 0.12s" }}
-                  onMouseEnter={e=>{ if(!isActive){ e.currentTarget.style.background="#1e1e1e"; e.currentTarget.style.color="#bbb"; }}}
-                  onMouseLeave={e=>{ if(!isActive){ e.currentTarget.style.background="transparent"; e.currentTarget.style.color="#777"; }}}>
-                  <div style={{ width: sidebarOpen ? 18 : 24, height: sidebarOpen ? 18 : 24, borderRadius:5, background: proj.icon ? `url(${proj.icon}) center/cover` : proj.color, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize: sidebarOpen ? 9 : 12, fontWeight:700, color:"rgba(255,255,255,0.9)" }}>{!proj.icon && proj.name[0]}</div>
-                  {sidebarOpen && (
-                    <>
-                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{proj.name}</span>
-                      <button onClick={e => { e.stopPropagation(); setEditProject(proj); }}
-                        title="Configurações do projeto"
-                        style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", padding:2, display:"flex", alignItems:"center", opacity:0.6, transition:"all 0.15s" }}
-                        onMouseEnter={e=>{ e.currentTarget.style.opacity="1"; e.currentTarget.style.color="#e0e0e0"; }}
-                        onMouseLeave={e=>{ e.currentTarget.style.opacity="0.6"; e.currentTarget.style.color="#555"; }}>
-                        <Settings size={13} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
+            {projects.filter((p: any) => !p.isFavorite).map(proj => renderProjectItem(proj))}
           </>
         )}
       </div>

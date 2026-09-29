@@ -30,6 +30,7 @@ import {
   Wallet,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Filter,
   Sparkles,
   Lock,
@@ -43,6 +44,10 @@ import {
   Send,
   Crown,
   AlertOctagon,
+  Trash2,
+  FolderOpen,
+  Repeat2,
+  Coins,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -108,6 +113,24 @@ interface Client {
   email?: string;
   phone?: string;
   whatsappOptIn: boolean;
+  status: string;
+  notes?: string;
+  projectId?: string;
+  projectName?: string;
+  projectColor?: string;
+}
+
+interface ClientContract {
+  id: string;
+  clientId: string;
+  projectId: string;
+  monthlyAmount: number;        // em centavos
+  billingDay: number;
+  billingCycleMonths: number;
+  contractStartDate?: string;
+  contractEndDate?: string;
+  totalInstallments?: number;
+  installmentsPaid: number;
   status: string;
   notes?: string;
 }
@@ -738,6 +761,35 @@ export function FinanceiroPage() {
     }
   };
 
+  const handleDeleteClient = async (client: Client) => {
+    const isAlreadyInactive = client.status === "inactive";
+    const confirmMsg = isAlreadyInactive
+      ? `Deseja realmente excluir definitivamente o cadastro do cliente "${client.name}"?\n\n(Se não houver faturas vinculadas, ele será totalmente removido do sistema).`
+      : `Deseja encerrar o contrato e desativar o cliente "${client.name}"?\n\n- Cobranças automáticas pelo WhatsApp serão suspensas imediatamente.\n- Se houver faturas e histórico contábil, eles serão mantidos em segurança.\n- Se for um cadastro sem faturas, ele será excluído.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await API.delete(`/finance/clients/${client.id}`);
+      toast.success(res?.message || "Operação realizada com sucesso.");
+      await loadAllData();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Erro ao processar cliente.");
+    }
+  };
+
+  const handleReactivateClient = async (client: Client) => {
+    try {
+      const res = await API.post(`/finance/clients/${client.id}/reactivate`, {});
+      toast.success(res?.message || "Cliente e contrato reativados com sucesso.");
+      await loadAllData();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Erro ao reativar cliente.");
+    }
+  };
+
   const handleSendWhatsAppPix = async (_client: Client, tx?: Transaction) => {
     const selectedTx = transactions.find(item => item.id === tx?.id);
     const selectedClient = clients.find(item => item.id === selectedTx?.clientId);
@@ -1050,6 +1102,8 @@ export function FinanceiroPage() {
                 onNewClient={() => { setEditingClient(null); setShowClientModal(true); }}
                 onEditClient={(client) => { setEditingClient(client); setShowClientModal(true); }}
                 onSendWhatsApp={handleSendWhatsAppPix}
+                onDeleteClient={handleDeleteClient}
+                onReactivateClient={handleReactivateClient}
                 sendingBillingId={sendingBillingId}
                 onNewTxForClient={(clientId) => {
                   setEditingTx(null);
@@ -1173,6 +1227,8 @@ export function FinanceiroPage() {
             setEditingClient(null);
             loadAllData();
           }}
+          onDelete={handleDeleteClient}
+          onReactivate={handleReactivateClient}
         />
       )}
 
@@ -2461,6 +2517,8 @@ function ClientsView({
   onEditClient,
   onSendWhatsApp,
   onNewTxForClient,
+  onDeleteClient,
+  onReactivateClient,
   sendingBillingId,
 }: {
   clients: Client[];
@@ -2469,15 +2527,25 @@ function ClientsView({
   onEditClient: (client: Client) => void;
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onNewTxForClient: (clientId: string) => void;
+  onDeleteClient: (client: Client) => void;
+  onReactivateClient: (client: Client) => void;
   sendingBillingId: string | null;
 }) {
   const isMobile = useIsMobile();
   const [searchClient, setSearchClient] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"active" | "all" | "inactive">("active");
 
-  const filteredClients = clients.filter(c =>
-    c.name.toLowerCase().includes(searchClient.toLowerCase()) ||
-    (c.document || "").includes(searchClient)
-  );
+  const activeCount = clients.filter(c => c.status !== "inactive").length;
+  const inactiveCount = clients.filter(c => c.status === "inactive").length;
+
+  const filteredClients = clients.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(searchClient.toLowerCase()) ||
+      (c.document || "").includes(searchClient);
+    if (!matchesSearch) return false;
+    if (statusFilter === "active") return c.status !== "inactive";
+    if (statusFilter === "inactive") return c.status === "inactive";
+    return true;
+  });
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
@@ -2487,7 +2555,7 @@ function ClientsView({
             Carteira de Clientes & Contas a Receber
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
-            Gestão de contratos B2B, emissão de cobranças Pix via WhatsApp e histórico de pagamentos
+            Gestão de contratos B2B, emissão de cobranças Pix via WhatsApp e cancelamento/reativação de assinaturas
           </p>
         </div>
         <button
@@ -2510,54 +2578,99 @@ function ClientsView({
         </button>
       </div>
 
-      <div style={{ maxWidth: 360, width: "100%", position: "relative" }}>
-        <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: "#666" }} />
-        <input
-          type="text"
-          placeholder="Buscar cliente por nome ou CNPJ..."
-          value={searchClient}
-          onChange={(e) => setSearchClient(e.target.value)}
-          style={{
-            width: "100%",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8,
-            padding: "9px 12px 9px 36px",
-            color: "#fff",
-            fontSize: 16,
-            outline: "none",
-            boxSizing: "border-box",
-          }}
-        />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ maxWidth: 360, width: "100%", position: "relative" }}>
+          <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: "#666" }} />
+          <input
+            type="text"
+            placeholder="Buscar cliente por nome ou CNPJ..."
+            value={searchClient}
+            onChange={(e) => setSearchClient(e.target.value)}
+            style={{
+              width: "100%",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8,
+              padding: "9px 12px 9px 36px",
+              color: "#fff",
+              fontSize: 14,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            { id: "active",   label: `Ativos (${activeCount})` },
+            { id: "all",      label: `Todos (${clients.length})` },
+            { id: "inactive", label: `Cancelados / Inativos (${inactiveCount})` },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setStatusFilter(tab.id as any)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 20,
+                fontSize: 12,
+                fontWeight: statusFilter === tab.id ? 700 : 500,
+                background: statusFilter === tab.id ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.04)",
+                border: statusFilter === tab.id ? "1px solid #8B5CF6" : "1px solid rgba(255,255,255,0.08)",
+                color: statusFilter === tab.id ? "#fff" : "#a1a1aa",
+                cursor: "pointer",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {filteredClients.length > 0 ? (
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
           {filteredClients.map((client) => {
+            const isInactive = client.status === "inactive";
             const clientTxs = transactions.filter(t => t.clientId === client.id && t.type === "inflow");
             const totalBilled = clientTxs.filter(t => t.status === "paid").reduce((s, t) => s + t.amount, 0);
             const pendingTxs = clientTxs.filter(t => t.status === "pending").sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
             const pendingAmount = pendingTxs.reduce((s, t) => s + t.amount, 0);
             const hasOverdue = pendingTxs.some(t => new Date(t.dueDate) < new Date());
-            const canSendBilling = Boolean(client.whatsappOptIn && client.phone?.replace(/\D/g, "") && client.status !== "inactive" && pendingTxs.length > 0);
+            const canSendBilling = Boolean(client.whatsappOptIn && client.phone?.replace(/\D/g, "") && !isInactive && pendingTxs.length > 0);
 
             return (
               <div
                 key={client.id}
                 style={{
-                  background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
-                  border: `1px solid ${hasOverdue ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.08)"}`,
+                  background: isInactive
+                    ? "linear-gradient(135deg, rgba(22,22,25,0.95), rgba(18,18,20,0.95))"
+                    : "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
+                  border: `1px solid ${isInactive ? "rgba(239,68,68,0.2)" : hasOverdue ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.08)"}`,
                   borderRadius: 14,
                   padding: "20px",
                   display: "flex",
                   flexDirection: "column",
                   gap: 14,
+                  opacity: isInactive ? 0.85 : 1,
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>{client.name}</h4>
                     <span style={{ fontSize: 11, color: "#888" }}>{client.document || "Sem CNPJ/CPF"}</span>
+                    {client.projectId && client.projectName && (
+                      <div style={{ marginTop: 5 }}>
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
+                          background: `${client.projectColor || "#7C5AC2"}22`,
+                          border: `1px solid ${client.projectColor || "#7C5AC2"}44`,
+                          color: client.projectColor || "#A78BFA",
+                        }}>
+                          <FolderOpen size={9} /> {client.projectName}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <span
                     style={{
@@ -2565,22 +2678,38 @@ function ClientsView({
                       fontWeight: 700,
                       padding: "2px 8px",
                       borderRadius: 12,
-                      background: hasOverdue ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
-                      color: hasOverdue ? "#EF4444" : "#10B981",
-                      border: `1px solid ${hasOverdue ? "rgba(239,68,68,0.3)" : "rgba(16,185,129,0.3)"}`,
+                      background: isInactive
+                        ? "rgba(239,68,68,0.12)"
+                        : hasOverdue
+                          ? "rgba(239,68,68,0.15)"
+                          : "rgba(16,185,129,0.15)",
+                      color: isInactive ? "#EF4444" : hasOverdue ? "#EF4444" : "#10B981",
+                      border: `1px solid ${isInactive ? "rgba(239,68,68,0.25)" : hasOverdue ? "rgba(239,68,68,0.3)" : "rgba(16,185,129,0.3)"}`,
                     }}
                   >
-                    {hasOverdue ? "Inadimplente / Atrasado" : "Em Dia"}
+                    {isInactive ? "Contrato Cancelado" : hasOverdue ? "Inadimplente / Atrasado" : "Em Dia"}
                   </span>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: client.whatsappOptIn ? "hsl(152 65% 45%)" : "hsl(240 5% 65%)" }}>
-                    {client.whatsappOptIn ? "WhatsApp autorizado" : "WhatsApp sem autorização"}
+                  <span style={{ fontSize: 11, fontWeight: 600, color: isInactive ? "#888" : client.whatsappOptIn ? "hsl(152 65% 45%)" : "hsl(240 5% 65%)" }}>
+                    {isInactive ? "● Cobrança Suspensa" : client.whatsappOptIn ? "WhatsApp autorizado" : "WhatsApp sem autorização"}
                   </span>
-                  <button type="button" onClick={() => onEditClient(client)} style={{ border: "none", background: "transparent", color: "hsl(265 85% 62%)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                    Editar ficha
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button type="button" onClick={() => onEditClient(client)} style={{ border: "none", background: "transparent", color: "hsl(265 85% 62%)", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                      Editar ficha
+                    </button>
+                    {!isInactive && (
+                      <button
+                        type="button"
+                        title="Cancelar contrato ou excluir cliente"
+                        onClick={() => onDeleteClient(client)}
+                        style={{ border: "none", background: "transparent", color: "#666", cursor: "pointer", padding: 2, display: "inline-flex", alignItems: "center" }}
+                      >
+                        <Trash2 style={{ width: 13, height: 13 }} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, background: "rgba(0,0,0,0.25)", padding: "10px", borderRadius: 8 }}>
@@ -2596,45 +2725,90 @@ function ClientsView({
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={() => onSendWhatsApp(client, pendingTxs[0])}
-                    disabled={!canSendBilling || sendingBillingId === pendingTxs[0]?.id}
-                    title={!client.whatsappOptIn ? "Registre a autorização na ficha do cliente" : !client.phone ? "Cadastre o WhatsApp do cliente" : client.status === "inactive" ? "Cliente inativo" : !pendingTxs.length ? "Nenhuma parcela em aberto" : undefined}
-                    style={{
-                      flex: 1,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      background: canSendBilling ? "hsl(152 65% 45%)" : "hsl(240 4% 22%)",
-                      border: "none",
-                      color: "#fff",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: canSendBilling ? "pointer" : "not-allowed",
-                      opacity: canSendBilling ? 1 : 0.65,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <Send style={{ width: 13, height: 13 }} /> {sendingBillingId === pendingTxs[0]?.id ? "Enviando..." : "Cobrança WhatsApp"}
-                  </button>
-                  <button
-                    onClick={() => onNewTxForClient(client.id)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      color: "#ccc",
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    + Fatura
-                  </button>
-                </div>
+                {isInactive ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => onReactivateClient(client)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: "rgba(16,185,129,0.15)",
+                        border: "1px solid rgba(16,185,129,0.3)",
+                        color: "#10B981",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <CheckCircle2 style={{ width: 13, height: 13 }} /> Reativar Contrato
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteClient(client)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: "rgba(239,68,68,0.1)",
+                        border: "1px solid rgba(239,68,68,0.25)",
+                        color: "#EF4444",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      <Trash2 style={{ width: 13, height: 13 }} /> Excluir
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => onSendWhatsApp(client, pendingTxs[0])}
+                      disabled={!canSendBilling || sendingBillingId === pendingTxs[0]?.id}
+                      title={!client.whatsappOptIn ? "Registre a autorização na ficha do cliente" : !client.phone ? "Cadastre o WhatsApp do cliente" : client.status === "inactive" ? "Cliente inativo" : !pendingTxs.length ? "Nenhuma parcela em aberto" : undefined}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: canSendBilling ? "hsl(152 65% 45%)" : "hsl(240 4% 22%)",
+                        border: "none",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: canSendBilling ? "pointer" : "not-allowed",
+                        opacity: canSendBilling ? 1 : 0.65,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <Send style={{ width: 13, height: 13 }} /> {sendingBillingId === pendingTxs[0]?.id ? "Enviando..." : "Cobrança WhatsApp"}
+                    </button>
+                    <button
+                      onClick={() => onNewTxForClient(client.id)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "#ccc",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + Fatura
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -2642,8 +2816,8 @@ function ClientsView({
       ) : (
         <EmptyState
           icon={Users}
-          title="Nenhum cliente cadastrado"
-          description="Cadastre clientes para vincular faturamentos, controlar contas a receber e emitir cobranças Pix via WhatsApp."
+          title={statusFilter === "inactive" ? "Nenhum cliente cancelado ou inativo" : "Nenhum cliente encontrado"}
+          description={statusFilter === "inactive" ? "Não há contratos cancelados no momento." : "Cadastre clientes para vincular faturamentos, controlar contas a receber e emitir cobranças Pix via WhatsApp."}
           primaryAction={{ label: "Cadastrar Primeiro Cliente", onClick: onNewClient }}
         />
       )}
@@ -3962,14 +4136,94 @@ function BudgetModal({
 // MODAL: CLIENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ClientModal({ client, onClose, onSaved }: { client?: Client | null; onClose: () => void; onSaved: () => void }) {
+function ClientModal({
+  client,
+  onClose,
+  onSaved,
+  onDelete,
+  onReactivate,
+}: {
+  client?: Client | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onDelete?: (client: Client) => Promise<void> | void;
+  onReactivate?: (client: Client) => Promise<void> | void;
+}) {
+  const { projects } = useContext(AppContext);
   const [name, setName] = useState(client?.name ?? "");
   const [document, setDocument] = useState(client?.document ?? "");
   const [email, setEmail] = useState(client?.email ?? "");
   const [phone, setPhone] = useState(client?.phone ?? "");
   const [notes, setNotes] = useState(client?.notes ?? "");
   const [whatsappOptIn, setWhatsappOptIn] = useState(client?.whatsappOptIn === true);
+  const [projectId, setProjectId] = useState(client?.projectId ?? "");
+
+  // Contrato
+  const [contractOpen, setContractOpen] = useState(false);
+  const [contract, setContract] = useState<ClientContract | null>(null);
+  const [loadingContract, setLoadingContract] = useState(false);
+  const [monthlyAmountInput, setMonthlyAmountInput] = useState("");
+  const [billingDay, setBillingDay] = useState("1");
+  const [billingType, setBillingType] = useState<"recurring" | "installments">("recurring");
+  const [totalInstallments, setTotalInstallments] = useState("");
+  const [contractStartDate, setContractStartDate] = useState("");
+  const [contractEndDate, setContractEndDate] = useState("");
+  const [contractNotes, setContractNotes] = useState("");
+  const [savingContract, setSavingContract] = useState(false);
+  const [generatingInstallments, setGeneratingInstallments] = useState(false);
+  const [generateMonths, setGenerateMonths] = useState("3");
+
   const [saving, setSaving] = useState(false);
+  const [processingAction, setProcessingAction] = useState(false);
+
+  const handleCancelOrDelete = async () => {
+    if (!client || !onDelete) return;
+    try {
+      setProcessingAction(true);
+      await onDelete(client);
+      onClose();
+    } catch {
+      // toast already handled
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
+  const handleReactivate = async () => {
+    if (!client || !onReactivate) return;
+    try {
+      setProcessingAction(true);
+      await onReactivate(client);
+      onClose();
+    } catch {
+      // toast already handled
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
+  // Carrega contrato existente ao abrir (se editando cliente)
+  useEffect(() => {
+    if (client?.id && contractOpen) {
+      setLoadingContract(true);
+      API.get(`/finance/clients/${client.id}/contract`)
+        .then(res => {
+          if (res?.contract) {
+            const c: ClientContract = res.contract;
+            setContract(c);
+            setMonthlyAmountInput((c.monthlyAmount / 100).toFixed(2).replace(".", ","));
+            setBillingDay(String(c.billingDay));
+            setBillingType(c.totalInstallments ? "installments" : "recurring");
+            setTotalInstallments(c.totalInstallments ? String(c.totalInstallments) : "");
+            setContractStartDate(c.contractStartDate ? c.contractStartDate.substring(0, 10) : "");
+            setContractEndDate(c.contractEndDate ? c.contractEndDate.substring(0, 10) : "");
+            setContractNotes(c.notes ?? "");
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingContract(false));
+    }
+  }, [client?.id, contractOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3983,6 +4237,7 @@ function ClientModal({ client, onClose, onSaved }: { client?: Client | null; onC
         phone: phone.trim() || null,
         notes: notes.trim() || null,
         whatsappOptIn,
+        projectId: projectId || null,
       };
       if (client?.id) {
         await API.put(`/finance/clients/${client.id}`, payload);
@@ -3998,74 +4253,398 @@ function ClientModal({ client, onClose, onSaved }: { client?: Client | null; onC
     }
   };
 
+  const handleSaveContract = async () => {
+    if (!client?.id) { toast.error("Salve o cliente primeiro."); return; }
+    if (!projectId) { toast.error("Selecione um Projeto antes de configurar o contrato."); return; }
+    const amountCents = Math.round(parseFloat(monthlyAmountInput.replace(",", ".").replace(/[^\d.]/g, "")) * 100);
+    if (isNaN(amountCents) || amountCents < 0) { toast.error("Valor inválido."); return; }
+    try {
+      setSavingContract(true);
+      await API.put(`/finance/clients/${client.id}/contract`, {
+        projectId,
+        monthlyAmount: amountCents,
+        billingDay: parseInt(billingDay),
+        billingCycleMonths: 1,
+        contractStartDate: contractStartDate || null,
+        contractEndDate: contractEndDate || null,
+        totalInstallments: billingType === "installments" && totalInstallments ? parseInt(totalInstallments) : null,
+        notes: contractNotes.trim() || null,
+      });
+      toast.success("Contrato salvo com sucesso!");
+      onSaved();
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao salvar contrato.");
+    } finally {
+      setSavingContract(false);
+    }
+  };
+
+  const handleGenerateInstallments = async () => {
+    if (!client?.id) { toast.error("Salve o cliente primeiro."); return; }
+    const months = parseInt(generateMonths);
+    if (isNaN(months) || months < 1 || months > 24) { toast.error("Informe entre 1 e 24 meses."); return; }
+    try {
+      setGeneratingInstallments(true);
+      const res = await API.post(`/finance/clients/${client.id}/contract/generate-installments`, { months });
+      toast.success(`${res.count} fatura(s) gerada(s) com sucesso!`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao gerar faturas.");
+    } finally {
+      setGeneratingInstallments(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box",
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", background: "linear-gradient(135deg, hsl(240 3% 18% / 0.95), hsl(240 4% 12% / 0.95))", border: "1px solid hsl(240 4% 20%)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 10px 40px -10px hsl(0 0% 0% / 0.55)" }}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa" }}>{client ? "Editar Cliente" : "Novo Cliente Corporativo"}</h3>
+      <div style={{ width: "100%", maxWidth: 500, maxHeight: "92vh", overflowY: "auto", background: "linear-gradient(135deg, hsl(240 3% 18% / 0.95), hsl(240 4% 12% / 0.95))", border: "1px solid hsl(240 4% 20%)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 10px 40px -10px hsl(0 0% 0% / 0.55)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa" }}>
+              {client ? "Editar Cliente" : "Novo Cliente Corporativo"}
+            </h3>
+            {client && (
+              <span style={{
+                fontSize: 11,
+                padding: "3px 8px",
+                borderRadius: 6,
+                fontWeight: 700,
+                background: client.status === "inactive" ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
+                color: client.status === "inactive" ? "#EF4444" : "#10B981",
+                border: client.status === "inactive" ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(16,185,129,0.3)",
+              }}>
+                {client.status === "inactive" ? "Contrato Cancelado / Inativo" : "Contrato Ativo"}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Nome */}
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Razão Social / Nome *</label>
-            <input
-              type="text"
-              required
-              placeholder="Ex: StrataScratch Inc..."
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-            />
+            <input type="text" required placeholder="Ex: StrataScratch Inc..." value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
           </div>
 
+          {/* Projeto */}
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><FolderOpen size={12} /> Produto / Projeto Contratado</span>
+            </label>
+            <select
+              value={projectId}
+              onChange={e => setProjectId(e.target.value)}
+              style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
+            >
+              <option value="">— Sem vínculo —</option>
+              {projects.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* CNPJ + Telefone */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>CNPJ / CPF</label>
-              <input
-                type="text"
-                placeholder="00.000.000/0001-00"
-                value={document}
-                onChange={(e) => setDocument(e.target.value)}
-                style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-              />
+              <input type="text" placeholder="00.000.000/0001-00" value={document} onChange={(e) => setDocument(e.target.value)} style={inputStyle} />
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>WhatsApp / Telefone</label>
-              <input
-                type="text"
-                placeholder="(11) 99999-9999"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-              />
+              <input type="text" placeholder="(11) 99999-9999" value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
             </div>
           </div>
 
+          {/* E-mail */}
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>E-mail Financeiro</label>
-            <input
-              type="email"
-              placeholder="financeiro@empresa.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
-            />
+            <input type="email" placeholder="financeiro@empresa.com" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
           </div>
 
+          {/* WhatsApp opt-in */}
           <label style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 10, border: "1px solid hsl(240 4% 20%)", background: "hsl(240 3% 7% / 0.55)", cursor: "pointer" }}>
             <input type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} style={{ marginTop: 3, accentColor: "hsl(265 85% 62%)" }} />
             <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#fafafa" }}>Cliente autorizou cobranças pelo WhatsApp</span>
-              <span style={{ fontSize: 11, lineHeight: 1.5, color: "hsl(240 5% 65%)" }}>Marque apenas após confirmar a autorização com o cliente. Desmarcar interrompe novos envios. Trocar o telefone revoga a autorização; confirme o novo número e autorize novamente.</span>
+              <span style={{ fontSize: 11, lineHeight: 1.5, color: "hsl(240 5% 65%)" }}>Marque apenas após confirmar a autorização com o cliente.</span>
             </span>
           </label>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-            <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12 }}>
-              Cancelar
-            </button>
-            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700 }}>
-              {saving ? "Salvando..." : client ? "Salvar Alterações" : "Salvar Cliente"}
-            </button>
+          {/* Botões do form principal */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+            <div>
+              {client && onDelete && (
+                client.status === "inactive" ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {onReactivate && (
+                      <button
+                        type="button"
+                        disabled={saving || processingAction}
+                        onClick={handleReactivate}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          background: "rgba(16,185,129,0.15)",
+                          border: "1px solid rgba(16,185,129,0.35)",
+                          color: "#10B981",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <RefreshCw size={13} /> Reativar Contrato
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={saving || processingAction}
+                      onClick={handleCancelOrDelete}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: "rgba(239,68,68,0.12)",
+                        border: "1px solid rgba(239,68,68,0.3)",
+                        color: "#EF4444",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <Trash2 size={13} /> Excluir Definitivo
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={saving || processingAction}
+                    onClick={handleCancelOrDelete}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "rgba(239,68,68,0.12)",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                      color: "#EF4444",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Trash2 size={13} /> Cancelar Contrato / Excluir
+                  </button>
+                )
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}>
+                Cancelar
+              </button>
+              <button type="submit" disabled={saving || processingAction} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                {saving ? "Salvando..." : client ? "Salvar Alterações" : "Salvar Cliente"}
+              </button>
+            </div>
           </div>
         </form>
+
+        {/* ── Seção de Contrato (só quando editando) ── */}
+        {client?.id && (
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 14 }}>
+            <button
+              type="button"
+              onClick={() => setContractOpen(!contractOpen)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                background: contractOpen ? "rgba(139,92,246,0.08)" : "transparent",
+                border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "10px 14px",
+                cursor: "pointer", color: "#A78BFA", fontSize: 13, fontWeight: 700,
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <Coins size={14} /> Configurar Contrato / Parcelas
+              </span>
+              <ChevronDown size={14} style={{ transform: contractOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "0.2s" }} />
+            </button>
+
+            {contractOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                {loadingContract ? (
+                  <div style={{ fontSize: 12, color: "#666", textAlign: "center", padding: 12 }}>Carregando contrato...</div>
+                ) : (
+                  <>
+                    {/* Valor Mensal */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Valor (R\$) *</label>
+                        <input
+                          type="text"
+                          placeholder="0,00"
+                          value={monthlyAmountInput}
+                          onChange={e => setMonthlyAmountInput(e.target.value)}
+                          style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Dia de Vencimento</label>
+                        <input
+                          type="number"
+                          min="1" max="28"
+                          placeholder="1-28"
+                          value={billingDay}
+                          onChange={e => setBillingDay(e.target.value)}
+                          style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Tipo */}
+                    <div>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 6 }}>Tipo de Cobrança</label>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {(["recurring", "installments"] as const).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setBillingType(t)}
+                            style={{
+                              flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                              border: billingType === t ? "1px solid #A78BFA" : "1px solid rgba(255,255,255,0.1)",
+                              background: billingType === t ? "rgba(139,92,246,0.15)" : "transparent",
+                              color: billingType === t ? "#A78BFA" : "#777",
+                            }}
+                          >
+                            {t === "recurring" ? (
+                              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><Repeat2 size={12} /> Recorrente</span>
+                            ) : (
+                              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><Receipt size={12} /> Parcelado</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {billingType === "installments" && (
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Total de Parcelas</label>
+                        <input
+                          type="number" min="1" placeholder="Ex: 12"
+                          value={totalInstallments}
+                          onChange={e => setTotalInstallments(e.target.value)}
+                          style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Datas */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Início do Contrato</label>
+                        <input type="date" value={contractStartDate} onChange={e => setContractStartDate(e.target.value)}
+                          style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Fim do Contrato</label>
+                        <input type="date" value={contractEndDate} onChange={e => setContractEndDate(e.target.value)}
+                          style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notas do contrato */}
+                    <div>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Observações do Contrato</label>
+                      <textarea
+                        placeholder="Condições especiais, descontos, multas..."
+                        value={contractNotes}
+                        onChange={e => setContractNotes(e.target.value)}
+                        rows={2}
+                        style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }}
+                      />
+                    </div>
+
+                    {/* Status do contrato se já existe */}
+                    {contract && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <span style={{ fontSize: 12, color: "#888" }}>Status do Contrato:</span>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          background: contract.status === "cancelled" ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
+                          color: contract.status === "cancelled" ? "#EF4444" : "#10B981",
+                        }}>
+                          {contract.status === "cancelled" ? "Cancelado" : "Ativo"}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Salvar contrato */}
+                    <button
+                      type="button"
+                      onClick={handleSaveContract}
+                      disabled={savingContract}
+                      style={{ padding: "9px 16px", borderRadius: 8, background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.35)", color: "#A78BFA", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      {savingContract ? "Salvando Contrato..." : "Salvar Contrato"}
+                    </button>
+
+                    {/* Gerar Faturas Automáticas */}
+                    {contract && (
+                      <div style={{ background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#10B981", display: "flex", alignItems: "center", gap: 6 }}>
+                          <Sparkles size={13} /> Gerar Faturas Automáticas
+                        </span>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <input
+                            type="number" min="1" max="24"
+                            value={generateMonths}
+                            onChange={e => setGenerateMonths(e.target.value)}
+                            style={{ width: 60, background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "7px 8px", color: "#fff", fontSize: 13, outline: "none", textAlign: "center" }}
+                          />
+                          <span style={{ fontSize: 12, color: "#666" }}>meses à frente</span>
+                          <button
+                            type="button"
+                            onClick={handleGenerateInstallments}
+                            disabled={generatingInstallments}
+                            style={{ flex: 1, padding: "8px 12px", borderRadius: 8, background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", color: "#10B981", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                          >
+                            {generatingInstallments ? "Gerando..." : "Gerar Faturas"}
+                          </button>
+                        </div>
+                        <span style={{ fontSize: 11, color: "#555" }}>
+                          Cria lançamentos de entrada (pendentes) no Livro Caixa para os próximos meses.
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
