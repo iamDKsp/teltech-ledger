@@ -15,7 +15,7 @@ import {
   financialSettingsTable,
   whatsappMessagesTable,
 } from "@workspace/db";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, lt, desc, sql, inArray } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
 import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
@@ -754,16 +754,7 @@ router.get("/projects/:projectId/clients", requireAuth, async (req: Request, res
     if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
     const projectId = req.params.projectId as string;
 
-    const clients = await db
-      .select()
-      .from(clientsTable)
-      .where(and(
-        eq(clientsTable.workspaceId, workspaceId),
-        sql`${clientsTable.projectId} = ${projectId}`,
-      ))
-      .orderBy(clientsTable.name);
-
-    // Para cada cliente, busca o contrato ativo
+    // 1. Busca contratos ativos ou existentes deste projeto
     const contracts = await db
       .select()
       .from(clientContractsTable)
@@ -773,10 +764,39 @@ router.get("/projects/:projectId/clients", requireAuth, async (req: Request, res
       ));
 
     const contractByClientId = new Map(contracts.map(c => [c.clientId, c]));
+    const clientIdsWithContract = contracts.map(c => c.clientId);
+
+    // 2. Busca clientes vinculados diretamente via clientsTable.projectId OU via clientContractsTable.projectId
+    const whereConditions = [
+      eq(clientsTable.workspaceId, workspaceId),
+      clientIdsWithContract.length > 0
+        ? or(eq(clientsTable.projectId, projectId), inArray(clientsTable.id, clientIdsWithContract))
+        : eq(clientsTable.projectId, projectId),
+    ];
+
+    const clients = await db
+      .select()
+      .from(clientsTable)
+      .where(and(...whereConditions))
+      .orderBy(clientsTable.name);
+
+    // 3. Verifica se os clientes possuem faturas em atraso
+    const overdueTransactions = await db
+      .select({ clientId: financialTransactionsTable.clientId })
+      .from(financialTransactionsTable)
+      .where(and(
+        eq(financialTransactionsTable.workspaceId, workspaceId),
+        eq(financialTransactionsTable.type, "inflow"),
+        eq(financialTransactionsTable.status, "pending"),
+        lt(financialTransactionsTable.dueDate, new Date())
+      ));
+
+    const overdueClientIds = new Set(overdueTransactions.map(t => t.clientId).filter(Boolean));
 
     const result = clients.map(c => ({
       ...c,
       contract: contractByClientId.get(c.id) ?? null,
+      pendingOverdue: overdueClientIds.has(c.id),
     }));
 
     res.json({ clients: result });
@@ -1012,7 +1032,7 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       categoryId, clientId, projectId, accountId, partnerId,
       costType, notes, status, paymentMethod, paidAt, receiptUrl,
       isReimbursement, isRecurring, recurringInterval,
-      installmentsTotal, isInstallmentBatch,
+      installmentsTotal, isInstallmentBatch, installmentMode,
       pauseBilling,
     } = req.body;
 
@@ -1035,8 +1055,10 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       const n = parseInt(installmentsTotal);
       const groupId = randomUUID();
       const baseDueDate = new Date(dueDate);
-      const perInstallment = Math.floor(amount / n);
-      const remainder = amount - perInstallment * n;
+
+      const isPerInstallment = installmentMode === "per_installment";
+      const perInstallment = isPerInstallment ? amount : Math.floor(amount / n);
+      const remainder = isPerInstallment ? 0 : amount - perInstallment * n;
 
       const createdList = await db.transaction(async (tx) => {
         const list = [];

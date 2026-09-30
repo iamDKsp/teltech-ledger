@@ -609,6 +609,7 @@ export function FinanceiroPage() {
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [initialClientProjectId, setInitialClientProjectId] = useState<string>("");
   const [sendingBillingId, setSendingBillingId] = useState<string | null>(null);
   const [rejectingTxId, setRejectingTxId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -616,6 +617,21 @@ export function FinanceiroPage() {
   const [loading, setLoading] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
   const [quickFilter, setQuickFilter] = useState<"all" | "inflow" | "outflow" | "pending" | "paid" | "overdue" | "approval">("all");
+
+  // Verifica se veio da barra lateral com ?newClient=true&projectId=...
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("newClient") === "true") {
+        const pId = params.get("projectId") || "";
+        setInitialClientProjectId(pId);
+        setEditingClient(null);
+        setShowClientModal(true);
+        setActiveTab("clients");
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }
+  }, []);
 
   // ─── Fetch All Data ──────────────────────────────────────────────────────────
 
@@ -1221,10 +1237,12 @@ export function FinanceiroPage() {
       {showClientModal && (
         <ClientModal
           client={editingClient}
-          onClose={() => { setShowClientModal(false); setEditingClient(null); }}
+          initialProjectId={initialClientProjectId}
+          onClose={() => { setShowClientModal(false); setEditingClient(null); setInitialClientProjectId(""); }}
           onSaved={() => {
             setShowClientModal(false);
             setEditingClient(null);
+            setInitialClientProjectId("");
             loadAllData();
           }}
           onDelete={handleDeleteClient}
@@ -3572,6 +3590,7 @@ function TransactionModal({
   // Batch installments & recurrence
   const [isInstallment, setIsInstallment] = useState(false);
   const [installmentsCount, setInstallmentsCount] = useState(2);
+  const [installmentMode, setInstallmentMode] = useState<"per_installment" | "total">("per_installment");
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringInterval, setRecurringInterval] = useState("monthly");
   const [pauseBilling, setPauseBilling] = useState(tx?.pauseBilling === true);
@@ -3607,6 +3626,7 @@ function TransactionModal({
       if (!tx && isInstallment && installmentsCount > 1) {
         payload.installmentsTotal = installmentsCount;
         payload.isInstallmentBatch = true;
+        payload.installmentMode = installmentMode;
       }
 
       if (!tx && isRecurring) {
@@ -3800,7 +3820,7 @@ function TransactionModal({
           </div>
 
           {!tx && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: "#ccc" }}>Gerar Parcelamento em Lote?</label>
                 <input
@@ -3810,17 +3830,97 @@ function TransactionModal({
                 />
               </div>
               {isInstallment && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 12, color: "#888" }}>Número de parcelas:</span>
-                  <select
-                    value={installmentsCount}
-                    onChange={(e) => setInstallmentsCount(parseInt(e.target.value))}
-                    style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px", color: "#fff" }}
-                  >
-                    {[2, 3, 4, 5, 6, 10, 12, 24, 36, 48].map(n => (
-                      <option key={n} value={n}>{n}x mensais</option>
-                    ))}
-                  </select>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: "#888" }}>Número de parcelas:</span>
+                    <select
+                      value={installmentsCount}
+                      onChange={(e) => setInstallmentsCount(parseInt(e.target.value))}
+                      style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px", color: "#fff" }}
+                    >
+                      {[2, 3, 4, 5, 6, 10, 12, 24, 36, 48].map(n => (
+                        <option key={n} value={n}>{n}x mensais</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Seletor de Modo de Parcelamento */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#888" }}>Como interpretar o valor digitado:</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setInstallmentMode("per_installment")}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          border: installmentMode === "per_installment" ? "1px solid #10B981" : "1px solid rgba(255,255,255,0.1)",
+                          background: installmentMode === "per_installment" ? "rgba(16,185,129,0.15)" : "transparent",
+                          color: installmentMode === "per_installment" ? "#10B981" : "#888",
+                          textAlign: "center",
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        Por Parcela / Mensalidade
+                        <span style={{ display: "block", fontSize: 10, opacity: 0.8, fontWeight: 400, marginTop: 2 }}>
+                          (Ex: {installmentsCount}x de {amountInput ? `R$ ${amountInput}` : "R$ 109,90"})
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInstallmentMode("total")}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          border: installmentMode === "total" ? "1px solid #A78BFA" : "1px solid rgba(255,255,255,0.1)",
+                          background: installmentMode === "total" ? "rgba(139,92,246,0.15)" : "transparent",
+                          color: installmentMode === "total" ? "#A78BFA" : "#888",
+                          textAlign: "center",
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        Valor Total da Venda
+                        <span style={{ display: "block", fontSize: 10, opacity: 0.8, fontWeight: 400, marginTop: 2 }}>
+                          (Dividir em {installmentsCount} parcelas)
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Resumo em tempo real */}
+                  {(() => {
+                    const parsedAmt = parseBRL(amountInput);
+                    const singleInst = installmentMode === "per_installment" ? parsedAmt : Math.floor(parsedAmt / installmentsCount);
+                    const totalCalc = installmentMode === "per_installment" ? parsedAmt * installmentsCount : parsedAmt;
+                    return (
+                      <div style={{
+                        padding: "8px 12px",
+                        background: "rgba(139,92,246,0.1)",
+                        border: "1px solid rgba(139,92,246,0.25)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: "#ddd",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 3,
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>Valor de cada fatura ({installmentsCount}x):</span>
+                          <strong style={{ color: "#10B981", fontSize: 13 }}>{formatBRL(singleInst)}</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#888", fontSize: 11 }}>
+                          <span>Faturamento acumulado:</span>
+                          <span>{formatBRL(totalCalc)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -4138,12 +4238,14 @@ function BudgetModal({
 
 function ClientModal({
   client,
+  initialProjectId,
   onClose,
   onSaved,
   onDelete,
   onReactivate,
 }: {
   client?: Client | null;
+  initialProjectId?: string;
   onClose: () => void;
   onSaved: () => void;
   onDelete?: (client: Client) => Promise<void> | void;
@@ -4156,7 +4258,13 @@ function ClientModal({
   const [phone, setPhone] = useState(client?.phone ?? "");
   const [notes, setNotes] = useState(client?.notes ?? "");
   const [whatsappOptIn, setWhatsappOptIn] = useState(client?.whatsappOptIn === true);
-  const [projectId, setProjectId] = useState(client?.projectId ?? "");
+  const [projectId, setProjectId] = useState(client?.projectId || initialProjectId || "");
+
+  useEffect(() => {
+    if (initialProjectId && !client?.projectId) {
+      setProjectId(initialProjectId);
+    }
+  }, [initialProjectId, client?.projectId]);
 
   // Contrato
   const [contractOpen, setContractOpen] = useState(false);
@@ -4181,6 +4289,9 @@ function ClientModal({
     try {
       setProcessingAction(true);
       await onDelete(client);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("teltech:client-saved", { detail: { projectId: client.projectId } }));
+      }
       onClose();
     } catch {
       // toast already handled
@@ -4194,6 +4305,9 @@ function ClientModal({
     try {
       setProcessingAction(true);
       await onReactivate(client);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("teltech:client-saved", { detail: { projectId: client.projectId } }));
+      }
       onClose();
     } catch {
       // toast already handled
@@ -4244,6 +4358,9 @@ function ClientModal({
       } else {
         await API.post("/finance/clients", payload);
       }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("teltech:client-saved", { detail: { projectId: payload.projectId } }));
+      }
       onSaved();
     } catch (err) {
       console.error(err);
@@ -4270,6 +4387,9 @@ function ClientModal({
         totalInstallments: billingType === "installments" && totalInstallments ? parseInt(totalInstallments) : null,
         notes: contractNotes.trim() || null,
       });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("teltech:client-saved", { detail: { projectId } }));
+      }
       toast.success("Contrato salvo com sucesso!");
       onSaved();
     } catch (err) {

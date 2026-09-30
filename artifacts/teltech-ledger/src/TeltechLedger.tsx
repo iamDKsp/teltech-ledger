@@ -1497,6 +1497,29 @@ function Sidebar() {
   const { sidebarOpen, setSidebarOpen, sidebarModule, activeProject, setActiveProject, projects, refreshProjects, setActiveTab } = ctx;
   const w = sidebarOpen ? 200 : 52;
 
+  const refreshProjectClients = async (projectId: string) => {
+    try {
+      const res = await API.get(`/finance/projects/${projectId}/clients`);
+      setProjectClients(prev => ({ ...prev, [projectId]: res?.clients ?? [] }));
+    } catch {}
+  };
+
+  // Escuta atualizações de clientes para atualizar o menu lateral em tempo real
+  useEffect(() => {
+    const handler = (e: any) => {
+      const pId = e.detail?.projectId;
+      if (pId) {
+        refreshProjectClients(pId);
+      } else {
+        Object.keys(expandedProjects).forEach(id => {
+          if (expandedProjects[id]) refreshProjectClients(id);
+        });
+      }
+    };
+    window.addEventListener("teltech:client-saved", handler);
+    return () => window.removeEventListener("teltech:client-saved", handler);
+  }, [expandedProjects]);
+
   const handleNavClick = (label: string) => {
     if (label === "Início") navigate("/");
     else if (label === "Painel") navigate("/painel");
@@ -1514,16 +1537,21 @@ function Sidebar() {
 
   const toggleProjectExpand = async (proj: AppProject, e: React.MouseEvent) => {
     e.stopPropagation();
-    const isExpanded = expandedProjects[proj.id];
-    setExpandedProjects(prev => ({ ...prev, [proj.id]: !isExpanded }));
+    const willExpand = !expandedProjects[proj.id];
+    setExpandedProjects(prev => ({ ...prev, [proj.id]: willExpand }));
 
-    if (!isExpanded && !projectClients[proj.id]) {
-      setLoadingClients(prev => ({ ...prev, [proj.id]: true }));
+    // Ao expandir, sempre busca lista atualizada de clientes da API
+    if (willExpand) {
+      if (!projectClients[proj.id]) {
+        setLoadingClients(prev => ({ ...prev, [proj.id]: true }));
+      }
       try {
         const res = await API.get(`/finance/projects/${proj.id}/clients`);
         setProjectClients(prev => ({ ...prev, [proj.id]: res?.clients ?? [] }));
       } catch {
-        setProjectClients(prev => ({ ...prev, [proj.id]: [] }));
+        if (!projectClients[proj.id]) {
+          setProjectClients(prev => ({ ...prev, [proj.id]: [] }));
+        }
       } finally {
         setLoadingClients(prev => ({ ...prev, [proj.id]: false }));
       }
@@ -1538,14 +1566,7 @@ function Sidebar() {
 
   const handleAddClientToProject = (proj: AppProject, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/financeiro`);
-  };
-
-  const refreshProjectClients = async (projectId: string) => {
-    try {
-      const res = await API.get(`/finance/projects/${projectId}/clients`);
-      setProjectClients(prev => ({ ...prev, [projectId]: res?.clients ?? [] }));
-    } catch {}
+    navigate(`/financeiro?newClient=true&projectId=${proj.id}`);
   };
 
   const renderProjectItem = (proj: AppProject) => {
