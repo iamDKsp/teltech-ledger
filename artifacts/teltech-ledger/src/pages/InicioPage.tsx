@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useContext } from "react";
 import { useLocation } from "wouter";
 import { API } from "../lib/api";
+import { useAuth } from "../lib/auth-context";
 import { 
   CalendarCheck, 
   AlertTriangle, 
@@ -56,6 +57,7 @@ interface DashboardData {
 }
 
 export function InicioPage() {
+  const { user } = useAuth();
   const [, navigate] = useLocation();
   const { setSidebarModule, projects } = useContext(AppContext);
   const [data, setData] = useState<DashboardData | null>(null);
@@ -167,16 +169,52 @@ export function InicioPage() {
           zIndex: 0
         }} />
 
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <h1 style={{ margin: "0 0 8px 0", fontSize: "28px", fontWeight: "600", color: "#fafafa" }}>
-            {greeting}, {data.welcomeData.name?.split(" ")[0] || "Usuário"}!
-          </h1>
-          <p style={{ margin: 0, color: "#888", fontSize: "16px" }}>
-            {displayDate}
-          </p>
-          <p style={{ margin: "16px 0 0 0", color: "#a1a1aa", fontSize: "14px" }}>
-            Aqui está o resumo do seu dia.
-          </p>
+        <div style={{
+          position: "relative",
+          zIndex: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: "clamp(14px, 3vw, 22px)",
+          minWidth: 0
+        }}>
+          {/* User Profile Avatar */}
+          <div style={{
+            width: "clamp(64px, 9vw, 82px)",
+            height: "clamp(64px, 9vw, 82px)",
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #7C5AC2 0%, #4F2D8A 100%)",
+            border: "3px solid rgba(124, 90, 194, 0.4)",
+            boxShadow: "0 8px 24px rgba(124, 90, 194, 0.3)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            flexShrink: 0
+          }}>
+            {user?.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.name || "Foto de perfil"}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <span style={{ fontSize: "clamp(26px, 4vw, 36px)", fontWeight: 700, color: "#fff" }}>
+                {(user?.name || data.welcomeData.name || "U")[0]?.toUpperCase()}
+              </span>
+            )}
+          </div>
+
+          <div>
+            <h1 style={{ margin: "0 0 6px 0", fontSize: "clamp(22px, 3.5vw, 28px)", fontWeight: "600", color: "#fafafa", lineHeight: 1.2 }}>
+              {greeting}, {user?.name?.split(" ")[0] || data.welcomeData.name?.split(" ")[0] || "Usuário"}!
+            </h1>
+            <p style={{ margin: 0, color: "#888", fontSize: "15px" }}>
+              {displayDate}
+            </p>
+            <p style={{ margin: "6px 0 0 0", color: "#a1a1aa", fontSize: "14px" }}>
+              Aqui está o resumo do seu dia.
+            </p>
+          </div>
         </div>
 
         {/* Quick Actions */}

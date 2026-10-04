@@ -2682,6 +2682,7 @@ export function TeltechLedger() {
           flexDirection:"column", 
           overflow:"hidden", 
           minWidth:0,
+          minHeight: 0,
           position: "relative"
         }}>
           <Header/>
@@ -2691,6 +2692,7 @@ export function TeltechLedger() {
             flexDirection: "column",
             overflow: "hidden",
             minWidth: 0,
+            minHeight: 0,
             paddingBottom: isMobile ? "calc(56px + env(safe-area-inset-bottom, 0px))" : 0
           }}>
             <MainContent />

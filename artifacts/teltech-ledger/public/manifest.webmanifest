@@ -6,9 +6,10 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["fullscreen", "minimal-ui", "standalone"],
   "orientation": "portrait",
-  "background_color": "#111113",
-  "theme_color": "#111113",
+  "background_color": "#111111",
+  "theme_color": "#1a1a1a",
   "icons": [
     {
       "src": "/icon-192.png",
