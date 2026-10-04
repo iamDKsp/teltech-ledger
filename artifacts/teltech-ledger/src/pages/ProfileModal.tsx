@@ -3,6 +3,8 @@ import { useAuth } from "../lib/auth-context";
 import { useIsMobile } from "../hooks/use-mobile";
 import { API_BASE } from "../lib/api";
 import { Camera, X, Loader2, Check, AlertCircle } from "lucide-react";
+import { motion } from "framer-motion";
+import { backdropVariants, modalVariants, bottomSheetVariants } from "../lib/motion";
 
 export function ProfileModal({ onClose }: { onClose: () => void }) {
   const { user, token, updateUser, refreshUser } = useAuth();
@@ -128,13 +130,15 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div 
+    <motion.div 
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
       style={{ 
         position: "fixed", 
         inset: 0, 
         background: "rgba(0,0,0,0.72)", 
-        backdropFilter: "blur(6px)", 
-        WebkitBackdropFilter: "blur(6px)",
         display: "flex", 
         alignItems: isMobile ? "flex-end" : "center", 
         justifyContent: "center", 
@@ -144,7 +148,8 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div 
+      <motion.div 
+        variants={isMobile ? bottomSheetVariants : modalVariants}
         style={{ 
           width: isMobile ? "100%" : 420, 
           maxWidth: "100vw", 
@@ -156,7 +161,6 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
           borderRadius: isMobile ? "20px 20px 0 0" : 16, 
           boxShadow: "0 20px 60px rgba(0,0,0,0.85)",
           overflow: "hidden",
-          animation: isMobile ? "fadeInUp 0.25s ease-out" : "none"
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -508,7 +512,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
             </div>
           </form>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

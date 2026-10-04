@@ -4,6 +4,8 @@ import { useAuth } from "../lib/auth-context";
 import { useIsMobile } from "../hooks/use-mobile";
 import { Loader } from "./Loader";
 import { ArrowDown, Flag, ArrowUp, AlertTriangle, X, Paperclip, Check } from "lucide-react";
+import { motion } from "framer-motion";
+import { backdropVariants, modalVariants, bottomSheetVariants } from "../lib/motion";
 
 const API = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ""
   ? import.meta.env.VITE_API_URL
@@ -437,7 +439,11 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
   const currentColumn = columns.find(c => c.id === colId);
 
   return (
-    <div
+    <motion.div
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: "fixed",
@@ -447,24 +453,24 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
         display: "flex",
         alignItems: isMobile ? "flex-end" : "center",
         justifyContent: "center",
-        backdropFilter: "blur(3px)",
-        animation: "fadeIn 0.18s ease"
       }}
     >
-      <div style={{
-        width: isMobile ? "100vw" : 900,
-        maxWidth: "100vw",
-        height: isMobile ? "100dvh" : undefined,
-        maxHeight: isMobile ? "100dvh" : "88vh",
-        background: "#1a1a1f",
-        borderRadius: isMobile ? 0 : 16,
-        border: isMobile ? "none" : "1px solid rgba(255,255,255,0.07)",
-        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        animation: isMobile ? "slideUp 0.2s ease" : "slideUp 0.22s cubic-bezier(0.34,1.2,0.64,1)"
-      }}>
+      <motion.div
+        variants={isMobile ? bottomSheetVariants : modalVariants}
+        style={{
+          width: isMobile ? "100vw" : 900,
+          maxWidth: "100vw",
+          height: isMobile ? "100dvh" : undefined,
+          maxHeight: isMobile ? "100dvh" : "88vh",
+          background: "#1a1a1f",
+          borderRadius: isMobile ? 0 : 16,
+          border: isMobile ? "none" : "1px solid rgba(255,255,255,0.07)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
 
         {/* ── Top bar ── */}
         <div style={{
@@ -962,7 +968,7 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

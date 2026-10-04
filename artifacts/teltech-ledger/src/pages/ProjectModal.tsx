@@ -4,6 +4,8 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { X, Trash2 } from "lucide-react";
 import { API } from "../lib/api";
 import { getProjectChanges } from "../lib/project-changes";
+import { motion } from "framer-motion";
+import { backdropVariants, modalVariants, bottomSheetVariants } from "../lib/motion";
 
 interface ProjectColumn { id: string; title: string; position: number; }
 interface Project { id: string; workspaceId: string; name: string; color: string; icon?: string | null; }
@@ -188,21 +190,29 @@ export function ProjectModal({ project, onClose, onSaved }: {
   };
 
   return (
-    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 10000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", backdropFilter: "blur(4px)", animation: "fadeIn 0.15s ease" }}>
-      <div style={{
-        width: isMobile ? "100vw" : 480,
-        maxWidth: "100vw",
-        maxHeight: isMobile ? "92dvh" : "85vh",
-        background: "#1a1a1f",
-        borderRadius: isMobile ? "16px 16px 0 0" : 16,
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        animation: isMobile ? "slideUp 0.2s ease" : "slideUp 0.2s cubic-bezier(0.34,1.2,0.64,1)"
-      }}>
+    <motion.div
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 10000, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center" }}
+    >
+      <motion.div
+        variants={isMobile ? bottomSheetVariants : modalVariants}
+        style={{
+          width: isMobile ? "100vw" : 480,
+          maxWidth: "100vw",
+          maxHeight: isMobile ? "92dvh" : "85vh",
+          background: "#1a1a1f",
+          borderRadius: isMobile ? "16px 16px 0 0" : 16,
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f0f0f0" }}>
@@ -329,7 +339,7 @@ export function ProjectModal({ project, onClose, onSaved }: {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

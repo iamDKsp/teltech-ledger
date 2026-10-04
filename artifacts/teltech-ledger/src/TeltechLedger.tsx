@@ -39,6 +39,16 @@ import {
   UserCircle,
 } from "lucide-react";
 import { useIsMobile } from "./hooks/use-mobile";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  backdropVariants,
+  modalVariants,
+  drawerVariants,
+  dropdownVariants,
+  pageVariants,
+  tabSpring,
+  bottomSheetVariants
+} from "./lib/motion";
 // ─── App Context ──────────────────────────────────────────────────────────────
 
 import { API } from "./lib/api";
@@ -802,11 +812,18 @@ export function RenameColumnModal({ colTitle, onConfirm, onClose }: { colTitle: 
   };
 
   return (
-    <div
-      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)", zIndex:200000, display:"flex", alignItems:"center", justifyContent:"center", animation:"fadeIn 0.15s ease" }}
+    <motion.div
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:200000, display:"flex", alignItems:"center", justifyContent:"center" }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ width:360, background:"linear-gradient(145deg,#1e1e28,#17171f)", borderRadius:14, border:"1px solid rgba(124,90,194,0.25)", padding:"28px 28px 22px", boxShadow:"0 32px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.04)", animation:"slideUp 0.2s cubic-bezier(0.34,1.4,0.64,1)" }}>
+      <motion.div
+        variants={modalVariants}
+        style={{ width:360, background:"linear-gradient(145deg,#1e1e28,#17171f)", borderRadius:14, border:"1px solid rgba(124,90,194,0.25)", padding:"28px 28px 22px", boxShadow:"0 32px 80px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.04)" }}
+      >
         {/* Header */}
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
           <div style={{ width:36, height:36, borderRadius:9, background:"linear-gradient(135deg,rgba(124,90,194,0.25),rgba(124,90,194,0.08))", border:"1px solid rgba(124,90,194,0.3)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -868,8 +885,8 @@ export function RenameColumnModal({ colTitle, onConfirm, onClose }: { colTitle: 
             Salvar nome
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -1036,13 +1053,15 @@ function BoardColumn({ col, onTaskCreated }: { col: Column; onTaskCreated?: (tas
           )}
         </div>
       </div>
-      {showRename && (
-        <RenameColumnModal
-          colTitle={col.title}
-          onConfirm={handleRenameConfirm}
-          onClose={() => setShowRename(false)}
-        />
-      )}
+      <AnimatePresence>
+        {showRename && (
+          <RenameColumnModal
+            colTitle={col.title}
+            onConfirm={handleRenameConfirm}
+            onClose={() => setShowRename(false)}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -1413,42 +1432,60 @@ function Board() {
           {drag?.active && dragTask && <FloatingCard drag={drag} task={dragTask}/>}
         </div>
       </div>
-      {selectedTask && (
-        <TaskModal
-          task={selectedTask.task}
-          colId={selectedTask.colId}
-          onClose={()=>setSelectedTask(null)}
-          onSave={loadBoard}
-        />
-      )}
-      {taskToDelete && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", backdropFilter:"blur(5px)", zIndex:100000, display:"flex", alignItems:"center", justifyContent:"center", animation:"fadeIn 0.15s ease" }}>
-          <div style={{ width:"min(380px, calc(100vw - 32px))", background:"#1e1e22", borderRadius:12, border:"1px solid rgba(255,255,255,0.1)", padding:"20px", boxShadow:"0 20px 60px rgba(0,0,0,0.8)", animation:"slideUp 0.2s ease" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
-              <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(239,68,68,0.1)", display:"flex", alignItems:"center", justifyContent:"center", color:"#ef4444" }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+      <AnimatePresence>
+        {selectedTask && (
+          <TaskModal
+            key="task-modal"
+            task={selectedTask.task}
+            colId={selectedTask.colId}
+            onClose={()=>setSelectedTask(null)}
+            onSave={loadBoard}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {taskToDelete && (
+          <motion.div
+            key="delete-task-backdrop"
+            variants={backdropVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", backdropFilter:"blur(5px)", WebkitBackdropFilter:"blur(5px)", zIndex:100000, display:"flex", alignItems:"center", justifyContent:"center" }}
+            onClick={() => setTaskToDelete(null)}
+          >
+            <motion.div
+              key="delete-task-dialog"
+              variants={modalVariants}
+              onClick={e => e.stopPropagation()}
+              style={{ width:"min(380px, calc(100vw - 32px))", background:"#1e1e22", borderRadius:12, border:"1px solid rgba(255,255,255,0.1)", padding:"20px", boxShadow:"0 20px 60px rgba(0,0,0,0.8)" }}
+            >
+              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+                <div style={{ width:40, height:40, borderRadius:"50%", background:"rgba(239,68,68,0.1)", display:"flex", alignItems:"center", justifyContent:"center", color:"#ef4444" }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </div>
+                <div>
+                  <h3 style={{ margin:0, fontSize:16, color:"#f0f0f0", fontWeight:600 }}>Excluir Tarefa</h3>
+                </div>
               </div>
-              <div>
-                <h3 style={{ margin:0, fontSize:16, color:"#f0f0f0", fontWeight:600 }}>Excluir Tarefa</h3>
+              <p style={{ margin:"0 0 24px 0", fontSize:13, color:"#aaa", lineHeight:1.5 }}>
+                Tem certeza que deseja excluir permanentemente esta tarefa? Essa ação não pode ser desfeita e todos os dados serão perdidos.
+              </p>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
+                <button onClick={() => setTaskToDelete(null)} style={{ padding:"8px 16px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#ccc", fontSize:13, cursor:"pointer", fontWeight:500 }}>Cancelar</button>
+                <button onClick={async () => {
+                    if (!activeProject) return;
+                    try {
+                      await fetch(`${API}/api/projects/${activeProject.id}/tasks/${taskToDelete.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+                      setTaskToDelete(null);
+                      loadBoard();
+                    } catch (e) { console.error(e); }
+                }} style={{ padding:"8px 16px", borderRadius:6, background:"#ef4444", border:"none", color:"#fff", fontSize:13, cursor:"pointer", fontWeight:600 }}>Sim, Excluir</button>
               </div>
-            </div>
-            <p style={{ margin:"0 0 24px 0", fontSize:13, color:"#aaa", lineHeight:1.5 }}>
-              Tem certeza que deseja excluir permanentemente esta tarefa? Essa ação não pode ser desfeita e todos os dados serão perdidos.
-            </p>
-            <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
-              <button onClick={() => setTaskToDelete(null)} style={{ padding:"8px 16px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#ccc", fontSize:13, cursor:"pointer", fontWeight:500 }}>Cancelar</button>
-              <button onClick={async () => {
-                  if (!activeProject) return;
-                  try {
-                    await fetch(`${API}/api/projects/${activeProject.id}/tasks/${taskToDelete.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-                    setTaskToDelete(null);
-                    loadBoard();
-                  } catch (e) { console.error(e); }
-              }} style={{ padding:"8px 16px", borderRadius:6, background:"#ef4444", border:"none", color:"#fff", fontSize:13, cursor:"pointer", fontWeight:600 }}>Sim, Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </DragContext.Provider>
   );
 }
@@ -1813,8 +1850,10 @@ function Sidebar() {
     </div>
 
     {/* Project modals */}
-    {editProject && <ProjectModal project={editProject} onClose={() => setEditProject(null)} onSaved={refreshProjects} />}
-    {showNewProject && <ProjectModal project={null} onClose={() => setShowNewProject(false)} onSaved={refreshProjects} />}
+    <AnimatePresence>
+      {editProject && <ProjectModal key="edit-project" project={editProject} onClose={() => setEditProject(null)} onSaved={refreshProjects} />}
+      {showNewProject && <ProjectModal key="new-project" project={null} onClose={() => setShowNewProject(false)} onSaved={refreshProjects} />}
+    </AnimatePresence>
     </>
   );
 }
@@ -1848,22 +1887,32 @@ function StatusDropdown({ value, onChange }: { value: string; onChange: (v: stri
         <span style={{ fontSize: 12, fontWeight: 600, color: current.color }}>{current.label}</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={current.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "" }}><path d="M6 9l6 6 6-6"/></svg>
       </div>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, background: "rgba(20,20,24,0.97)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, boxShadow: "0 16px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)", zIndex: 9999, overflow: "hidden", minWidth: 150, animation: "statusDropIn 0.18s cubic-bezier(0.34,1.4,0.64,1)" }}>
-          {STATUS_OPTIONS.map(opt => (
-            <div
-              key={opt.value}
-              onClick={() => { onChange(opt.value); setOpen(false); }}
-              style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px", cursor: "pointer", background: opt.value === value ? opt.bg : "transparent", transition: "background 0.12s", borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-              onMouseEnter={e => { if (opt.value !== value) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-              onMouseLeave={e => { if (opt.value !== value) e.currentTarget.style.background = "transparent"; }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: opt.color, flexShrink: 0 }} />
-              {opt.value === value && <Check size={13} style={{ marginLeft: "auto", color: opt.color }} />}
-            </div>
-          ))}
-        </div>
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            key="status-dropdown-list"
+            variants={dropdownVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, background: "rgba(20,20,24,0.97)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, boxShadow: "0 16px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)", zIndex: 9999, overflow: "hidden", minWidth: 150 }}
+          >
+            {STATUS_OPTIONS.map(opt => (
+              <div
+                key={opt.value}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 14px", cursor: "pointer", background: opt.value === value ? opt.bg : "transparent", transition: "background 0.12s", borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                onMouseEnter={e => { if (opt.value !== value) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                onMouseLeave={e => { if (opt.value !== value) e.currentTarget.style.background = "transparent"; }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: opt.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: opt.value === value ? opt.color : "#d4d4d8", fontWeight: opt.value === value ? 600 : 500 }}>{opt.label}</span>
+                {opt.value === value && <Check size={13} style={{ marginLeft: "auto", color: opt.color }} />}
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1990,7 +2039,7 @@ function MobileDrawer({
   onNewProject,
   onEditProject
 }: {
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
   activeModule: string;
   projects: AppProject[];
@@ -2002,8 +2051,6 @@ function MobileDrawer({
   onEditProject: (p: AppProject) => void;
 }) {
   const [location, navigate] = useLocation();
-
-  if (!isOpen) return null;
 
   const prof = user ? getMemberProfile(user.name) : null;
 
@@ -2018,39 +2065,54 @@ function MobileDrawer({
   ];
 
   return (
-    <div style={{
-      position: "fixed",
-      inset: 0,
-      zIndex: 100000,
-      display: "flex"
-    }}>
+    <motion.div
+      initial={{ opacity: 1 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 1 }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100000,
+        display: "flex"
+      }}
+    >
       {/* Backdrop */}
-      <div 
+      <motion.div 
+        key="mobile-drawer-backdrop"
+        variants={backdropVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
         onClick={onClose}
         style={{
           position: "absolute",
           inset: 0,
           background: "rgba(0,0,0,0.72)",
           backdropFilter: "blur(8px)",
-          WebkitBackdropFilter: "blur(8px)",
-          animation: "fadeIn 0.2s ease"
+          WebkitBackdropFilter: "blur(8px)"
         }}
       />
 
       {/* Drawer Body */}
-      <div style={{
-        position: "relative",
-        width: "min(310px, 84vw)",
-        height: "100%",
-        background: "#161619",
-        borderRight: "1px solid rgba(255,255,255,0.08)",
-        display: "flex",
-        flexDirection: "column",
-        boxShadow: "10px 0 40px rgba(0,0,0,0.8)",
-        animation: "slideRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
-        overflowY: "auto",
-        WebkitOverflowScrolling: "touch"
-      }}>
+      <motion.div
+        key="mobile-drawer-body"
+        variants={drawerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        style={{
+          position: "relative",
+          width: "min(310px, 84vw)",
+          height: "100%",
+          background: "#161619",
+          borderRight: "1px solid rgba(255,255,255,0.08)",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "10px 0 40px rgba(0,0,0,0.8)",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch"
+        }}
+      >
         {/* Drawer Header */}
         <div style={{
           padding: "16px",
@@ -2291,8 +2353,8 @@ function MobileDrawer({
             <span>Sair</span>
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -2370,19 +2432,28 @@ function Header() {
               <div style={{ display:"flex", alignItems:"center", gap:5, cursor:"pointer", position:"relative" }} onClick={() => setShowDropdown(!showDropdown)}>
                 <span style={{ fontSize: isMobile ? 14 : 16, fontWeight:700, color:"#f0f0f0", maxWidth: isMobile ? 140 : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeProject.name}</span>
                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M3 5l3.5 3.5L10 5" stroke="#777" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                {showDropdown && (
-                  <div style={{ position:"absolute", top:"calc(100% + 8px)", left:0, background:"#1e1e22", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, boxShadow:"0 12px 40px rgba(0,0,0,0.7)", zIndex:100, minWidth:220, padding:"6px", animation:"fadeIn 0.12s ease" }}>
-                    {projects.map((p: any) => (
-                      <div key={p.id} onClick={e => { e.stopPropagation(); navigate(`/projetos/${p.id}/quadros`); setShowDropdown(false); }}
-                        style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:7, cursor:"pointer", fontSize:13, color: p.id===activeProject.id ? "#e0e0e0" : "#888", background: p.id===activeProject.id ? "#2a2a2e" : "transparent" }}
-                        onMouseEnter={e => { if(p.id!==activeProject.id) e.currentTarget.style.background="#242424"; }}
-                        onMouseLeave={e => { if(p.id!==activeProject.id) e.currentTarget.style.background="transparent"; }}>
-                        <div style={{ width:20, height:20, borderRadius:5, background: p.icon ? `url(${p.icon}) center/cover` : p.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#fff" }}>{!p.icon && p.name[0]}</div>
-                        {p.name}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <AnimatePresence>
+                  {showDropdown && (
+                    <motion.div
+                      key="project-picker-dropdown"
+                      variants={dropdownVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                      style={{ position:"absolute", top:"calc(100% + 8px)", left:0, background:"#1e1e22", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, boxShadow:"0 12px 40px rgba(0,0,0,0.7)", zIndex:100, minWidth:220, padding:"6px" }}
+                    >
+                      {projects.map((p: any) => (
+                        <div key={p.id} onClick={e => { e.stopPropagation(); navigate(`/projetos/${p.id}/quadros`); setShowDropdown(false); }}
+                          style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:7, cursor:"pointer", fontSize:13, color: p.id===activeProject.id ? "#e0e0e0" : "#888", background: p.id===activeProject.id ? "#2a2a2e" : "transparent" }}
+                          onMouseEnter={e => { if(p.id!==activeProject.id) e.currentTarget.style.background="#242424"; }}
+                          onMouseLeave={e => { if(p.id!==activeProject.id) e.currentTarget.style.background="transparent"; }}>
+                          <div style={{ width:20, height:20, borderRadius:5, background: p.icon ? `url(${p.icon}) center/cover` : p.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#fff" }}>{!p.icon && p.name[0]}</div>
+                          {p.name}
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
               
               {!isMobile && (
@@ -2437,62 +2508,107 @@ function Header() {
                 {!isMobile && <span style={{ fontSize:12, color:"#bbb", fontWeight:500 }}>{user.name}</span>}
               </div>
               
-              {profileMenuOpen && (
-                <>
-                  <div style={{ position: "fixed", top:0, left:0, right:0, bottom:0, zIndex: 90 }} onClick={() => setProfileMenuOpen(false)} />
-                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(18,18,22,0.97)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, boxShadow: "0 16px 48px rgba(0,0,0,0.8)", zIndex: 100, minWidth: 220, overflow:"hidden", animation: "fadeIn 0.12s ease" }}>
-                    {/* Profile Header */}
-                    {(() => {
-                      const prof = user ? getMemberProfile(user.name) : null;
-                      return (
-                        <div style={{ padding:"16px", borderBottom:"1px solid rgba(255,255,255,0.07)", display:"flex", flexDirection:"column", alignItems:"center", gap:10, background:`radial-gradient(ellipse at 50% 0%, ${prof?.color ?? "#7C5AC2"}22 0%, transparent 70%)` }}>
-                          <div style={{ width:60, height:60, borderRadius:"50%", border:`2px solid ${prof?.color ?? "#7C5AC2"}`, overflow:"hidden", background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, fontWeight:700, color:"#fff" }}>
-                            {user?.avatarUrl ? <img src={user.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : user?.name[0]?.toUpperCase()}
+              <AnimatePresence>
+                {profileMenuOpen && (
+                  <>
+                    <div style={{ position: "fixed", top:0, left:0, right:0, bottom:0, zIndex: 90 }} onClick={() => setProfileMenuOpen(false)} />
+                    <motion.div
+                      key="profile-menu-dropdown"
+                      variants={dropdownVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                      style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "rgba(18,18,22,0.97)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, boxShadow: "0 16px 48px rgba(0,0,0,0.8)", zIndex: 100, minWidth: 220, overflow:"hidden" }}
+                    >
+                      {/* Profile Header */}
+                      {(() => {
+                        const prof = user ? getMemberProfile(user.name) : null;
+                        return (
+                          <div style={{ padding:"16px", borderBottom:"1px solid rgba(255,255,255,0.07)", display:"flex", flexDirection:"column", alignItems:"center", gap:10, background:`radial-gradient(ellipse at 50% 0%, ${prof?.color ?? "#7C5AC2"}22 0%, transparent 70%)` }}>
+                            <div style={{ width:60, height:60, borderRadius:"50%", border:`2px solid ${prof?.color ?? "#7C5AC2"}`, overflow:"hidden", background:"linear-gradient(135deg,#4f2d8a,#7C5AC2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, fontWeight:700, color:"#fff" }}>
+                              {user?.avatarUrl ? <img src={user.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : user?.name[0]?.toUpperCase()}
+                            </div>
+                            <div style={{ textAlign:"center" }}>
+                              <div style={{ fontSize:14, fontWeight:700, color:"#f0f0f8" }}>{user?.name}</div>
+                              <div style={{ fontSize:11, fontWeight:600, color: prof?.color ?? "#7C5AC2", marginTop:2 }}>{prof?.role}</div>
+                              <div style={{ fontSize:11, fontStyle:"italic", color:"rgba(255,255,255,0.35)", marginTop:5, lineHeight:1.4 }}>{prof?.tagline}</div>
+                            </div>
                           </div>
-                          <div style={{ textAlign:"center" }}>
-                            <div style={{ fontSize:14, fontWeight:700, color:"#f0f0f8" }}>{user?.name}</div>
-                            <div style={{ fontSize:11, fontWeight:600, color: prof?.color ?? "#7C5AC2", marginTop:2 }}>{prof?.role}</div>
-                            <div style={{ fontSize:11, fontStyle:"italic", color:"rgba(255,255,255,0.35)", marginTop:5, lineHeight:1.4 }}>{prof?.tagline}</div>
-                          </div>
+                        );
+                      })()}
+                      {/* Actions */}
+                      <div style={{ padding:"6px" }}>
+                        <div 
+                          onClick={() => { setProfileMenuOpen(false); setProfileModalOpen(true); }}
+                          style={{ padding: "9px 12px", borderRadius: 7, cursor: "pointer", fontSize: 13, color: "#ccc", transition: "all 0.1s", display:"flex", alignItems:"center", gap:8 }}
+                          onMouseEnter={e => e.currentTarget.style.background="rgba(255,255,255,0.05)"} onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          Editar Perfil
                         </div>
-                      );
-                    })()}
-                    {/* Actions */}
-                    <div style={{ padding:"6px" }}>
-                      <div 
-                        onClick={() => { setProfileMenuOpen(false); setProfileModalOpen(true); }}
-                        style={{ padding: "9px 12px", borderRadius: 7, cursor: "pointer", fontSize: 13, color: "#ccc", transition: "all 0.1s", display:"flex", alignItems:"center", gap:8 }}
-                        onMouseEnter={e => e.currentTarget.style.background="rgba(255,255,255,0.05)"} onMouseLeave={e => e.currentTarget.style.background="transparent"}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        Editar Perfil
+                        <div 
+                          onClick={logout}
+                          style={{ padding: "9px 12px", borderRadius: 7, cursor: "pointer", fontSize: 13, color: "#ef4444", transition: "all 0.1s", display:"flex", alignItems:"center", gap:8 }}
+                          onMouseEnter={e => e.currentTarget.style.background="rgba(239,68,68,0.08)"} onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                          Sair
+                        </div>
                       </div>
-                      <div 
-                        onClick={logout}
-                        style={{ padding: "9px 12px", borderRadius: 7, cursor: "pointer", fontSize: 13, color: "#ef4444", transition: "all 0.1s", display:"flex", alignItems:"center", gap:8 }}
-                        onMouseEnter={e => e.currentTarget.style.background="rgba(239,68,68,0.08)"} onMouseLeave={e => e.currentTarget.style.background="transparent"}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                        Sair
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
             </div>
           )}
         </div>
       </div>
-      {profileModalOpen && <ProfileModal onClose={() => setProfileModalOpen(false)} />}
+      <AnimatePresence>
+        {profileModalOpen && <ProfileModal key="header-profile-modal" onClose={() => setProfileModalOpen(false)} />}
+      </AnimatePresence>
       {isProjectView && (
         <div style={{ display:"flex", alignItems:"center", padding: isMobile ? "0 8px" : "0 20px", overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none" }}>
-          {TABS.map(tab=>(
-            <button key={tab} onClick={()=>{
-              if (activeProject) navigate(`/projetos/${activeProject.id}/${tab.toLowerCase().replace(/ /g, '-')}`);
-            }} style={{ padding: isMobile ? "7px 11px" : "8px 14px", background:"transparent", border:"none", borderBottom:`2.5px solid ${activeTab===tab?"#7C5AC2":"transparent"}`, color: activeTab===tab?"#f0f0f0":"#505060", fontWeight: activeTab===tab?600:400, fontSize: isMobile ? 12 : 13, cursor:"pointer", whiteSpace:"nowrap", transition:"all 0.12s" }}>
-              {tab}
-            </button>
-          ))}
+          {TABS.map(tab => {
+            const isActive = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                onClick={() => {
+                  if (activeProject) navigate(`/projetos/${activeProject.id}/${tab.toLowerCase().replace(/ /g, '-')}`);
+                }}
+                style={{
+                  position: "relative",
+                  padding: isMobile ? "7px 11px" : "8px 14px",
+                  background: "transparent",
+                  border: "none",
+                  color: isActive ? "#f0f0f0" : "#505060",
+                  fontWeight: isActive ? 600 : 400,
+                  fontSize: isMobile ? 12 : 13,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "color 0.15s"
+                }}
+              >
+                {tab}
+                {isActive && (
+                  <motion.div
+                    layoutId="activeProjectTabIndicator"
+                    transition={tabSpring}
+                    style={{
+                      position: "absolute",
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: 2.5,
+                      backgroundColor: "#7C5AC2",
+                      borderRadius: "2px 2px 0 0",
+                      boxShadow: "0 0 8px rgba(124,90,194,0.6)"
+                    }}
+                  />
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -2551,31 +2667,57 @@ function MainContent() {
   const { sidebarModule, activeTab, activeProject, projects } = useContext(AppContext);
   const currentWorkspaceId = activeProject?.workspaceId || projects[0]?.workspaceId;
 
-  if (sidebarModule === "Início") return <InicioPage />;
-  if (sidebarModule === "Minhas Tarefas") return <MinhasTarefasPage />;
-  if (sidebarModule === "Membros") return <MembersPage />;
-  if (sidebarModule === "Financeiro") return <FinanceiroPage />;
-  if (sidebarModule === "Metas") return <MetasPage />;
-  if (sidebarModule === "Painel") return <PainelPage />;
-  if (sidebarModule === "Configurações") {
-    return <ConfiguracoesPage workspace={{ id: currentWorkspaceId, name: "Workspace Principal" }} />;
-  }
-  if (sidebarModule === "project") {
-    switch (activeTab) {
-      case "Quadros": return <Board />;
-      case "Lista": return <ProjectList />;
-      case "Calendário": return <ProjectCalendar />;
-      case "Visão Geral": return <ProjectOverview />;
-      case "Cronologia":
-      case "Cronograma": return <ProjectTimeline />;
-      case "Arquivos": return activeProject ? <ProjectFiles projectId={activeProject.id} /> : <div/>;
-      case "Canais": return activeProject ? <ProjectChannels projectId={activeProject.id} /> : <div/>;
-      default: return <ComingSoon module={`Projeto: ${activeTab}`} />;
-    }
-  }
+  const contentKey = sidebarModule === "project" ? `project-${activeProject?.id}-${activeTab}` : sidebarModule;
 
-  // Any other module -> Coming Soon
-  return <ComingSoon module={sidebarModule} />;
+  const renderModule = () => {
+    if (sidebarModule === "Início") return <InicioPage />;
+    if (sidebarModule === "Minhas Tarefas") return <MinhasTarefasPage />;
+    if (sidebarModule === "Membros") return <MembersPage />;
+    if (sidebarModule === "Financeiro") return <FinanceiroPage />;
+    if (sidebarModule === "Metas") return <MetasPage />;
+    if (sidebarModule === "Painel") return <PainelPage />;
+    if (sidebarModule === "Configurações") {
+      return <ConfiguracoesPage workspace={{ id: currentWorkspaceId, name: "Workspace Principal" }} />;
+    }
+    if (sidebarModule === "project") {
+      switch (activeTab) {
+        case "Quadros": return <Board />;
+        case "Lista": return <ProjectList />;
+        case "Calendário": return <ProjectCalendar />;
+        case "Visão Geral": return <ProjectOverview />;
+        case "Cronologia":
+        case "Cronograma": return <ProjectTimeline />;
+        case "Arquivos": return activeProject ? <ProjectFiles projectId={activeProject.id} /> : <div/>;
+        case "Canais": return activeProject ? <ProjectChannels projectId={activeProject.id} /> : <div/>;
+        default: return <ComingSoon module={`Projeto: ${activeTab}`} />;
+      }
+    }
+    return <ComingSoon module={sidebarModule} />;
+  };
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={contentKey}
+        variants={pageVariants}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+          minHeight: 0,
+          width: "100%",
+          height: "100%",
+          overflow: "hidden"
+        }}
+      >
+        {renderModule()}
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 export function TeltechLedger() {
@@ -2709,25 +2851,32 @@ export function TeltechLedger() {
             activeProject={activeProject}
             projects={projects}
           />
-          <MobileDrawer
-            isOpen={mobileDrawerOpen}
-            onClose={() => setMobileDrawerOpen(false)}
-            activeModule={sidebarModule}
-            projects={projects}
-            activeProject={activeProject}
-            user={user}
-            logout={logout}
-            onEditProfile={() => setProfileModalOpen(true)}
-            onNewProject={() => setShowNewProject(true)}
-            onEditProject={(p) => setEditProject(p)}
-          />
+          <AnimatePresence>
+            {mobileDrawerOpen && (
+              <MobileDrawer
+                key="mobile-drawer"
+                isOpen={mobileDrawerOpen}
+                onClose={() => setMobileDrawerOpen(false)}
+                activeModule={sidebarModule}
+                projects={projects}
+                activeProject={activeProject}
+                user={user}
+                logout={logout}
+                onEditProfile={() => setProfileModalOpen(true)}
+                onNewProject={() => setShowNewProject(true)}
+                onEditProject={(p) => setEditProject(p)}
+              />
+            )}
+          </AnimatePresence>
         </>
       )}
 
       {/* Modals triggered from drawer or elsewhere */}
-      {editProject && <ProjectModal project={editProject} onClose={() => setEditProject(null)} onSaved={fetchProjects} />}
-      {showNewProject && <ProjectModal project={null} onClose={() => setShowNewProject(false)} onSaved={fetchProjects} />}
-      {profileModalOpen && <ProfileModal onClose={() => setProfileModalOpen(false)} />}
+      <AnimatePresence>
+        {editProject && <ProjectModal key="root-edit-project" project={editProject} onClose={() => setEditProject(null)} onSaved={fetchProjects} />}
+        {showNewProject && <ProjectModal key="root-new-project" project={null} onClose={() => setShowNewProject(false)} onSaved={fetchProjects} />}
+        {profileModalOpen && <ProfileModal key="root-profile-modal" onClose={() => setProfileModalOpen(false)} />}
+      </AnimatePresence>
     </AppContext.Provider>
   );
 }

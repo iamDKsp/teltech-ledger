@@ -6,6 +6,7 @@ import { TeltechLedger } from "./TeltechLedger";
 import { Loader } from "./components/Loader";
 import { Router } from "wouter";
 import { Toaster } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,19 +18,42 @@ function AppInner() {
   const { isLoading, isAuthenticated } = useAuth();
   const [loaderFinished, setLoaderFinished] = useState(false);
 
-  if (isLoading || !loaderFinished) {
-    return (
-      <div style={{ width: '100vw', height: '100vh', background: '#0d0d0d' }}>
-        <Loader isReady={!isLoading} onFinish={() => setLoaderFinished(true)} />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
-
-  return <TeltechLedger />;
+  return (
+    <AnimatePresence mode="wait">
+      {isLoading || !loaderFinished ? (
+        <motion.div
+          key="loader-view"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 1.02 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", background: "#0d0d0d", zIndex: 999999 }}
+        >
+          <Loader isReady={!isLoading} onFinish={() => setLoaderFinished(true)} />
+        </motion.div>
+      ) : !isAuthenticated ? (
+        <motion.div
+          key="login-view"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+          style={{ width: "100vw", height: "100vh" }}
+        >
+          <LoginPage />
+        </motion.div>
+      ) : (
+        <motion.div
+          key="ledger-view"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <TeltechLedger />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 }
 
 export default function App() {

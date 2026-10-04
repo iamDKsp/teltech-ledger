@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Plus, ChevronDown, ChevronRight, CheckCircle, TrendingUp, Trash2, Edit3, X, Calendar, Check, AlertCircle } from 'lucide-react';
 import { API } from '../lib/api';
+import { motion, AnimatePresence } from 'framer-motion';
+import { backdropVariants, modalVariants, accordionVariants } from '../lib/motion';
 
 interface Goal {
   id: string;
@@ -67,7 +69,11 @@ const btnSecondary: React.CSSProperties = {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div
+    <motion.div
+      variants={backdropVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: 'fixed',
@@ -80,7 +86,9 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         backdropFilter: 'blur(5px)',
       }}
     >
-      <div
+      <motion.div
+        variants={modalVariants}
+        onClick={(e) => e.stopPropagation()}
         style={{
           width: 480,
           maxWidth: '92vw',
@@ -120,8 +128,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
           </button>
         </div>
         <div style={{ padding: '20px' }}>{children}</div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -380,7 +388,7 @@ export const MetasPage: React.FC = () => {
                   onMouseOut={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
                   <div style={{ marginRight: '16px', color: '#888' }}>
-                    {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                    <ChevronDown size={20} style={{ transition: 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1)', transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -428,8 +436,16 @@ export const MetasPage: React.FC = () => {
                 </div>
 
                 {/* Key Results */}
-                {isExpanded && (
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '18px 24px 20px 52px', backgroundColor: '#131316' }}>
+                <AnimatePresence initial={false}>
+                  {isExpanded && (
+                    <motion.div
+                      key={`kr-${obj.id}`}
+                      variants={accordionVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                    >
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '18px 24px 20px 52px', backgroundColor: '#131316' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                       <h4 style={{ margin: 0, fontSize: '12px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
                         Resultados-Chave ({(obj.keyResults?.length || 0)})
@@ -506,16 +522,19 @@ export const MetasPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
             );
           })}
         </div>
       )}
 
-      {/* ── Modal: Criar Objetivo ── */}
-      {modalType === 'create_objective' && (
-        <Modal title="Novo Objetivo Estratégico" onClose={closeModal}>
+      {/* ── Modals with AnimatePresence ── */}
+      <AnimatePresence>
+        {modalType === 'create_objective' && (
+          <Modal key="modal-create-obj" title="Novo Objetivo Estratégico" onClose={closeModal}>
           {formError && (
             <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
               {formError}
@@ -565,7 +584,7 @@ export const MetasPage: React.FC = () => {
 
       {/* ── Modal: Criar Key Result ── */}
       {modalType === 'create_kr' && selectedObjective && (
-        <Modal title={`Adicionar KR — ${selectedObjective.title}`} onClose={closeModal}>
+        <Modal key="modal-create-kr" title={`Adicionar KR — ${selectedObjective.title}`} onClose={closeModal}>
           {formError && (
             <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
               {formError}
@@ -627,7 +646,7 @@ export const MetasPage: React.FC = () => {
 
       {/* ── Modal: Editar Key Result ── */}
       {modalType === 'edit_kr' && selectedGoal && (
-        <Modal title="Atualizar Progresso do KR" onClose={closeModal}>
+        <Modal key="modal-edit-kr" title="Atualizar Progresso do KR" onClose={closeModal}>
           {formError && (
             <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
               {formError}
@@ -699,7 +718,7 @@ export const MetasPage: React.FC = () => {
 
       {/* ── Modal: Confirmação de Exclusão ── */}
       {modalType === 'delete' && selectedGoal && (
-        <Modal title="Confirmar Exclusão" onClose={closeModal}>
+        <Modal key="modal-delete" title="Confirmar Exclusão" onClose={closeModal}>
           {formError && (
             <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
               {formError}
@@ -724,6 +743,7 @@ export const MetasPage: React.FC = () => {
           </div>
         </Modal>
       )}
+      </AnimatePresence>
     </div>
   );
 };
