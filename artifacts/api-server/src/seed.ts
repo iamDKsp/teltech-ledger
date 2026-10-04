@@ -1,6 +1,82 @@
-import { db, usersTable, workspacesTable, workspaceMembersTable, financialCategoriesTable } from "@workspace/db";
+import { db, pool, usersTable, workspacesTable, workspaceMembersTable, financialCategoriesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
+
+export async function runOneTimeFinancialReset() {
+  const migrationId = "2026-10-04_reset_financial_module";
+  try {
+    // 1. Garantir que a tabela de migrações do sistema existe
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS system_migrations (
+        id TEXT PRIMARY KEY,
+        executed_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    // 2. Verificar se este reset específico já foi executado
+    const { rows } = await pool.query(
+      "SELECT id FROM system_migrations WHERE id = $1 LIMIT 1;",
+      [migrationId]
+    );
+
+    if (rows.length > 0) {
+      console.log(`  ℹ️ [Migrations] ${migrationId} já executado anteriormente. Ignorando.`);
+      return;
+    }
+
+    console.log(`  🚀 [Migrations] Executando reset completo do módulo financeiro (${migrationId})...`);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN;");
+
+      // 1. Desvincular clientes das tarefas do Kanban
+      await client.query("UPDATE tasks SET client_id = NULL WHERE client_id IS NOT NULL;");
+
+      // 2. Limpar mensagens de cobrança e clientes no WhatsApp
+      await client.query("DELETE FROM whatsapp_messages WHERE transaction_id IS NOT NULL OR client_id IS NOT NULL;");
+
+      // 3. Limpar logs de auditoria financeira
+      await client.query("DELETE FROM financial_audit_logs;");
+
+      // 4. Limpar todas as transações (cobranças, receitas, despesas, retiradas, reembolsos)
+      await client.query("DELETE FROM financial_transactions;");
+
+      // 5. Limpar módulos contratados, itens de vendas e vendas comerciais
+      await client.query("DELETE FROM sale_modules;");
+      await client.query("DELETE FROM sale_items;");
+      await client.query("DELETE FROM client_sales;");
+
+      // 6. Limpar contratos antigos
+      await client.query("DELETE FROM client_contracts;");
+
+      // 7. Limpar todos os clientes
+      await client.query("DELETE FROM clients;");
+
+      // 8. Limpar orçamentos departamentais
+      await client.query("DELETE FROM financial_budgets;");
+
+      // 9. Zerar saldos das contas bancárias
+      await client.query("UPDATE financial_accounts SET current_balance = 0;");
+
+      // 10. Registrar que esta migração one-off foi executada com sucesso
+      await client.query(
+        "INSERT INTO system_migrations (id, executed_at) VALUES ($1, NOW());",
+        [migrationId]
+      );
+
+      await client.query("COMMIT;");
+      console.log(`  🎉 [Migrations] ${migrationId} executado com sucesso! Módulo financeiro zerado para novo ciclo.`);
+    } catch (err) {
+      await client.query("ROLLBACK;");
+      console.error(`  ❌ [Migrations] Erro ao executar ${migrationId}:`, err);
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error("  ❌ [Migrations] Falha ao verificar/executar tabela system_migrations:", err);
+  }
+}
 
 export async function bootstrapWorkspace() {
   console.log("🌱 Checking workspace bootstrap...");
@@ -112,6 +188,9 @@ export async function bootstrapWorkspace() {
     }
   }
 
+  // One-time financial reset migration (executa apenas uma vez no deploy)
+  await runOneTimeFinancialReset();
+
   // Only run demo data seed if explicitly enabled in non-production
   if (process.env.NODE_ENV !== "production" && process.env.SEED_DEMO_DATA === "true" && workspaceId) {
     await seedDemoData(workspaceId);
@@ -123,7 +202,7 @@ export async function bootstrapWorkspace() {
 async function seedDemoData(workspaceId: string) {
   if (process.env.NODE_ENV === "production") return;
 
-  const { financialAccountsTable, financialApprovalRulesTable, financialSettingsTable, financialBudgetsTable, clientsTable, financialTransactionsTable } = await import("@workspace/db");
+  const { financialAccountsTable, financialApprovalRulesTable, financialSettingsTable } = await import("@workspace/db");
 
   // Approval rules default
   const existingRules = await db.select({ id: financialApprovalRulesTable.id }).from(financialApprovalRulesTable).where(eq(financialApprovalRulesTable.workspaceId, workspaceId)).limit(1);
@@ -145,50 +224,7 @@ async function seedDemoData(workspaceId: string) {
     });
   }
 
-  // Cleanup initial mock/dev bank accounts if they have no transactions registered
-  const mockNames = ["Banco Inter PJ", "Conta Cora PJ", "Caixa Reserva Teltech"];
-  for (const name of mockNames) {
-    const mockAccounts = await db
-      .select({ id: financialAccountsTable.id })
-      .from(financialAccountsTable)
-      .where(and(eq(financialAccountsTable.workspaceId, workspaceId), eq(financialAccountsTable.name, name)));
-
-    for (const mockAcc of mockAccounts) {
-      const [tx] = await db
-        .select({ id: financialTransactionsTable.id })
-        .from(financialTransactionsTable)
-        .where(eq(financialTransactionsTable.accountId, mockAcc.id))
-        .limit(1);
-
-      if (!tx) {
-        await db.delete(financialAccountsTable).where(eq(financialAccountsTable.id, mockAcc.id));
-        console.log(`  🧹 [Cleanup] Removida conta de teste mock: "${name}"`);
-      }
-    }
-  }
-
-  // Monthly budgets (DEV ONLY)
-  const existingBudgets = await db.select({ id: financialBudgetsTable.id }).from(financialBudgetsTable).where(eq(financialBudgetsTable.workspaceId, workspaceId)).limit(1);
-  if (existingBudgets.length === 0) {
-    const curMonth = new Date().getMonth() + 1;
-    const curYear = new Date().getFullYear();
-    await db.insert(financialBudgetsTable).values([
-      { workspaceId, department: "tech", month: curMonth, year: curYear, amount: 800000 },
-      { workspaceId, department: "marketing", month: curMonth, year: curYear, amount: 600000 },
-      { workspaceId, department: "operations", month: curMonth, year: curYear, amount: 400000 },
-    ]);
-  }
-
-  // Clients (DEV ONLY)
-  const existingClients = await db.select({ id: clientsTable.id }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId)).limit(1);
-  if (existingClients.length === 0) {
-    await db.insert(clientsTable).values([
-      { workspaceId, name: "StrataScratch Inc", document: "12.345.678/0001-90", email: "finance@stratascratch.com", phone: "(11) 98765-4321", notes: "Contrato SaaS mensal recorrente" },
-      { workspaceId, name: "AlertSec Cloud Ltd", document: "98.765.432/0001-10", email: "billing@alertsec.io", phone: "(11) 97654-3210", notes: "Projeto e suporte de cibersegurança" },
-    ]);
-  }
-
-  console.log("  ✅ [Demo Seed] Seeded development accounts, budgets, and clients");
+  console.log("  ✅ [Demo Seed] Configurações de desenvolvimento verificadas");
 }
 
 // Backward compatibility export
