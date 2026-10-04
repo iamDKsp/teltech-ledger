@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "set PORT=5000 && node --env-file=../../.env --enable-source-maps ./dist/index.mjs",
     "start:prod": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "esbuild src/__tests__/sales-schedule.test.ts --bundle --platform=node --format=esm --outfile=dist/tests/sales-schedule.test.mjs --log-level=error && node --test dist/tests/sales-schedule.test.mjs"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

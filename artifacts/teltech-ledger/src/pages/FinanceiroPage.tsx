@@ -50,6 +50,13 @@ import {
   Coins,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  SalesWizardModal,
+  ModulesCatalogModal,
+  SaleManageModal,
+  ClientSalesSummary,
+  type SaleView,
+} from "./finance/SalesModule";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +100,10 @@ interface Transaction {
   installmentNumber?: number;
   installmentsTotal?: number;
   pauseBilling?: boolean;
+  saleId?: string | null;
+  saleItemId?: string | null;
+  revenueType?: "recurring" | "one_time" | null;
+  referenceMonth?: string | null;
   createdAt: string;
 }
 
@@ -173,6 +184,9 @@ interface DREData {
   month: number;
   year: number;
   grossRevenue: number;
+  recurringRevenue?: number;
+  oneTimeRevenue?: number;
+  otherRevenue?: number;
   taxDeductions: number;
   netRevenue: number;
   totalCOGS: number;
@@ -198,6 +212,8 @@ interface ProjectProfitability {
 
 interface DashboardData {
   mrr: number;
+  oneTimeContracted?: number;
+  contractedReceivable?: number;
   monthInflow: number;
   monthInflowPending: number;
   monthOutflow: number;
@@ -598,8 +614,13 @@ export function FinanceiroPage() {
   const [partners, setPartners] = useState<PartnerData[]>([]);
   const [budgets, setBudgets] = useState<BudgetData[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<Transaction[]>([]);
+  const [sales, setSales] = useState<SaleView[]>([]);
 
   // Modals
+  const [showSalesWizard, setShowSalesWizard] = useState(false);
+  const [salesWizardClientId, setSalesWizardClientId] = useState<string | null>(null);
+  const [showModulesModal, setShowModulesModal] = useState(false);
+  const [managingSaleId, setManagingSaleId] = useState<string | null>(null);
   const [showTxModal, setShowTxModal] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [txInitialClientId, setTxInitialClientId] = useState<string | null>(null);
@@ -653,9 +674,10 @@ export function FinanceiroPage() {
         API.get(`/finance/budgets?month=${m}&year=${y}`),
         API.get(`/finance/approvals`),
         API.get(`/projects`),
+        API.get(`/finance/sales`),
       ]);
 
-      const [dashRes, txRes, catRes, accRes, clRes, dreRes, profRes, partRes, budRes, appRes, projRes] =
+      const [dashRes, txRes, catRes, accRes, clRes, dreRes, profRes, partRes, budRes, appRes, projRes, salesRes] =
         results.map(r => (r.status === "fulfilled" ? (r as PromiseFulfilledResult<any>).value : null));
 
       if (dashRes?.dashboard) setDashboard(dashRes.dashboard);
@@ -669,6 +691,7 @@ export function FinanceiroPage() {
       if (budRes?.budgets) setBudgets(budRes.budgets);
       if (appRes?.pending) setPendingApprovals(appRes.pending);
       if (projRes?.projects) setProjects(projRes.projects);
+      if (salesRes?.sales) setSales(salesRes.sales);
     } catch (err) {
       console.error("Erro ao carregar dados financeiros:", err);
     } finally {
@@ -1115,6 +1138,10 @@ export function FinanceiroPage() {
               <ClientsView
                 clients={clients}
                 transactions={transactions}
+                sales={sales}
+                onNewSale={(clientId) => { setSalesWizardClientId(clientId ?? null); setShowSalesWizard(true); }}
+                onManageSale={(sale) => setManagingSaleId(sale.id)}
+                onOpenModules={() => setShowModulesModal(true)}
                 onNewClient={() => { setEditingClient(null); setShowClientModal(true); }}
                 onEditClient={(client) => { setEditingClient(client); setShowClientModal(true); }}
                 onSendWhatsApp={handleSendWhatsAppPix}
@@ -1247,6 +1274,35 @@ export function FinanceiroPage() {
           }}
           onDelete={handleDeleteClient}
           onReactivate={handleReactivateClient}
+        />
+      )}
+
+      {showSalesWizard && (
+        <SalesWizardModal
+          clients={clients}
+          projects={projects}
+          initialClientId={salesWizardClientId}
+          onClose={() => { setShowSalesWizard(false); setSalesWizardClientId(null); }}
+          onSaved={() => {
+            setShowSalesWizard(false);
+            setSalesWizardClientId(null);
+            loadAllData();
+          }}
+        />
+      )}
+
+      {showModulesModal && (
+        <ModulesCatalogModal
+          onClose={() => setShowModulesModal(false)}
+          onChanged={() => { /* catálogo é lido sob demanda pelos modais */ }}
+        />
+      )}
+
+      {managingSaleId && sales.find((s) => s.id === managingSaleId) && (
+        <SaleManageModal
+          sale={sales.find((s) => s.id === managingSaleId)!}
+          onClose={() => setManagingSaleId(null)}
+          onChanged={() => loadAllData()}
         />
       )}
 
@@ -1464,6 +1520,33 @@ function CockpitView({
           color="#F59E0B"
         />
       </div>
+
+      {/* ─── Receita Contratada (recorrente x pontual x futura) ─────────────── */}
+      {((dashboard.mrr ?? 0) > 0 || (dashboard.oneTimeContracted ?? 0) > 0 || (dashboard.contractedReceivable ?? 0) > 0) && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+            gap: 14,
+            background: "linear-gradient(135deg, rgba(139,92,246,0.08), rgba(26,26,30,0.95))",
+            border: "1px solid rgba(139,92,246,0.22)",
+            borderRadius: 14,
+            padding: isMobile ? "14px" : "16px 22px",
+          }}
+        >
+          {[
+            { label: "MRR — Mensalidades do mês", value: dashboard.mrr ?? 0, hint: "Receita recorrente (SaaS + manutenção)", color: "#A78BFA" },
+            { label: "Projetos / Entradas do mês", value: dashboard.oneTimeContracted ?? 0, hint: "Receita pontual prevista", color: "#60A5FA" },
+            { label: "Já contratado p/ meses futuros", value: dashboard.contractedReceivable ?? 0, hint: "Parcelas e mensalidades já geradas", color: "#34D399" },
+          ].map((k) => (
+            <div key={k.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: 0.3 }}>{k.label}</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{formatBRL(k.value)}</span>
+              <span style={{ fontSize: 11, color: "#71717a" }}>{k.hint}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ─── Row 2: 2-Column Grid (Left: 2/3 Content, Right: 1/3 Pendencies) ─── */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr", gap: 20, alignItems: "start" }}>
@@ -2531,22 +2614,30 @@ function TransactionsLedgerView({
 function ClientsView({
   clients,
   transactions,
+  sales,
   onNewClient,
   onEditClient,
   onSendWhatsApp,
   onNewTxForClient,
   onDeleteClient,
   onReactivateClient,
+  onNewSale,
+  onManageSale,
+  onOpenModules,
   sendingBillingId,
 }: {
   clients: Client[];
   transactions: Transaction[];
+  sales: SaleView[];
   onNewClient: () => void;
   onEditClient: (client: Client) => void;
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onNewTxForClient: (clientId: string) => void;
   onDeleteClient: (client: Client) => void;
   onReactivateClient: (client: Client) => void;
+  onNewSale: (clientId?: string) => void;
+  onManageSale: (sale: SaleView) => void;
+  onOpenModules: () => void;
   sendingBillingId: string | null;
 }) {
   const isMobile = useIsMobile();
@@ -2576,24 +2667,62 @@ function ClientsView({
             Gestão de contratos B2B, emissão de cobranças Pix via WhatsApp e cancelamento/reativação de assinaturas
           </p>
         </div>
-        <button
-          onClick={onNewClient}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            background: "#8B5CF6",
-            border: "none",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <Plus style={{ width: 15, height: 15 }} /> Novo Cliente
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            onClick={onOpenModules}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#ccc",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Layers style={{ width: 14, height: 14 }} /> Módulos SaaS
+          </button>
+          <button
+            onClick={onNewClient}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#ccc",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Plus style={{ width: 15, height: 15 }} /> Novo Cliente
+          </button>
+          <button
+            onClick={() => onNewSale()}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              background: "#8B5CF6",
+              border: "none",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Sparkles style={{ width: 15, height: 15 }} /> Nova Venda
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
@@ -2742,6 +2871,14 @@ function ClientsView({
                     </div>
                   </div>
                 </div>
+
+                {!isInactive && (
+                  <ClientSalesSummary
+                    sales={sales.filter((s) => s.clientId === client.id)}
+                    onNewSale={() => onNewSale(client.id)}
+                    onManage={onManageSale}
+                  />
+                )}
 
                 {isInactive ? (
                   <div style={{ display: "flex", gap: 8 }}>
@@ -3041,12 +3178,21 @@ function DREView({
       <div style={{ background: "#18181c", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, overflow: "hidden", overflowX: "auto" }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center", minWidth: isMobile ? 480 : "auto" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Estrutura de Demonstração de Resultado</span>
-          <span style={{ fontSize: 12, color: "#888" }}>Base: Competência Contábil</span>
+          <span style={{ fontSize: 12, color: "#888" }}>Base: Regime de Caixa (lançamentos liquidados)</span>
         </div>
 
         <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 2, minWidth: isMobile ? 480 : "auto" }}>
           {[
             { label: "(+) RECEITA BRUTA OPERACIONAL", val: dre.grossRevenue, pct: 100, bold: true, color: "#10B981" },
+            ...(((dre.recurringRevenue ?? 0) > 0 || (dre.oneTimeRevenue ?? 0) > 0)
+              ? [
+                  { label: "    ↳ Recorrente (mensalidades SaaS / manutenção)", val: dre.recurringRevenue ?? 0, pct: dre.grossRevenue > 0 ? ((dre.recurringRevenue ?? 0) / dre.grossRevenue) * 100 : 0, color: "#34D399" },
+                  { label: "    ↳ Pontual (projetos / entradas)", val: dre.oneTimeRevenue ?? 0, pct: dre.grossRevenue > 0 ? ((dre.oneTimeRevenue ?? 0) / dre.grossRevenue) * 100 : 0, color: "#6EE7B7" },
+                  ...((dre.otherRevenue ?? 0) > 0
+                    ? [{ label: "    ↳ Outras receitas (lançamentos avulsos)", val: dre.otherRevenue ?? 0, pct: dre.grossRevenue > 0 ? ((dre.otherRevenue ?? 0) / dre.grossRevenue) * 100 : 0, color: "#A7F3D0" }]
+                    : []),
+                ]
+              : []),
             { label: "    (-) Provisão Tributária (Simples Nacional 6%)", val: dre.taxDeductions, pct: dre.grossRevenue > 0 ? (dre.taxDeductions / dre.grossRevenue) * 100 : 0, sign: "-", color: "#EC4899" },
             { label: "(=) RECEITA OPERACIONAL LÍQUIDA", val: dre.netRevenue, pct: dre.grossRevenue > 0 ? (dre.netRevenue / dre.grossRevenue) * 100 : 0, bold: true, color: "#fff", divider: true },
             { label: "    (-) Custos Diretos dos Serviços Prestados (CPV / COGS)", val: dre.totalCOGS, pct: dre.grossRevenue > 0 ? (dre.totalCOGS / dre.grossRevenue) * 100 : 0, sign: "-", color: "#3B82F6" },

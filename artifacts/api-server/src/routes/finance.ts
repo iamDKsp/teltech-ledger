@@ -157,6 +157,14 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     // ── MRR: Sum of contracted recurring inflow due this month (not cancelled)
     const mrr = monthTxs.filter(t => t.type === "inflow" && t.isRecurring && t.status !== "cancelled").reduce((s, t) => s + t.amount, 0);
 
+    // ── Receita pontual (projetos/entradas) prevista no mês e receita contratada para meses futuros
+    const oneTimeContracted = monthTxs
+      .filter(t => t.type === "inflow" && t.revenueType === "one_time" && t.status !== "cancelled")
+      .reduce((s, t) => s + t.amount, 0);
+    const contractedReceivable = transactions
+      .filter(t => t.type === "inflow" && t.saleId && t.status === "pending" && new Date(t.dueDate) > endOfMonth)
+      .reduce((s, t) => s + t.amount, 0);
+
     // ── Fluxo de Caixa Realizado no Mês (agrupado por paidAt com fallback para dueDate)
     const cashRealizedInflow = transactions.filter(t => {
       if (t.type !== "inflow" || t.status !== "paid") return false;
@@ -324,6 +332,8 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     res.json({
       dashboard: {
         mrr,
+        oneTimeContracted,
+        contractedReceivable,
         monthInflow, monthInflowPending,
         monthOutflow, monthOutflowPending,
         monthBalance,
@@ -1504,6 +1514,12 @@ router.get("/dre", requireAuth, async (req: Request, res: Response) => {
     // 1. Receita Bruta
     const grossRevenue = monthTxs.filter(t => t.type === "inflow").reduce((s, t) => s + t.amount, 0);
 
+    // 1.1 Composição da receita por natureza (recorrente x pontual x avulsa)
+    const inflowTxs = monthTxs.filter(t => t.type === "inflow");
+    const recurringRevenue = inflowTxs.filter(t => t.revenueType === "recurring").reduce((s, t) => s + t.amount, 0);
+    const oneTimeRevenue = inflowTxs.filter(t => t.revenueType === "one_time").reduce((s, t) => s + t.amount, 0);
+    const otherRevenue = grossRevenue - recurringRevenue - oneTimeRevenue;
+
     // 2. Impostos Provisionados
     const taxDeductions = Math.round((grossRevenue * settings.taxRatePercent) / 10000);
 
@@ -1546,6 +1562,9 @@ router.get("/dre", requireAuth, async (req: Request, res: Response) => {
         month: reqMonth + 1,
         year: reqYear,
         grossRevenue,
+        recurringRevenue,
+        oneTimeRevenue,
+        otherRevenue,
         taxDeductions,
         netRevenue,
         totalCOGS,

@@ -457,6 +457,85 @@ export const insertClientContractSchema = createInsertSchema(clientContractsTabl
 export type InsertClientContract = z.infer<typeof insertClientContractSchema>;
 export type ClientContract = typeof clientContractsTable.$inferSelect;
 
+// ─── SaaS Modules (catálogo) ──────────────────────────────────────────────────
+// Cada módulo do SaaS tem um preço de tabela; o preço negociado por cliente
+// fica em sale_modules.
+
+export const saasModulesTable = pgTable("saas_modules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  defaultPrice: integer("default_price").notNull().default(0), // em centavos
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type SaasModule = typeof saasModulesTable.$inferSelect;
+
+// ─── Client Sales (Venda / Contrato comercial) ────────────────────────────────
+// Uma venda agrupa os itens de cobrança de um cliente:
+//   - item 'project'      → entrada/projeto (pontual; parcelas fixas ou marcos)
+//   - item 'subscription' → mensalidade SaaS/manutenção (recorrente)
+
+export const clientSalesTable = pgTable("client_sales", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("active"), // 'active' | 'paused' | 'cancelled' | 'completed'
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type ClientSale = typeof clientSalesTable.$inferSelect;
+
+export const saleItemsTable = pgTable("sale_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  saleId: uuid("sale_id").notNull().references(() => clientSalesTable.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // 'project' | 'subscription'
+  label: text("label").notNull(),
+
+  // Projeto / entrada (kind = 'project')
+  totalAmount: integer("total_amount").notNull().default(0), // em centavos
+  installmentsCount: integer("installments_count").notNull().default(1),
+  firstDueDate: timestamp("first_due_date"),
+  paymentMode: text("payment_mode").notNull().default("installments"), // 'installments' | 'milestones'
+
+  // Mensalidade (kind = 'subscription')
+  startMode: text("start_mode"), // 'with_entry' | 'after_entry' | 'fixed_date' | 'after_delivery'
+  billingDay: integer("billing_day").notNull().default(1),
+  startDate: timestamp("start_date"),   // data do 1º vencimento (null enquanto aguarda entrega)
+  endDate: timestamp("end_date"),
+  fixedAmount: integer("fixed_amount"), // usado quando a mensalidade não tem módulos
+  generatedThrough: text("generated_through"), // 'YYYY-MM' do último mês gerado
+
+  status: text("status").notNull().default("active"), // 'active' | 'awaiting_start' | 'paused' | 'cancelled' | 'completed'
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type SaleItem = typeof saleItemsTable.$inferSelect;
+
+// Módulos contratados em um item de mensalidade, com preço negociado e vigência.
+// Trocar de módulo = encerrar a linha antiga (endDate) e abrir outra (startDate).
+export const saleModulesTable = pgTable("sale_modules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  saleItemId: uuid("sale_item_id").notNull().references(() => saleItemsTable.id, { onDelete: "cascade" }),
+  moduleId: uuid("module_id").notNull().references(() => saasModulesTable.id, { onDelete: "restrict" }),
+  price: integer("price").notNull().default(0), // em centavos
+  startDate: timestamp("start_date").notNull().defaultNow(),
+  endDate: timestamp("end_date"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type SaleModule = typeof saleModulesTable.$inferSelect;
+
 // ─── Financial Accounts ───────────────────────────────────────────────────────
 
 export const financialAccountsTable = pgTable("financial_accounts", {
@@ -572,6 +651,12 @@ export const financialTransactionsTable = pgTable("financial_transactions", {
   categoryId: uuid("category_id").references(() => financialCategoriesTable.id, { onDelete: "set null" }),
   clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
   projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
+
+  // Origem comercial (venda → item → parcela) e natureza da receita
+  saleId: uuid("sale_id").references(() => clientSalesTable.id, { onDelete: "set null" }),
+  saleItemId: uuid("sale_item_id").references(() => saleItemsTable.id, { onDelete: "set null" }),
+  revenueType: text("revenue_type"),     // 'recurring' | 'one_time' (null = não vinculado a venda)
+  referenceMonth: text("reference_month"), // 'YYYY-MM' competência da mensalidade
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
