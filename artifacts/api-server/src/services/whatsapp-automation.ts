@@ -5,133 +5,86 @@ import {
   financialTransactionsTable,
   usersTable,
   workspaceMembersTable,
+  whatsappContactsTable,
   whatsappMessagesTable,
   whatsappSettingsTable,
   type FinancialTransaction,
-  type Client,
+  type WhatsappSettings,
 } from "@workspace/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import {
   normalizeWhatsAppPhone,
   restoreWhatsAppSessions,
-  sendWhatsAppText,
+  sendWhatsAppMessage,
   stopWhatsAppSessions,
+  type OutboundMessage,
 } from "./whatsapp-session";
-import { generatePixPayload } from "../lib/pix";
+import {
+  composeBilling,
+  composePaymentAlert,
+  composeReceipt,
+  composeWithdrawal,
+  dayDifference,
+  dueDay,
+  saoPauloNow,
+  storedBody,
+  type BillingKind,
+  type InternalRecipient,
+} from "./whatsapp-compose";
 
-const TIMEZONE = "America/Sao_Paulo";
 const MAX_DAILY_MESSAGES_PER_WORKSPACE = 100;
 const MAX_ATTEMPTS = 5;
-const formatter = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const clock = new Intl.DateTimeFormat("en-US", {
-  timeZone: TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  hourCycle: "h23",
-});
 
-export type BillingKind = "billing_before" | "billing_due" | "billing_overdue" | "manual_billing" | "payment_receipt";
+export type { BillingKind };
 
-function saoPauloNow(now = new Date()): { date: string; hour: number } {
-  const parts = Object.fromEntries(clock.formatToParts(now).map((part) => [part.type, part.value]));
-  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
-}
-
-function dueDay(dueDate: Date): string {
-  // Finance treats dueDate as a calendar date; ISO's UTC day preserves a date-only
-  // value entered at 00:00Z instead of shifting it to the previous Brazil day.
-  return dueDate.toISOString().slice(0, 10);
-}
-
-function dayDifference(left: string, right: string): number {
-  return Math.round((Date.parse(`${left}T00:00:00Z`) - Date.parse(`${right}T00:00:00Z`)) / 86_400_000);
-}
-
-function readableDate(date: string): string {
-  const [year, month, day] = date.split("-");
-  return `${day}/${month}/${year}`;
-}
-
-function describeInstallment(transaction: FinancialTransaction): string {
-  if (!transaction.installmentNumber || !transaction.installmentsTotal) return transaction.description;
-  return `${transaction.description} (parcela ${transaction.installmentNumber}/${transaction.installmentsTotal})`;
-}
-
-function billingBody(
-  kind: BillingKind,
-  transaction: FinancialTransaction,
-  client: Pick<Client, "name">,
-  pixKey: string | null,
-): string {
-  const date = dueDay(transaction.dueDate);
-  const intro = kind === "billing_before"
-    ? "Lembramos que a parcela abaixo vence em breve:"
-    : kind === "billing_overdue"
-      ? "Identificamos uma parcela em aberto:"
-      : "Segue o lembrete da parcela em aberto:";
-  const lines = [
-    `Olá, ${client.name}. ${intro}`,
-    `${describeInstallment(transaction)}`,
-    `Valor: ${formatter.format(transaction.amount / 100)}`,
-    `Vencimento: ${readableDate(date)}`,
-  ];
-  if (pixKey?.trim()) {
-    lines.push(`Chave Pix: ${pixKey.trim()}`);
-    const pixPayload = generatePixPayload({
-      pixKey: pixKey.trim(),
-      amountCents: transaction.amount,
-      txId: transaction.id.replace(/-/g, "").slice(0, 20),
-    });
-    if (pixPayload) {
-      lines.push("", "*Pix Copia e Cola:*", pixPayload);
-    }
-  }
-  lines.push("", "Se já efetuou o pagamento, favor desconsiderar este lembrete.");
-  return lines.join("\n");
-}
-
-function receiptBody(
-  transaction: FinancialTransaction,
-  client: Pick<Client, "name">,
-): string {
-  const paidDate = readableDate(saoPauloNow(transaction.paidAt ?? new Date()).date);
-  return [
-    `Olá, ${client.name}!`,
-    "Confirmamos com sucesso o recebimento do seu pagamento:",
-    `${describeInstallment(transaction)}`,
-    `Valor: ${formatter.format(transaction.amount / 100)}`,
-    `Data do recebimento: ${paidDate}`,
-    "",
-    "Agradecemos pela pontualidade e pela parceria com a Teltech! 🤝",
-  ].join("\n");
-}
-
-function withdrawalBody(
-  transaction: FinancialTransaction,
-  partnerName: string | null,
-  account: { name: string; currentBalance: number } | null,
-): string {
-  return [
-    "Teltech Ledger: retirada de sócio registrada no caixa.",
-    `Valor: ${formatter.format(transaction.amount / 100)}`,
-    `Descrição: ${transaction.description}`,
-    partnerName ? `Sócio: ${partnerName}` : null,
-    account ? `Conta de origem: ${account.name}` : null,
-    account ? `Saldo após retirada: ${formatter.format(account.currentBalance / 100)}` : null,
-    `Data: ${readableDate(saoPauloNow(transaction.paidAt ?? new Date()).date)}`,
-  ].filter(Boolean).join("\n");
-}
-
-async function getBillingData(workspaceId: string, transactionId: string) {
+async function loadBillingData(workspaceId: string, transactionId: string) {
   const [record] = await db.select({ transaction: financialTransactionsTable, client: clientsTable })
     .from(financialTransactionsTable)
     .leftJoin(clientsTable, eq(financialTransactionsTable.clientId, clientsTable.id))
     .where(and(eq(financialTransactionsTable.workspaceId, workspaceId), eq(financialTransactionsTable.id, transactionId)))
     .limit(1);
   return record ?? null;
+}
+
+async function loadSettings(exec: any, workspaceId: string): Promise<WhatsappSettings | undefined> {
+  const [settings] = await exec.select().from(whatsappSettingsTable)
+    .where(eq(whatsappSettingsTable.workspaceId, workspaceId)).limit(1);
+  return settings;
+}
+
+type Topic = "withdrawals" | "payments";
+
+/**
+ * Internal people who should hear about a topic. Reads whatsapp_contacts; the
+ * legacy comma-separated list is only used while no contact was registered yet.
+ */
+export async function internalRecipients(
+  exec: any,
+  workspaceId: string,
+  settings: WhatsappSettings | undefined,
+  topic: Topic,
+): Promise<InternalRecipient[]> {
+  const contacts: (typeof whatsappContactsTable.$inferSelect)[] = await exec.select().from(whatsappContactsTable)
+    .where(eq(whatsappContactsTable.workspaceId, workspaceId));
+  if (contacts.length === 0) {
+    if (topic !== "withdrawals" || !settings?.internalAlertPhone) return [];
+    const legacy = settings.internalAlertPhone.split(/[,;\n\r\t]+/)
+      .map((value: string) => normalizeWhatsAppPhone(value.trim()))
+      .filter((phone: string | null): phone is string => Boolean(phone));
+    return Array.from(new Set(legacy)).map((phone) => ({ phone, name: "equipe", nickname: null, userId: null }));
+  }
+  const seen = new Set<string>();
+  const recipients: InternalRecipient[] = [];
+  for (const contact of contacts) {
+    if (!contact.active) continue;
+    if (topic === "withdrawals" ? !contact.notifyWithdrawals : !contact.notifyPayments) continue;
+    const phone = normalizeWhatsAppPhone(contact.phone);
+    if (!phone || seen.has(phone)) continue;
+    seen.add(phone);
+    recipients.push({ phone, name: contact.name, nickname: contact.nickname, userId: contact.userId });
+  }
+  return recipients;
 }
 
 export async function enqueueManualBilling(workspaceId: string, transactionId: string): Promise<{
@@ -141,7 +94,7 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
   message?: typeof whatsappMessagesTable.$inferSelect;
   created?: boolean;
 }> {
-  const record = await getBillingData(workspaceId, transactionId);
+  const record = await loadBillingData(workspaceId, transactionId);
   if (!record) return { ok: false, reason: "Transação não encontrada" };
   const { transaction, client } = record;
   if (transaction.type !== "inflow" || transaction.status !== "pending") {
@@ -152,8 +105,7 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
   }
   const recipient = normalizeWhatsAppPhone(client.phone);
   if (!recipient) return { ok: false, reason: "Telefone do cliente inválido" };
-  const [settings] = await db.select().from(whatsappSettingsTable)
-    .where(eq(whatsappSettingsTable.workspaceId, workspaceId)).limit(1);
+  const settings = await loadSettings(db, workspaceId);
   if (!settings?.pixKey?.trim()) return { ok: false, reason: "Configure a chave Pix antes de enviar cobranças" };
   const dedupeKey = `${workspaceId}:manual:${transactionId}:${saoPauloNow().date}`;
   const [inserted] = await db.insert(whatsappMessagesTable).values({
@@ -163,7 +115,7 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
     dedupeKey,
     kind: "manual_billing",
     recipient,
-    body: billingBody("manual_billing", transaction, client, settings?.pixKey ?? null),
+    body: storedBody(composeBilling("manual_billing", transaction, client, settings)),
   }).onConflictDoNothing().returning();
   const message = inserted ?? (await db.select().from(whatsappMessagesTable)
     .where(eq(whatsappMessagesTable.dedupeKey, dedupeKey)).limit(1))[0];
@@ -176,6 +128,24 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
   return { ok: true, message, created: Boolean(inserted) };
 }
 
+/** Puts a failed or skipped message back in the outbox (it is revalidated before sending). */
+export async function requeueMessage(workspaceId: string, messageId: string): Promise<{ ok: boolean; reason?: string }> {
+  const [message] = await db.select().from(whatsappMessagesTable)
+    .where(and(eq(whatsappMessagesTable.id, messageId), eq(whatsappMessagesTable.workspaceId, workspaceId))).limit(1);
+  if (!message) return { ok: false, reason: "Mensagem não encontrada" };
+  if (!["failed", "skipped"].includes(message.status)) {
+    return { ok: false, reason: "Somente mensagens com falha ou ignoradas podem ser reenviadas" };
+  }
+  await db.update(whatsappMessagesTable).set({
+    status: "queued",
+    attempts: 0,
+    nextAttemptAt: new Date(),
+    lastError: null,
+    updatedAt: new Date(),
+  }).where(eq(whatsappMessagesTable.id, message.id));
+  return { ok: true };
+}
+
 // The caller invokes this inside the same financial DB transaction that records
 // the paid withdrawal, ensuring the alert row cannot exist without the ledger row.
 export async function enqueueWithdrawalAlert(
@@ -185,12 +155,9 @@ export async function enqueueWithdrawalAlert(
   actorUserId: string | null,
 ): Promise<void> {
   if (transaction.type !== "outflow" || transaction.costType !== "partner_withdrawal" || transaction.status !== "paid") return;
-  const [settings] = await tx.select().from(whatsappSettingsTable)
-    .where(eq(whatsappSettingsTable.workspaceId, workspaceId)).limit(1);
-  if (!settings?.withdrawalAlertsEnabled || !settings.internalAlertPhone) return;
-
-  const rawList = settings.internalAlertPhone.split(/[,;\n\r\t]+/).map((p: string) => p.trim()).filter(Boolean);
-  const recipients = Array.from(new Set(rawList.map((p: string) => normalizeWhatsAppPhone(p)).filter((p: string | null): p is string => Boolean(p))));
+  const settings = await loadSettings(tx, workspaceId);
+  if (!settings?.withdrawalAlertsEnabled) return;
+  const recipients = await internalRecipients(tx, workspaceId, settings, "withdrawals");
   if (!recipients.length) return;
 
   const [partner] = transaction.partnerId
@@ -209,24 +176,30 @@ export async function enqueueWithdrawalAlert(
       .limit(1)
     : [];
 
-  const body = [
-    withdrawalBody(transaction, partner?.name ?? null, account ?? null),
-    actor ? `Registrado por: ${actor.name}` : null,
-  ].filter(Boolean).join("\n");
-
   for (const recipient of recipients) {
+    const composed = composeWithdrawal(transaction, {
+      recipient,
+      partnerName: partner?.name ?? null,
+      partnerUserId: transaction.partnerId ?? null,
+      account: account ?? null,
+      actorName: actor?.name ?? null,
+    }, settings);
     await tx.insert(whatsappMessagesTable).values({
       workspaceId,
       transactionId: transaction.id,
       clientId: null,
-      dedupeKey: `${workspaceId}:withdrawal:${transaction.id}:${recipient}:paid`,
+      dedupeKey: `${workspaceId}:withdrawal:${transaction.id}:${recipient.phone}:paid`,
       kind: "withdrawal_alert",
-      recipient,
-      body,
+      recipient: recipient.phone,
+      body: composed.text,
     }).onConflictDoNothing();
   }
 }
 
+/**
+ * Called when a client payment is confirmed. Queues the receipt for the client
+ * and, when enabled, a "payment received" notice for the internal contacts.
+ */
 export async function enqueuePaymentReceipt(
   tx: any,
   workspaceId: string,
@@ -236,19 +209,44 @@ export async function enqueuePaymentReceipt(
   const [client] = await tx.select().from(clientsTable)
     .where(and(eq(clientsTable.id, transaction.clientId), eq(clientsTable.workspaceId, workspaceId)))
     .limit(1);
-  if (!client || client.status !== "active" || !client.whatsappOptIn) return;
+  if (!client) return;
+  const settings = await loadSettings(tx, workspaceId);
+
+  if (settings?.paymentAlertsEnabled) {
+    const recipients = await internalRecipients(tx, workspaceId, settings, "payments");
+    if (recipients.length) {
+      const [account] = transaction.accountId
+        ? await tx.select({ name: financialAccountsTable.name }).from(financialAccountsTable)
+          .where(and(eq(financialAccountsTable.id, transaction.accountId), eq(financialAccountsTable.workspaceId, workspaceId)))
+          .limit(1)
+        : [];
+      for (const recipient of recipients) {
+        const composed = composePaymentAlert(transaction, { recipient, clientName: client.name, account: account ?? null }, settings);
+        await tx.insert(whatsappMessagesTable).values({
+          workspaceId,
+          transactionId: transaction.id,
+          clientId: client.id,
+          dedupeKey: `${workspaceId}:payalert:${transaction.id}:${recipient.phone}`,
+          kind: "payment_alert",
+          recipient: recipient.phone,
+          body: composed.text,
+        }).onConflictDoNothing();
+      }
+    }
+  }
+
+  if (settings?.receiptEnabled === false) return;
+  if (client.status !== "active" || !client.whatsappOptIn) return;
   const recipient = normalizeWhatsAppPhone(client.phone);
   if (!recipient) return;
-
-  const dedupeKey = `${workspaceId}:receipt:${transaction.id}`;
   await tx.insert(whatsappMessagesTable).values({
     workspaceId,
     transactionId: transaction.id,
     clientId: client.id,
-    dedupeKey,
+    dedupeKey: `${workspaceId}:receipt:${transaction.id}`,
     kind: "payment_receipt",
     recipient,
-    body: receiptBody(transaction, client),
+    body: composeReceipt(transaction, client, settings).text,
   }).onConflictDoNothing();
 }
 
@@ -293,7 +291,7 @@ async function enqueueDailyBilling(): Promise<void> {
         dedupeKey: `${settings.workspaceId}:${kind}:${transaction.id}:${due}`,
         kind,
         recipient,
-        body: billingBody(kind, transaction, client, settings.pixKey),
+        body: storedBody(composeBilling(kind, transaction, client, settings)),
       }).onConflictDoNothing();
     }
   }
@@ -323,33 +321,61 @@ async function markSkipped(messageId: string, reason: string): Promise<void> {
     .where(eq(whatsappMessagesTable.id, messageId));
 }
 
-async function revalidate(message: typeof whatsappMessagesTable.$inferSelect): Promise<{
-  recipient: string;
-  body: string;
-} | { skip: string }> {
-  if (message.kind === "withdrawal_alert") {
-    if (!message.transactionId) return { skip: "Retirada removida" };
-    const [settings] = await db.select().from(whatsappSettingsTable)
-      .where(eq(whatsappSettingsTable.workspaceId, message.workspaceId)).limit(1);
-    if (!settings?.withdrawalAlertsEnabled) return { skip: "Alertas de retirada desativados" };
-    const recipient = normalizeWhatsAppPhone(settings.internalAlertPhone);
-    if (!recipient) return { skip: "Telefone interno inválido" };
+type Validated = { recipient: string; body: string; message: OutboundMessage } | { skip: string };
+
+function plain(recipient: string, body: string): Validated {
+  return { recipient, body, message: { text: body } };
+}
+
+async function revalidate(message: typeof whatsappMessagesTable.$inferSelect): Promise<Validated> {
+  if (message.kind === "withdrawal_alert" || message.kind === "payment_alert") {
+    const isWithdrawal = message.kind === "withdrawal_alert";
+    if (!message.transactionId) return { skip: isWithdrawal ? "Retirada removida" : "Pagamento removido" };
+    const settings = await loadSettings(db, message.workspaceId);
+    if (isWithdrawal ? !settings?.withdrawalAlertsEnabled : !settings?.paymentAlertsEnabled) {
+      return { skip: isWithdrawal ? "Alertas de retirada desativados" : "Alertas de pagamento desativados" };
+    }
+    const recipients = await internalRecipients(db, message.workspaceId, settings, isWithdrawal ? "withdrawals" : "payments");
+    if (!recipients.some((recipient) => recipient.phone === message.recipient)) {
+      return { skip: "Contato interno removido, inativo ou sem este aviso ativado" };
+    }
     const [transaction] = await db.select().from(financialTransactionsTable)
       .where(and(eq(financialTransactionsTable.id, message.transactionId), eq(financialTransactionsTable.workspaceId, message.workspaceId)))
       .limit(1);
-    if (!transaction || transaction.type !== "outflow" || transaction.status !== "paid" || transaction.costType !== "partner_withdrawal") {
-      return { skip: "Retirada não está mais paga" };
+    if (isWithdrawal) {
+      if (!transaction || transaction.type !== "outflow" || transaction.status !== "paid" || transaction.costType !== "partner_withdrawal") {
+        return { skip: "Retirada não está mais paga" };
+      }
+      if (transaction.updatedAt > message.createdAt) return { skip: "Retirada alterada após o registro do alerta" };
+    } else if (!transaction || transaction.type !== "inflow" || transaction.status !== "paid") {
+      return { skip: "Pagamento não está mais confirmado" };
     }
-    if (transaction.updatedAt > message.createdAt) return { skip: "Retirada alterada após o registro do alerta" };
     // Keep the amount, account and balance snapshot captured in the ledger
     // transaction; only revalidate eligibility and current alert destination.
-    return { recipient, body: message.body };
+    return plain(message.recipient, message.body);
+  }
+  if (message.kind === "payment_receipt") {
+    if (!message.transactionId || !message.clientId) return { skip: "Pagamento ou cliente removido" };
+    const record = await loadBillingData(message.workspaceId, message.transactionId);
+    if (!record) return { skip: "Pagamento removido" };
+    const { transaction, client } = record;
+    if (transaction.type !== "inflow" || transaction.status !== "paid") return { skip: "Pagamento não está mais confirmado" };
+    if (!client || client.id !== message.clientId || client.workspaceId !== message.workspaceId ||
+      client.status !== "active" || !client.whatsappOptIn) {
+      return { skip: "Cliente sem consentimento ativo" };
+    }
+    const settings = await loadSettings(db, message.workspaceId);
+    if (settings?.receiptEnabled === false) return { skip: "Confirmações de pagamento desativadas" };
+    const recipient = normalizeWhatsAppPhone(client.phone);
+    if (!recipient) return { skip: "Telefone do cliente inválido" };
+    const body = composeReceipt(transaction, client, settings).text;
+    return plain(recipient, body);
   }
   if (!["billing_before", "billing_due", "billing_overdue", "manual_billing"].includes(message.kind)) {
     return { skip: "Tipo de mensagem desconhecido" };
   }
   if (!message.transactionId || !message.clientId) return { skip: "Parcela ou cliente removido" };
-  const record = await getBillingData(message.workspaceId, message.transactionId);
+  const record = await loadBillingData(message.workspaceId, message.transactionId);
   if (!record) return { skip: "Parcela removida" };
   const { transaction, client } = record;
   if (transaction.type !== "inflow" || transaction.status !== "pending") return { skip: "Parcela já paga ou cancelada" };
@@ -359,8 +385,7 @@ async function revalidate(message: typeof whatsappMessagesTable.$inferSelect): P
   }
   const recipient = normalizeWhatsAppPhone(client.phone);
   if (!recipient) return { skip: "Telefone do cliente inválido" };
-  const [settings] = await db.select().from(whatsappSettingsTable)
-    .where(eq(whatsappSettingsTable.workspaceId, message.workspaceId)).limit(1);
+  const settings = await loadSettings(db, message.workspaceId);
   if (message.kind !== "manual_billing") {
     if (!settings?.autoBillingEnabled) return { skip: "Cobrança automática desativada" };
     if (!settings.pixKey?.trim()) return { skip: "Chave Pix não configurada" };
@@ -376,7 +401,8 @@ async function revalidate(message: typeof whatsappMessagesTable.$inferSelect): P
   } else if (!settings?.pixKey?.trim()) {
     return { skip: "Chave Pix não configurada" };
   }
-  return { recipient, body: billingBody(message.kind as BillingKind, transaction, client, settings?.pixKey ?? null) };
+  const composed = composeBilling(message.kind as BillingKind, transaction, client, settings);
+  return { recipient, body: storedBody(composed), message: composed };
 }
 
 async function deferMessage(message: typeof whatsappMessagesTable.$inferSelect, error: string, delayMs: number, countAttempt: boolean): Promise<void> {
@@ -407,11 +433,13 @@ async function processNextMessage(): Promise<void> {
       await markSkipped(message.id, valid.skip);
       return;
     }
+    const workspaceSettings = await loadSettings(db, message.workspaceId);
+    const dailyLimit = workspaceSettings?.dailyMessageLimit ?? MAX_DAILY_MESSAGES_PER_WORKSPACE;
     const [daily] = await db.select({ total: sql<number>`count(*)::int` })
       .from(whatsappMessagesTable)
       .where(and(eq(whatsappMessagesTable.workspaceId, message.workspaceId), eq(whatsappMessagesTable.status, "sent"),
         gte(whatsappMessagesTable.sentAt, new Date(Date.now() - 24 * 60 * 60_000))));
-    if ((daily?.total ?? 0) >= MAX_DAILY_MESSAGES_PER_WORKSPACE) {
+    if ((daily?.total ?? 0) >= dailyLimit) {
       await deferMessage(message, "Limite diário de mensagens atingido", 60 * 60_000, false);
       return;
     }
@@ -423,15 +451,15 @@ async function processNextMessage(): Promise<void> {
       return;
     }
     try {
-      const waMessageId = await sendWhatsAppText(message.workspaceId, finalCheck.recipient, finalCheck.body, message.id);
+      const outcome = await sendWhatsAppMessage(message.workspaceId, finalCheck.recipient, finalCheck.message, message.id);
       await db.update(whatsappMessagesTable).set({
         recipient: finalCheck.recipient,
         body: finalCheck.body,
         status: "sent",
         attempts: message.attempts + 1,
         sentAt: new Date(),
-        waMessageId,
-        lastError: null,
+        waMessageId: outcome.waMessageId,
+        lastError: outcome.fallbackReason ? `Botão de Pix indisponível; enviado como texto (${outcome.fallbackReason})`.slice(0, 500) : null,
         updatedAt: new Date(),
       }).where(eq(whatsappMessagesTable.id, message.id));
     } catch (error) {

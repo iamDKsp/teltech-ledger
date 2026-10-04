@@ -1,21 +1,43 @@
 import { Router, type IRouter } from "express";
-import { db, clientsTable, whatsappMessagesTable, whatsappSettingsTable } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  db,
+  clientsTable,
+  usersTable,
+  workspaceMembersTable,
+  whatsappContactsTable,
+  whatsappMessagesTable,
+  whatsappSettingsTable,
+} from "@workspace/db";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest } from "../middlewares/auth";
-import { enqueueManualBilling } from "../services/whatsapp-automation";
+import { enqueueManualBilling, requeueMessage } from "../services/whatsapp-automation";
+import { callName, composePreview } from "../services/whatsapp-compose";
 import {
+  checkWhatsAppNumber,
   connectWhatsApp,
   disconnectWhatsApp,
   getWhatsAppStatus,
   normalizeWhatsAppPhone,
   normalizeWhatsAppPhoneList,
 } from "../services/whatsapp-session";
+import { sendTestMessage, TestSendError } from "../services/whatsapp-test";
+import {
+  MAX_TEMPLATE_LENGTH,
+  TEMPLATE_KINDS,
+  TEMPLATE_META,
+  isTemplateKind,
+  unknownVariables,
+  type TemplateKind,
+} from "../services/whatsapp-templates";
+import { detectPixKeyType, normalizePixKey, PIX_KEY_TYPE_LABEL } from "../lib/pix";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const ADMIN_ROLES = ["owner", "admin", "ceo", "cto"];
 router.use(requireAuth, requireWorkspace, requireRole(ADMIN_ROLES));
+
+const PIX_KEY_TYPES = ["auto", "cpf", "cnpj", "phone", "email", "random"] as const;
 
 const settingsInput = z.object({
   autoBillingEnabled: z.boolean().optional(),
@@ -24,9 +46,22 @@ const settingsInput = z.object({
   daysAfterDue: z.number().int().min(0).max(30).optional(),
   dailySendHour: z.number().int().min(0).max(23).optional(),
   pixKey: z.string().trim().max(200).nullable().optional(),
-  internalAlertPhone: z.string().trim().max(500).nullable().optional(),
+  pixKeyType: z.enum(PIX_KEY_TYPES).optional(),
+  pixMerchantName: z.string().trim().max(25).nullable().optional(),
+  pixMerchantCity: z.string().trim().max(15).nullable().optional(),
+  pixDeliveryMode: z.enum(["text", "native"]).optional(),
   withdrawalAlertsEnabled: z.boolean().optional(),
+  paymentAlertsEnabled: z.boolean().optional(),
+  receiptEnabled: z.boolean().optional(),
+  optOutHintEnabled: z.boolean().optional(),
+  dailyMessageLimit: z.number().int().min(1).max(500).optional(),
+  assistantName: z.string().trim().min(1).max(30).optional(),
+  companyName: z.string().trim().min(1).max(40).optional(),
+  // null or blank restores the default text for that message.
+  templates: z.record(z.string(), z.string().max(MAX_TEMPLATE_LENGTH).nullable()).optional(),
 }).strict();
+
+type SettingsRow = typeof whatsappSettingsTable.$inferSelect;
 
 const defaultSettings = {
   autoBillingEnabled: false,
@@ -35,30 +70,82 @@ const defaultSettings = {
   daysAfterDue: 3,
   dailySendHour: 10,
   pixKey: "",
-  internalAlertPhone: "",
+  pixKeyType: "auto" as (typeof PIX_KEY_TYPES)[number],
+  pixMerchantName: "",
+  pixMerchantCity: "",
+  pixDeliveryMode: "text" as "text" | "native",
   withdrawalAlertsEnabled: false,
+  paymentAlertsEnabled: false,
+  receiptEnabled: true,
+  optOutHintEnabled: true,
+  dailyMessageLimit: 100,
+  assistantName: "Nexus",
+  companyName: "Teltech",
+  templates: {} as Record<string, string>,
 };
 
-function publicSettings(row?: typeof whatsappSettingsTable.$inferSelect) {
+function publicSettings(row?: SettingsRow) {
+  const pixKey = row?.pixKey ?? defaultSettings.pixKey;
+  const pixKeyType = (row?.pixKeyType ?? defaultSettings.pixKeyType) as (typeof PIX_KEY_TYPES)[number];
+  const detected = pixKey ? normalizePixKey(pixKey, pixKeyType) : null;
   return {
     autoBillingEnabled: row?.autoBillingEnabled ?? defaultSettings.autoBillingEnabled,
     daysBeforeDue: row?.daysBeforeDue ?? defaultSettings.daysBeforeDue,
     sendOnDueDate: row?.sendOnDueDate ?? defaultSettings.sendOnDueDate,
     daysAfterDue: row?.daysAfterDue ?? defaultSettings.daysAfterDue,
     dailySendHour: row?.dailySendHour ?? defaultSettings.dailySendHour,
-    pixKey: row?.pixKey ?? defaultSettings.pixKey,
-    internalAlertPhone: row?.internalAlertPhone ?? defaultSettings.internalAlertPhone,
+    pixKey,
+    pixKeyType,
+    pixMerchantName: row?.pixMerchantName ?? defaultSettings.pixMerchantName,
+    pixMerchantCity: row?.pixMerchantCity ?? defaultSettings.pixMerchantCity,
+    pixDeliveryMode: (row?.pixDeliveryMode ?? defaultSettings.pixDeliveryMode) as "text" | "native",
     withdrawalAlertsEnabled: row?.withdrawalAlertsEnabled ?? defaultSettings.withdrawalAlertsEnabled,
+    paymentAlertsEnabled: row?.paymentAlertsEnabled ?? defaultSettings.paymentAlertsEnabled,
+    receiptEnabled: row?.receiptEnabled ?? defaultSettings.receiptEnabled,
+    optOutHintEnabled: row?.optOutHintEnabled ?? defaultSettings.optOutHintEnabled,
+    dailyMessageLimit: row?.dailyMessageLimit ?? defaultSettings.dailyMessageLimit,
+    assistantName: row?.assistantName ?? defaultSettings.assistantName,
+    companyName: row?.companyName ?? defaultSettings.companyName,
+    templates: row?.templates ?? defaultSettings.templates,
+    pixKeyResolved: detected ? { type: detected.type, label: PIX_KEY_TYPE_LABEL[detected.type], key: detected.key } : null,
   };
 }
 
-function workspaceId(req: AuthenticatedRequest): string {
-  return req.user.workspaceId!;
+function workspaceId(req: unknown): string {
+  return (req as AuthenticatedRequest).user.workspaceId!;
+}
+
+async function readSettings(wsId: string): Promise<SettingsRow | undefined> {
+  const [stored] = await db.select().from(whatsappSettingsTable)
+    .where(eq(whatsappSettingsTable.workspaceId, wsId)).limit(1);
+  return stored;
+}
+
+/**
+ * Numbers saved in the old comma-separated field become contacts the first
+ * time the contact list is opened, so the user only has to give them a name.
+ */
+async function migrateLegacyContacts(wsId: string): Promise<void> {
+  const existing = await db.select({ id: whatsappContactsTable.id }).from(whatsappContactsTable)
+    .where(eq(whatsappContactsTable.workspaceId, wsId)).limit(1);
+  if (existing.length) return;
+  const settings = await readSettings(wsId);
+  const phones = normalizeWhatsAppPhoneList(settings?.internalAlertPhone)?.split(", ") ?? [];
+  if (!phones.length) return;
+  await db.insert(whatsappContactsTable).values(phones.map((phone) => ({
+    workspaceId: wsId,
+    name: `Contato interno (final ${phone.slice(-4)})`,
+    phone,
+    notifyWithdrawals: true,
+    notifyPayments: false,
+  }))).onConflictDoNothing();
+  await db.update(whatsappSettingsTable).set({ internalAlertPhone: null })
+    .where(eq(whatsappSettingsTable.workspaceId, wsId));
 }
 
 router.get("/status", async (req, res) => {
   try {
-    res.json(await getWhatsAppStatus(workspaceId(req as AuthenticatedRequest)));
+    res.json(await getWhatsAppStatus(workspaceId(req)));
   } catch (error) {
     logger.error({ err: error }, "WhatsApp status failed");
     res.status(500).json({ error: "Não foi possível consultar a conexão" });
@@ -66,7 +153,7 @@ router.get("/status", async (req, res) => {
 });
 
 router.post("/connect", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   try {
     await connectWhatsApp(wsId);
     res.json(await getWhatsAppStatus(wsId));
@@ -78,7 +165,7 @@ router.post("/connect", async (req, res) => {
 });
 
 router.post("/disconnect", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   try {
     await disconnectWhatsApp(wsId);
     res.json(await getWhatsAppStatus(wsId));
@@ -89,11 +176,9 @@ router.post("/disconnect", async (req, res) => {
 });
 
 router.get("/settings", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   try {
-    const [stored] = await db.select().from(whatsappSettingsTable)
-      .where(eq(whatsappSettingsTable.workspaceId, wsId)).limit(1);
-    res.json({ settings: publicSettings(stored) });
+    res.json({ settings: publicSettings(await readSettings(wsId)) });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId }, "WhatsApp settings read failed");
     res.status(500).json({ error: "Não foi possível consultar as configurações" });
@@ -101,31 +186,84 @@ router.get("/settings", async (req, res) => {
 });
 
 router.put("/settings", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   const parsed = settingsInput.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Configurações inválidas", details: parsed.error.flatten() });
     return;
   }
   try {
-    const [stored] = await db.select().from(whatsappSettingsTable)
-      .where(eq(whatsappSettingsTable.workspaceId, wsId)).limit(1);
+    const stored = await readSettings(wsId);
     const current = publicSettings(stored);
+    const { templates: templatePatch, ...patch } = parsed.data;
+
+    const templates: Record<string, string> = { ...current.templates };
+    for (const [kind, body] of Object.entries(templatePatch ?? {})) {
+      if (!isTemplateKind(kind)) {
+        res.status(400).json({ error: `Tipo de mensagem desconhecido: ${kind}` });
+        return;
+      }
+      if (!body?.trim()) {
+        delete templates[kind];
+        continue;
+      }
+      const unknown = unknownVariables(kind, body);
+      if (unknown.length) {
+        res.status(400).json({
+          error: `Variáveis inválidas em "${TEMPLATE_META[kind].label}": ${unknown.map((name) => `{${name}}`).join(", ")}`,
+        });
+        return;
+      }
+      templates[kind] = body;
+    }
+
+    const pixKey = (patch.pixKey !== undefined ? patch.pixKey : current.pixKey)?.trim() || null;
+    const pixKeyType = patch.pixKeyType ?? current.pixKeyType;
+    if (pixKey && !normalizePixKey(pixKey, pixKeyType)) {
+      res.status(400).json({
+        error: pixKeyType === "auto"
+          ? "Não reconhecemos essa chave Pix. Confira o valor ou escolha o tipo da chave."
+          : `A chave informada não é um(a) ${PIX_KEY_TYPE_LABEL[pixKeyType]} válido(a).`,
+      });
+      return;
+    }
+
     const next = {
-      ...current,
-      ...parsed.data,
-      pixKey: (parsed.data.pixKey !== undefined ? parsed.data.pixKey : current.pixKey)?.trim() || null,
-      internalAlertPhone: normalizeWhatsAppPhoneList(
-        parsed.data.internalAlertPhone !== undefined ? parsed.data.internalAlertPhone : current.internalAlertPhone,
-      ),
+      autoBillingEnabled: patch.autoBillingEnabled ?? current.autoBillingEnabled,
+      daysBeforeDue: patch.daysBeforeDue ?? current.daysBeforeDue,
+      sendOnDueDate: patch.sendOnDueDate ?? current.sendOnDueDate,
+      daysAfterDue: patch.daysAfterDue ?? current.daysAfterDue,
+      dailySendHour: patch.dailySendHour ?? current.dailySendHour,
+      pixKey,
+      pixKeyType,
+      pixMerchantName: (patch.pixMerchantName !== undefined ? patch.pixMerchantName : current.pixMerchantName)?.trim() || null,
+      pixMerchantCity: (patch.pixMerchantCity !== undefined ? patch.pixMerchantCity : current.pixMerchantCity)?.trim() || null,
+      pixDeliveryMode: patch.pixDeliveryMode ?? current.pixDeliveryMode,
+      withdrawalAlertsEnabled: patch.withdrawalAlertsEnabled ?? current.withdrawalAlertsEnabled,
+      paymentAlertsEnabled: patch.paymentAlertsEnabled ?? current.paymentAlertsEnabled,
+      receiptEnabled: patch.receiptEnabled ?? current.receiptEnabled,
+      optOutHintEnabled: patch.optOutHintEnabled ?? current.optOutHintEnabled,
+      dailyMessageLimit: patch.dailyMessageLimit ?? current.dailyMessageLimit,
+      assistantName: patch.assistantName ?? current.assistantName,
+      companyName: patch.companyName ?? current.companyName,
+      templates,
     };
     if (next.autoBillingEnabled && !next.pixKey) {
       res.status(400).json({ error: "Cadastre a chave Pix antes de ativar cobranças automáticas" });
       return;
     }
-    if (next.withdrawalAlertsEnabled && !next.internalAlertPhone) {
-      res.status(400).json({ error: "Cadastre pelo menos um WhatsApp interno válido para receber alertas" });
-      return;
+    if (next.withdrawalAlertsEnabled || next.paymentAlertsEnabled) {
+      await migrateLegacyContacts(wsId);
+      const contacts = await db.select().from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId));
+      const active = contacts.filter((contact) => contact.active);
+      if (next.withdrawalAlertsEnabled && !active.some((contact) => contact.notifyWithdrawals)) {
+        res.status(400).json({ error: "Cadastre ao menos um sócio ativo que receba avisos de retirada" });
+        return;
+      }
+      if (next.paymentAlertsEnabled && !active.some((contact) => contact.notifyPayments)) {
+        res.status(400).json({ error: "Cadastre ao menos um sócio ativo que receba avisos de pagamento" });
+        return;
+      }
     }
     const [saved] = await db.insert(whatsappSettingsTable)
       .values({ ...next, workspaceId: wsId, updatedAt: new Date() })
@@ -140,8 +278,326 @@ router.put("/settings", async (req, res) => {
   }
 });
 
+// ─── Message templates ────────────────────────────────────────────────────────
+
+router.get("/templates", (_req, res) => {
+  res.json({
+    templates: TEMPLATE_KINDS.map((kind) => {
+      const meta = TEMPLATE_META[kind];
+      return {
+        kind,
+        label: meta.label,
+        description: meta.description,
+        audience: meta.audience,
+        supportsPix: meta.supportsPix,
+        variables: meta.variables,
+        defaultBody: meta.defaultBody,
+      };
+    }),
+  });
+});
+
+const previewInput = z.object({
+  kind: z.string().refine(isTemplateKind, "Tipo de mensagem desconhecido"),
+  template: z.string().max(MAX_TEMPLATE_LENGTH).nullable().optional(),
+  // Unsaved edits from the settings screen, so the preview matches what is on screen.
+  overrides: z.object({
+    assistantName: z.string().trim().max(30).optional(),
+    companyName: z.string().trim().max(40).optional(),
+    pixKey: z.string().trim().max(200).nullable().optional(),
+    pixKeyType: z.enum(PIX_KEY_TYPES).optional(),
+    pixMerchantName: z.string().trim().max(25).nullable().optional(),
+    pixMerchantCity: z.string().trim().max(15).nullable().optional(),
+    pixDeliveryMode: z.enum(["text", "native"]).optional(),
+    optOutHintEnabled: z.boolean().optional(),
+  }).optional(),
+}).strict();
+
+router.post("/preview", async (req, res) => {
+  const wsId = workspaceId(req);
+  const parsed = previewInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Prévia inválida" });
+    return;
+  }
+  try {
+    const kind = parsed.data.kind as TemplateKind;
+    const stored = await readSettings(wsId);
+    const overrides = parsed.data.overrides ?? {};
+    const settings = {
+      ...(stored ?? {}),
+      ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined && value !== "")),
+    } as Partial<SettingsRow>;
+    if (overrides.pixKey === "" || overrides.pixKey === null) settings.pixKey = null;
+    const template = parsed.data.template ?? undefined;
+    const unknown = template ? unknownVariables(kind, template) : [];
+    const preview = composePreview(kind, settings, { templateOverride: template });
+    res.json({
+      text: preview.text,
+      fallbackText: preview.fallbackText ?? null,
+      footer: preview.footer ?? null,
+      pix: preview.pix
+        ? { mode: preview.pixMode, key: preview.pix.key, keyType: preview.pix.keyType, code: preview.pix.code, merchantName: preview.pix.merchantName, amountCents: preview.pix.amountCents }
+        : null,
+      unknownVariables: unknown,
+    });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp preview failed");
+    res.status(500).json({ error: "Não foi possível gerar a prévia" });
+  }
+});
+
+// ─── Internal contacts (partners) ─────────────────────────────────────────────
+
+const contactInput = z.object({
+  name: z.string().trim().min(2, "Informe o nome").max(80),
+  nickname: z.string().trim().max(40).nullable().optional(),
+  roleLabel: z.string().trim().max(40).nullable().optional(),
+  phone: z.string().trim().min(8, "Informe o WhatsApp").max(30),
+  userId: z.string().uuid().nullable().optional(),
+  active: z.boolean().optional(),
+  notifyWithdrawals: z.boolean().optional(),
+  notifyPayments: z.boolean().optional(),
+}).strict();
+
+function publicContact(row: typeof whatsappContactsTable.$inferSelect) {
+  return {
+    id: row.id,
+    userId: row.userId,
+    name: row.name,
+    nickname: row.nickname,
+    roleLabel: row.roleLabel,
+    phone: row.phone,
+    callName: callName(row),
+    active: row.active,
+    notifyWithdrawals: row.notifyWithdrawals,
+    notifyPayments: row.notifyPayments,
+  };
+}
+
+async function validateMember(wsId: string, userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return true;
+  const [member] = await db.select({ id: workspaceMembersTable.id }).from(workspaceMembersTable)
+    .where(and(eq(workspaceMembersTable.workspaceId, wsId), eq(workspaceMembersTable.userId, userId))).limit(1);
+  return Boolean(member);
+}
+
+router.get("/members", async (req, res) => {
+  const wsId = workspaceId(req);
+  try {
+    const rows = await db.select({ id: usersTable.id, name: usersTable.name, phone: usersTable.phone, role: workspaceMembersTable.role })
+      .from(workspaceMembersTable)
+      .innerJoin(usersTable, eq(workspaceMembersTable.userId, usersTable.id))
+      .where(eq(workspaceMembersTable.workspaceId, wsId))
+      .orderBy(asc(usersTable.name));
+    res.json({ members: rows });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp members read failed");
+    res.status(500).json({ error: "Não foi possível consultar os membros" });
+  }
+});
+
+router.get("/contacts", async (req, res) => {
+  const wsId = workspaceId(req);
+  try {
+    await migrateLegacyContacts(wsId);
+    const rows = await db.select().from(whatsappContactsTable)
+      .where(eq(whatsappContactsTable.workspaceId, wsId)).orderBy(asc(whatsappContactsTable.createdAt));
+    res.json({ contacts: rows.map(publicContact) });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp contacts read failed");
+    res.status(500).json({ error: "Não foi possível consultar os contatos" });
+  }
+});
+
+router.post("/contacts", async (req, res) => {
+  const wsId = workspaceId(req);
+  const parsed = contactInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Contato inválido" });
+    return;
+  }
+  const phone = normalizeWhatsAppPhone(parsed.data.phone);
+  if (!phone) {
+    res.status(400).json({ error: "WhatsApp inválido. Use DDD + número, ex: 14 99836-4338" });
+    return;
+  }
+  try {
+    if (!(await validateMember(wsId, parsed.data.userId))) {
+      res.status(400).json({ error: "Usuário não pertence a este workspace" });
+      return;
+    }
+    const [created] = await db.insert(whatsappContactsTable).values({
+      workspaceId: wsId,
+      userId: parsed.data.userId ?? null,
+      name: parsed.data.name,
+      nickname: parsed.data.nickname?.trim() || null,
+      roleLabel: parsed.data.roleLabel?.trim() || null,
+      phone,
+      active: parsed.data.active ?? true,
+      notifyWithdrawals: parsed.data.notifyWithdrawals ?? true,
+      notifyPayments: parsed.data.notifyPayments ?? false,
+    }).onConflictDoNothing().returning();
+    if (!created) {
+      res.status(409).json({ error: "Já existe um contato com este número" });
+      return;
+    }
+    res.status(201).json({ contact: publicContact(created) });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp contact create failed");
+    res.status(500).json({ error: "Não foi possível salvar o contato" });
+  }
+});
+
+router.put("/contacts/:id", async (req, res) => {
+  const wsId = workspaceId(req);
+  const id = z.string().uuid().safeParse(req.params.id);
+  const parsed = contactInput.partial().strict().safeParse(req.body);
+  if (!id.success || !parsed.success) {
+    res.status(400).json({ error: parsed.success ? "Contato inválido" : (parsed.error.issues[0]?.message ?? "Contato inválido") });
+    return;
+  }
+  const data = parsed.data;
+  let phone: string | undefined;
+  if (data.phone !== undefined) {
+    const normalized = normalizeWhatsAppPhone(data.phone);
+    if (!normalized) {
+      res.status(400).json({ error: "WhatsApp inválido. Use DDD + número, ex: 14 99836-4338" });
+      return;
+    }
+    phone = normalized;
+  }
+  try {
+    if (!(await validateMember(wsId, data.userId))) {
+      res.status(400).json({ error: "Usuário não pertence a este workspace" });
+      return;
+    }
+    const [updated] = await db.update(whatsappContactsTable).set({
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.nickname !== undefined ? { nickname: data.nickname?.trim() || null } : {}),
+      ...(data.roleLabel !== undefined ? { roleLabel: data.roleLabel?.trim() || null } : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(data.userId !== undefined ? { userId: data.userId } : {}),
+      ...(data.active !== undefined ? { active: data.active } : {}),
+      ...(data.notifyWithdrawals !== undefined ? { notifyWithdrawals: data.notifyWithdrawals } : {}),
+      ...(data.notifyPayments !== undefined ? { notifyPayments: data.notifyPayments } : {}),
+      updatedAt: new Date(),
+    }).where(and(eq(whatsappContactsTable.id, id.data), eq(whatsappContactsTable.workspaceId, wsId))).returning();
+    if (!updated) {
+      res.status(404).json({ error: "Contato não encontrado" });
+      return;
+    }
+    res.json({ contact: publicContact(updated) });
+  } catch (error) {
+    const duplicate = (error as { code?: string } | undefined)?.code === "23505";
+    if (!duplicate) logger.error({ err: error, workspaceId: wsId }, "WhatsApp contact update failed");
+    res.status(duplicate ? 409 : 500).json({ error: duplicate ? "Já existe um contato com este número" : "Não foi possível salvar o contato" });
+  }
+});
+
+router.delete("/contacts/:id", async (req, res) => {
+  const wsId = workspaceId(req);
+  const id = z.string().uuid().safeParse(req.params.id);
+  if (!id.success) {
+    res.status(400).json({ error: "Contato inválido" });
+    return;
+  }
+  try {
+    const [removed] = await db.delete(whatsappContactsTable)
+      .where(and(eq(whatsappContactsTable.id, id.data), eq(whatsappContactsTable.workspaceId, wsId))).returning({ id: whatsappContactsTable.id });
+    if (!removed) {
+      res.status(404).json({ error: "Contato não encontrado" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp contact delete failed");
+    res.status(500).json({ error: "Não foi possível remover o contato" });
+  }
+});
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+router.post("/check-number", async (req, res) => {
+  const wsId = workspaceId(req);
+  const parsed = z.object({ phone: z.string().trim().min(8).max(30) }).strict().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Informe o número" });
+    return;
+  }
+  try {
+    const result = await checkWhatsAppNumber(wsId, parsed.data.phone);
+    res.json({ phone: result.phone, exists: result.exists });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao verificar o número";
+    const known = message === "WhatsApp não conectado" || message === "Telefone de destino inválido";
+    if (!known) logger.error({ err: error, workspaceId: wsId }, "WhatsApp number check failed");
+    res.status(message === "WhatsApp não conectado" ? 409 : known ? 400 : 500).json({ error: known ? message : "Não foi possível verificar o número" });
+  }
+});
+
+const testInput = z.object({
+  kind: z.enum(["connection", ...TEMPLATE_KINDS] as [string, ...string[]]),
+  target: z.enum(["self", "contact", "custom"]),
+  contactId: z.string().uuid().optional(),
+  phone: z.string().trim().max(30).optional(),
+}).strict();
+
+router.post("/test", async (req, res) => {
+  const wsId = workspaceId(req);
+  const parsed = testInput.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Teste inválido" });
+    return;
+  }
+  const { kind, target, contactId, phone } = parsed.data;
+  try {
+    let destination: string | null | undefined;
+    let recipientName: string | undefined;
+    if (target === "self") {
+      destination = (await getWhatsAppStatus(wsId)).phone;
+      if (!destination) {
+        res.status(409).json({ error: "WhatsApp não conectado" });
+        return;
+      }
+    } else if (target === "contact") {
+      const [contact] = contactId
+        ? await db.select().from(whatsappContactsTable)
+          .where(and(eq(whatsappContactsTable.id, contactId), eq(whatsappContactsTable.workspaceId, wsId))).limit(1)
+        : [];
+      if (!contact) {
+        res.status(404).json({ error: "Contato não encontrado" });
+        return;
+      }
+      destination = contact.phone;
+      recipientName = callName(contact);
+    } else {
+      destination = phone;
+    }
+    if (!destination) {
+      res.status(400).json({ error: "Informe o número de destino" });
+      return;
+    }
+    const result = await sendTestMessage(wsId, {
+      kind: kind as Parameters<typeof sendTestMessage>[1]["kind"],
+      phone: destination,
+      recipientName,
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof TestSendError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp test send failed");
+    res.status(500).json({ error: "Não foi possível enviar o teste" });
+  }
+});
+
+// ─── History ──────────────────────────────────────────────────────────────────
+
 router.get("/messages", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? "50"), 10) || 50));
   try {
     const rows = await db.select({ message: whatsappMessagesTable, clientName: clientsTable.name })
@@ -150,15 +606,43 @@ router.get("/messages", async (req, res) => {
       .where(eq(whatsappMessagesTable.workspaceId, wsId))
       .orderBy(desc(whatsappMessagesTable.createdAt))
       .limit(limit);
-    res.json({ messages: rows.map(({ message, clientName }) => ({ ...message, clientName })) });
+    const contacts = await db.select({ phone: whatsappContactsTable.phone, name: whatsappContactsTable.name })
+      .from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId));
+    const contactNames = new Map(contacts.map((contact) => [contact.phone, contact.name]));
+    res.json({
+      messages: rows.map(({ message, clientName }) => ({
+        ...message,
+        clientName: clientName ?? contactNames.get(message.recipient) ?? null,
+      })),
+    });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId }, "WhatsApp message history failed");
     res.status(500).json({ error: "Não foi possível consultar as mensagens" });
   }
 });
 
+router.post("/messages/:id/retry", async (req, res) => {
+  const wsId = workspaceId(req);
+  const id = z.string().uuid().safeParse(req.params.id);
+  if (!id.success) {
+    res.status(400).json({ error: "Mensagem inválida" });
+    return;
+  }
+  try {
+    const result = await requeueMessage(wsId, id.data);
+    if (!result.ok) {
+      res.status(result.reason === "Mensagem não encontrada" ? 404 : 409).json({ error: result.reason });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "WhatsApp message retry failed");
+    res.status(500).json({ error: "Não foi possível reenviar a mensagem" });
+  }
+});
+
 router.post("/messages/manual-billing", async (req, res) => {
-  const wsId = workspaceId(req as AuthenticatedRequest);
+  const wsId = workspaceId(req);
   const parsed = z.object({ transactionId: z.string().uuid() }).safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "transactionId inválido" });
@@ -175,6 +659,17 @@ router.post("/messages/manual-billing", async (req, res) => {
     logger.error({ err: error, workspaceId: wsId }, "WhatsApp manual billing enqueue failed");
     res.status(500).json({ error: "Não foi possível enfileirar a cobrança" });
   }
+});
+
+// Exposed for the settings screen: tells which key type was detected while typing.
+router.post("/pix/detect", (req, res) => {
+  const parsed = z.object({ key: z.string().max(200) }).strict().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Chave inválida" });
+    return;
+  }
+  const type = detectPixKeyType(parsed.data.key);
+  res.json({ type, label: type ? PIX_KEY_TYPE_LABEL[type] : null });
 });
 
 export default router;

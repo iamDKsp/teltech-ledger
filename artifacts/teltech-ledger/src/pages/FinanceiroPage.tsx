@@ -513,15 +513,16 @@ function CockpitKpiCard({
   color?: string;
   alert?: boolean;
 }) {
+  const isMobile = useIsMobile();
   return (
     <div
       style={{
         flex: 1,
-        minWidth: 240,
+        minWidth: isMobile ? 0 : 240,
         background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
         border: `1px solid ${alert ? "rgba(239,68,68,0.5)" : "rgba(255,255,255,0.08)"}`,
         borderRadius: 14,
-        padding: "20px 22px",
+        padding: isMobile ? "14px 16px" : "20px 22px",
         position: "relative",
         overflow: "hidden",
         boxShadow: alert ? "0 8px 30px rgba(239,68,68,0.15)" : "0 8px 30px rgba(0,0,0,0.35)",
@@ -539,14 +540,14 @@ function CockpitKpiCard({
           filter: "blur(20px)",
         }}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: isMobile ? 8 : 12 }}>
+        <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
           {title}
         </span>
         <div
           style={{
-            padding: 7,
-            borderRadius: 10,
+            padding: isMobile ? 5 : 7,
+            borderRadius: 8,
             background: `${color}18`,
             border: `1px solid ${color}30`,
             color,
@@ -555,12 +556,12 @@ function CockpitKpiCard({
             justifyContent: "center",
           }}
         >
-          <Icon style={{ width: 18, height: 18 }} />
+          <Icon style={{ width: isMobile ? 16 : 18, height: isMobile ? 16 : 18 }} />
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-        <span style={{ fontSize: 26, fontWeight: 800, color: "#fafafa", letterSpacing: "-0.02em" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+        <span style={{ fontSize: isMobile ? 22 : 26, fontWeight: 800, color: "#fafafa", letterSpacing: "-0.02em" }}>
           {value}
         </span>
         {badge && (
@@ -884,63 +885,20 @@ export function FinanceiroPage() {
       }}
     >
       {/* ─── Top Executive Toolbar ────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: isMobile ? "12px 16px" : "16px 24px",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-          background: "linear-gradient(180deg, #18181c 0%, #131316 100%)",
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: isMobile ? 34 : 40,
-              height: isMobile ? 34 : 40,
-              borderRadius: 10,
-              background: "linear-gradient(135deg, #8B5CF6 0%, #4F2D8A 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-              boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
-              flexShrink: 0
-            }}
-          >
-            <Wallet style={{ width: isMobile ? 18 : 20, height: isMobile ? 18 : 20 }} />
-          </div>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ margin: 0, fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>
-                Gestão Financeira & Governança
-              </h1>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: 20,
-                  background: "rgba(16,185,129,0.15)",
-                  color: "#10B981",
-                  border: "1px solid rgba(16,185,129,0.3)",
-                }}
-              >
-                Mês Aberto
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: isMobile ? 11 : 12, color: "#a1a1aa" }}>
-              Teltech Software & Inteligência Artificial
-            </p>
-          </div>
-        </div>
-
-        {/* Period Selector & Global Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto", justifyContent: isMobile ? "space-between" : "flex-end" }}>
-          {/* Month Stepper */}
+      {isMobile ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 12px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            background: "linear-gradient(180deg, #18181c 0%, #131316 100%)",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
+          {/* Month Stepper - Compact */}
           <div
             style={{
               display: "flex",
@@ -948,47 +906,77 @@ export function FinanceiroPage() {
               background: "rgba(255,255,255,0.05)",
               border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: 8,
-              padding: "3px 4px",
+              padding: "2px 4px",
             }}
           >
             <button
               onClick={handlePrevMonth}
-              style={{ background: "transparent", border: "none", color: "#ccc", cursor: "pointer", padding: "4px 6px", borderRadius: 4 }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ccc",
+                cursor: "pointer",
+                padding: "4px 5px",
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+              }}
               title="Mês anterior"
             >
-              <ChevronLeft style={{ width: 16, height: 16 }} />
+              <ChevronLeft style={{ width: 15, height: 15 }} />
             </button>
-            <span style={{ fontSize: isMobile ? 12 : 13, fontWeight: 700, color: "#fff", padding: isMobile ? "0 6px" : "0 10px", minWidth: isMobile ? 110 : 140, textAlign: "center" }}>
-              {monthNames[selectedMonth - 1]} / {selectedYear}
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: "#fff",
+                padding: "0 6px",
+                minWidth: 88,
+                textAlign: "center",
+              }}
+            >
+              {monthNames[selectedMonth - 1]?.slice(0, 3)} / {selectedYear}
             </span>
             <button
               onClick={handleNextMonth}
-              style={{ background: "transparent", border: "none", color: "#ccc", cursor: "pointer", padding: "4px 6px", borderRadius: 4 }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ccc",
+                cursor: "pointer",
+                padding: "4px 5px",
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+              }}
               title="Próximo mês"
             >
-              <ChevronRight style={{ width: 16, height: 16 }} />
+              <ChevronRight style={{ width: 15, height: 15 }} />
             </button>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Quick Actions Aligned on the Same Line */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button
               onClick={handleExportCSV}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 5,
-                padding: isMobile ? "7px 10px" : "8px 14px",
+                gap: 4,
+                padding: "6px 9px",
                 borderRadius: 8,
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.12)",
                 color: "#e4e4e7",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 600,
                 cursor: "pointer",
+                height: 32,
               }}
+              title="Exportar CSV"
             >
-              <Download style={{ width: 14, height: 14 }} />
-              {isMobile ? "CSV" : "Exportar CSV"}
+              <Download style={{ width: 13, height: 13 }} />
+              <span>CSV</span>
             </button>
 
             <button
@@ -1001,8 +989,8 @@ export function FinanceiroPage() {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 5,
-                padding: isMobile ? "7px 12px" : "8px 16px",
+                gap: 4,
+                padding: "6px 11px",
                 borderRadius: 8,
                 background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
                 border: "none",
@@ -1010,15 +998,153 @@ export function FinanceiroPage() {
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: "pointer",
-                boxShadow: "0 4px 14px rgba(139,92,246,0.35)",
+                boxShadow: "0 2px 10px rgba(139,92,246,0.35)",
+                height: 32,
+                whiteSpace: "nowrap",
               }}
             >
-              <Plus style={{ width: 15, height: 15 }} />
-              Novo Lançamento
+              <Plus style={{ width: 14, height: 14 }} />
+              <span>Lançamento</span>
             </button>
           </div>
         </div>
-      </div>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            background: "linear-gradient(180deg, #18181c 0%, #131316 100%)",
+            flexWrap: "wrap",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: "linear-gradient(135deg, #8B5CF6 0%, #4F2D8A 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                boxShadow: "0 4px 16px rgba(139,92,246,0.3)",
+                flexShrink: 0,
+              }}
+            >
+              <Wallet style={{ width: 20, height: 20 }} />
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>
+                  Gestão Financeira & Governança
+                </h1>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 20,
+                    background: "rgba(16,185,129,0.15)",
+                    color: "#10B981",
+                    border: "1px solid rgba(16,185,129,0.3)",
+                  }}
+                >
+                  Mês Aberto
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: "#a1a1aa" }}>
+                Teltech Software & Inteligência Artificial
+              </p>
+            </div>
+          </div>
+
+          {/* Period Selector & Global Actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Month Stepper */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8,
+                padding: "3px 4px",
+              }}
+            >
+              <button
+                onClick={handlePrevMonth}
+                style={{ background: "transparent", border: "none", color: "#ccc", cursor: "pointer", padding: "4px 6px", borderRadius: 4 }}
+                title="Mês anterior"
+              >
+                <ChevronLeft style={{ width: 16, height: 16 }} />
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", padding: "0 10px", minWidth: 140, textAlign: "center" }}>
+                {monthNames[selectedMonth - 1]} / {selectedYear}
+              </span>
+              <button
+                onClick={handleNextMonth}
+                style={{ background: "transparent", border: "none", color: "#ccc", cursor: "pointer", padding: "4px 6px", borderRadius: 4 }}
+                title="Próximo mês"
+              >
+                <ChevronRight style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={handleExportCSV}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#e4e4e7",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <Download style={{ width: 14, height: 14 }} />
+                Exportar CSV
+              </button>
+
+              <button
+                onClick={() => {
+                  setEditingTx(null);
+                  setTxInitialClientId(null);
+                  setTxInitialType(null);
+                  setShowTxModal(true);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  background: "linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)",
+                  border: "none",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "0 4px 14px rgba(139,92,246,0.35)",
+                }}
+              >
+                <Plus style={{ width: 15, height: 15 }} />
+                Novo Lançamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── 8 Routine Navigation Tabs ───────────────────────────────────── */}
       <div
@@ -1026,21 +1152,23 @@ export function FinanceiroPage() {
           display: "flex",
           borderBottom: "1px solid rgba(255,255,255,0.08)",
           background: "#141417",
-          padding: "0 16px",
+          padding: isMobile ? "0 8px" : "0 16px",
           overflowX: "auto",
           WebkitOverflowScrolling: "touch",
           scrollbarWidth: "none",
+          flexShrink: 0,
+          gap: isMobile ? 2 : 0,
         }}
       >
         {[
-          { key: "dashboard",    label: "Cockpit Executivo",     icon: BarChart3 },
-          { key: "transactions", label: "Livro Caixa",           icon: FileText, badge: transactions.length },
-          { key: "clients",      label: "Clientes & Cobranças",  icon: Users },
-          { key: "accounts",     label: "Contas & Conciliação",  icon: Building2 },
-          { key: "dre",          label: "DRE & Rentabilidade",   icon: Scale },
-          { key: "budgets",      label: "Orçamentos & Metas",    icon: Target },
-          { key: "approvals",    label: "Governança & Alçadas",  icon: ShieldCheck, badge: pendingApprovals.length, alert: pendingApprovals.length > 0 },
-          { key: "partners",     label: "Sócios & Reembolsos",   icon: CreditCard },
+          { key: "dashboard",    label: "Cockpit Executivo",     shortLabel: "Cockpit",   icon: BarChart3 },
+          { key: "transactions", label: "Livro Caixa",           shortLabel: "Extrato",   icon: FileText, badge: transactions.length },
+          { key: "clients",      label: "Clientes & Cobranças",  shortLabel: "Clientes",  icon: Users },
+          { key: "accounts",     label: "Contas & Conciliação",  shortLabel: "Contas",    icon: Building2 },
+          { key: "dre",          label: "DRE & Rentabilidade",   shortLabel: "DRE",       icon: Scale },
+          { key: "budgets",      label: "Orçamentos & Metas",    shortLabel: "Metas",     icon: Target },
+          { key: "approvals",    label: "Governança & Alçadas",  shortLabel: "Alçadas",   icon: ShieldCheck, badge: pendingApprovals.length, alert: pendingApprovals.length > 0 },
+          { key: "partners",     label: "Sócios & Reembolsos",   shortLabel: "Sócios",    icon: CreditCard },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
@@ -1051,12 +1179,12 @@ export function FinanceiroPage() {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "13px 16px",
+                gap: isMobile ? 5 : 8,
+                padding: isMobile ? "9px 11px" : "13px 16px",
                 border: "none",
                 background: "transparent",
                 color: isActive ? "#fafafa" : "#71717a",
-                fontSize: 13,
+                fontSize: isMobile ? 12 : 13,
                 fontWeight: isActive ? 700 : 500,
                 borderBottom: isActive ? "2px solid #8B5CF6" : "2px solid transparent",
                 cursor: "pointer",
@@ -1064,14 +1192,14 @@ export function FinanceiroPage() {
                 transition: "all 0.15s ease",
               }}
             >
-              <Icon style={{ width: 16, height: 16, color: isActive ? "#8B5CF6" : "#71717a" }} />
-              <span>{tab.label}</span>
+              <Icon style={{ width: isMobile ? 14 : 16, height: isMobile ? 14 : 16, color: isActive ? "#8B5CF6" : "#71717a" }} />
+              <span>{isMobile ? tab.shortLabel : tab.label}</span>
               {tab.badge !== undefined && tab.badge > 0 && (
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: 700,
-                    padding: "1px 6px",
+                    padding: "1px 5px",
                     borderRadius: 10,
                     background: tab.alert ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.1)",
                     color: tab.alert ? "#EF4444" : "#ccc",
@@ -1740,7 +1868,7 @@ function CockpitView({
         </div>
 
         {/* RIGHT COLUMN (1/3) — Central de Pendências Críticas ("O que eu faço agora?") */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, order: isMobile ? -1 : 0 }}>
           <div
             style={{
               background: "linear-gradient(135deg, rgba(30,30,36,0.98), rgba(22,22,26,0.98))",
@@ -2116,39 +2244,39 @@ function TransactionsLedgerView({
   const balanceFiltered = totalInflowFiltered - totalOutflowFiltered;
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "24px", gap: 18, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 12 : 18, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
       {/* ─── Top Filter Metrics Ribbon ────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 16px" }}>
-          <span style={{ fontSize: 11, color: "#888", fontWeight: 600, textTransform: "uppercase" }}>Movimentações Filtradas</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginTop: 2 }}>{filtered.length} lançamentos</div>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(200px, 1fr))", gap: isMobile ? 8 : 12 }}>
+        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: isMobile ? "8px 12px" : "12px 16px" }}>
+          <span style={{ fontSize: 10, color: "#888", fontWeight: 600, textTransform: "uppercase" }}>Filtradas</span>
+          <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 800, color: "#fff", marginTop: 2 }}>{filtered.length} itens</div>
         </div>
-        <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, padding: "12px 16px" }}>
-          <span style={{ fontSize: 11, color: "#10B981", fontWeight: 600, textTransform: "uppercase" }}>Entradas (Filtro)</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#10B981", marginTop: 2 }}>{formatBRL(totalInflowFiltered)}</div>
+        <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, padding: isMobile ? "8px 12px" : "12px 16px" }}>
+          <span style={{ fontSize: 10, color: "#10B981", fontWeight: 600, textTransform: "uppercase" }}>Entradas</span>
+          <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 800, color: "#10B981", marginTop: 2 }}>{formatBRL(totalInflowFiltered)}</div>
         </div>
-        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: "12px 16px" }}>
-          <span style={{ fontSize: 11, color: "#EF4444", fontWeight: 600, textTransform: "uppercase" }}>Saídas (Filtro)</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#EF4444", marginTop: 2 }}>{formatBRL(totalOutflowFiltered)}</div>
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: isMobile ? "8px 12px" : "12px 16px" }}>
+          <span style={{ fontSize: 10, color: "#EF4444", fontWeight: 600, textTransform: "uppercase" }}>Saídas</span>
+          <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 800, color: "#EF4444", marginTop: 2 }}>{formatBRL(totalOutflowFiltered)}</div>
         </div>
-        <div style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "12px 16px" }}>
-          <span style={{ fontSize: 11, color: "#A78BFA", fontWeight: 600, textTransform: "uppercase" }}>Saldo Resultante</span>
-          <div style={{ fontSize: 20, fontWeight: 800, color: balanceFiltered >= 0 ? "#10B981" : "#EF4444", marginTop: 2 }}>
+        <div style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: isMobile ? "8px 12px" : "12px 16px" }}>
+          <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 600, textTransform: "uppercase" }}>Saldo</span>
+          <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 800, color: balanceFiltered >= 0 ? "#10B981" : "#EF4444", marginTop: 2 }}>
             {formatBRL(balanceFiltered)}
           </div>
         </div>
       </div>
 
       {/* ─── Quick View Tabs ──────────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 5, overflowX: "auto", maxWidth: "100%", paddingBottom: 2 }}>
           {[
             { id: "all",      label: "Todas" },
-            { id: "inflow",   label: "A Receber / Entradas" },
-            { id: "outflow",  label: "A Pagar / Saídas" },
-            { id: "overdue",  label: "Atrasadas / Urgentes", icon: <AlertTriangle size={12} style={{ color: "#EF4444" }} /> },
-            { id: "paid",     label: "Liquidadas" },
-            { id: "approval", label: "Em Alçada", icon: <Scale size={12} style={{ color: "#A78BFA" }} /> },
+            { id: "inflow",   label: isMobile ? "Entradas" : "A Receber / Entradas" },
+            { id: "outflow",  label: isMobile ? "Saídas" : "A Pagar / Saídas" },
+            { id: "overdue",  label: isMobile ? "Atrasadas" : "Atrasadas / Urgentes", icon: <AlertTriangle size={12} style={{ color: "#EF4444" }} /> },
+            { id: "paid",     label: isMobile ? "Pagas" : "Liquidadas" },
+            { id: "approval", label: isMobile ? "Alçada" : "Em Alçada", icon: <Scale size={12} style={{ color: "#A78BFA" }} /> },
           ].map((qv) => (
             <button
               key={qv.id}
@@ -2156,15 +2284,17 @@ function TransactionsLedgerView({
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 5,
-                padding: "6px 12px",
+                gap: 4,
+                padding: isMobile ? "5px 10px" : "6px 12px",
                 borderRadius: 20,
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: quickFilter === qv.id ? 700 : 500,
                 background: quickFilter === qv.id ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.04)",
                 border: quickFilter === qv.id ? "1px solid #8B5CF6" : "1px solid rgba(255,255,255,0.08)",
                 color: quickFilter === qv.id ? "#fff" : "#a1a1aa",
                 cursor: "pointer",
+                whiteSpace: "nowrap",
+                flexShrink: 0
               }}
             >
               {qv.icon}
@@ -2173,53 +2303,55 @@ function TransactionsLedgerView({
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={onExportCSV}
-            style={{
-              padding: "7px 12px",
-              borderRadius: 8,
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              color: "#ccc",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <Download style={{ width: 14, height: 14 }} /> Exportar
-          </button>
-          <button
-            onClick={onNewTx}
-            style={{
-              padding: "7px 14px",
-              borderRadius: 8,
-              background: "#8B5CF6",
-              border: "none",
-              color: "#fff",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <Plus style={{ width: 14, height: 14 }} /> Novo Lançamento
-          </button>
-        </div>
+        {!isMobile && (
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={onExportCSV}
+              style={{
+                padding: "7px 12px",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#ccc",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Download style={{ width: 14, height: 14 }} /> Exportar
+            </button>
+            <button
+              onClick={onNewTx}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 8,
+                background: "#8B5CF6",
+                border: "none",
+                color: "#fff",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Plus style={{ width: 14, height: 14 }} /> Novo Lançamento
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ─── Search & Dropdown Filters Bar ────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ flex: 1, minWidth: 260, position: "relative" }}>
-          <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, color: "#666" }} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ flex: 1, minWidth: isMobile ? "100%" : 260, position: "relative" }}>
+          <Search style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 15, height: 15, color: "#666" }} />
           <input
             type="text"
-            placeholder="Pesquisar por descrição, cliente, sócio ou categoria..."
+            placeholder={isMobile ? "Buscar lançamentos..." : "Pesquisar por descrição, cliente, sócio ou categoria..."}
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
             style={{
@@ -2227,7 +2359,7 @@ function TransactionsLedgerView({
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: 8,
-              padding: "9px 12px 9px 36px",
+              padding: "8px 12px 8px 34px",
               color: "#fff",
               fontSize: 13,
               outline: "none",
@@ -2240,17 +2372,17 @@ function TransactionsLedgerView({
           value={selectedAccountId}
           onChange={(e) => setSelectedAccountId(e.target.value)}
           style={{
-            width: 230,
+            width: isMobile ? "100%" : 210,
             background: "#18181c",
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
-            padding: "9px 12px",
+            padding: "8px 10px",
             color: "#ccc",
             fontSize: 12,
             outline: "none",
           }}
         >
-          <option value="all">Todas as Contas Bancárias</option>
+          <option value="all">Todas as Contas</option>
           {accounts.map(a => (
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
@@ -2260,11 +2392,11 @@ function TransactionsLedgerView({
           value={selectedProjectId}
           onChange={(e) => setSelectedProjectId(e.target.value)}
           style={{
-            width: 230,
+            width: isMobile ? "100%" : 210,
             background: "#18181c",
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
-            padding: "9px 12px",
+            padding: "8px 10px",
             color: "#ccc",
             fontSize: 12,
             outline: "none",

@@ -1,138 +1,75 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
-  MessageCircle,
-  Power,
-  RefreshCw,
-  Save,
-  Send,
-  ShieldCheck,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertCircle, FlaskConical, History, MessageCircle, MessageSquareText, RotateCcw, Save, Users, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../lib/api";
+import { cn } from "@/lib/utils";
+import { BillingRules } from "./whatsapp/BillingRules";
+import { ConnectionCard } from "./whatsapp/ConnectionCard";
+import { MessageHistory } from "./whatsapp/MessageHistory";
+import { AssistantAvatar, MessageTemplates } from "./whatsapp/MessageTemplates";
+import { PartnerContacts } from "./whatsapp/PartnerContacts";
+import { TestSender } from "./whatsapp/TestSender";
+import {
+  emptySettings,
+  type TemplateInfo,
+  type WhatsAppContact,
+  type WhatsAppMessage,
+  type WhatsAppSettings,
+  type WhatsAppStatus,
+  type WorkspaceMemberOption,
+} from "./whatsapp/types";
+import { Btn, Tip, WhatsAppTooltipProvider } from "./whatsapp/ui";
 
-type ConnectionStatus = "disconnected" | "connecting" | "qr" | "connected";
+type TabKey = "test" | "billing" | "messages" | "partners" | "history";
 
-interface WhatsAppStatus {
-  status: ConnectionStatus;
-  qr?: string;
-  phone?: string;
-  configured?: boolean;
-  paired?: boolean;
-  lastError?: string;
+const tabs: { key: TabKey; label: string; icon: typeof Users; tip: string }[] = [
+  { key: "test", label: "Teste de envio", icon: FlaskConical, tip: "Confirme que o número funciona enviando uma mensagem real." },
+  { key: "billing", label: "Cobrança & Pix", icon: WalletCards, tip: "Quando cobrar, chave Pix e forma de envio." },
+  { key: "messages", label: "Mensagens do Nexus", icon: MessageSquareText, tip: "Personalidade do assistente e texto de cada mensagem." },
+  { key: "partners", label: "Sócios & avisos", icon: Users, tip: "Quem recebe os avisos internos e como é chamado." },
+  { key: "history", label: "Histórico", icon: History, tip: "Tudo o que foi enviado, na fila ou com falha." },
+];
+
+function normalizeSettings(raw?: Partial<WhatsAppSettings>): WhatsAppSettings {
+  return {
+    ...emptySettings,
+    ...raw,
+    pixKey: raw?.pixKey ?? "",
+    pixMerchantName: raw?.pixMerchantName ?? "",
+    pixMerchantCity: raw?.pixMerchantCity ?? "",
+    templates: raw?.templates ?? {},
+  };
 }
 
-interface WhatsAppSettings {
-  autoBillingEnabled: boolean;
-  daysBeforeDue: number;
-  sendOnDueDate: boolean;
-  daysAfterDue: number;
-  dailySendHour: number;
-  pixKey: string;
-  internalAlertPhone: string;
-  withdrawalAlertsEnabled: boolean;
+/** Compara apenas o que o usuário pode editar (ignora campos calculados pelo servidor). */
+function editableSnapshot(settings: WhatsAppSettings): string {
+  const { pixKeyResolved: _ignored, templates, ...rest } = settings;
+  return JSON.stringify([Object.entries(rest).sort(([a], [b]) => a.localeCompare(b)), Object.entries(templates).sort(([a], [b]) => a.localeCompare(b))]);
 }
-
-interface WhatsAppMessage {
-  id?: string;
-  type?: string;
-  kind?: string;
-  eventType?: string;
-  status?: string;
-  clientName?: string;
-  recipient?: string;
-  recipientPhone?: string;
-  phone?: string;
-  to?: string;
-  error?: string;
-  errorMessage?: string;
-  lastError?: string;
-  createdAt?: string;
-  sentAt?: string;
-}
-
-const emptySettings: WhatsAppSettings = {
-  autoBillingEnabled: false,
-  daysBeforeDue: 3,
-  sendOnDueDate: true,
-  daysAfterDue: 3,
-  dailySendHour: 10,
-  pixKey: "",
-  internalAlertPhone: "",
-  withdrawalAlertsEnabled: false,
-};
-
-const statusCopy: Record<
-  ConnectionStatus,
-  { label: string; detail: string; tone: string }
-> = {
-  disconnected: {
-    label: "Desconectado",
-    detail: "Conecte o número da empresa para habilitar os envios.",
-    tone: "text-muted-foreground",
-  },
-  connecting: {
-    label: "Conectando",
-    detail: "Aguardando a sessão do WhatsApp.",
-    tone: "text-primary",
-  },
-  qr: {
-    label: "Aguardando leitura do QR",
-    detail:
-      "No WhatsApp da empresa, abra Aparelhos conectados e leia o código.",
-    tone: "text-primary",
-  },
-  connected: {
-    label: "Conectado",
-    detail: "A conexão está pronta para os envios configurados.",
-    tone: "text-success",
-  },
-};
-
-function readableDate(value?: string) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-}
-
-function messageLabel(message: WhatsAppMessage) {
-  const type = message.type ?? message.kind ?? message.eventType;
-  if (type === "manual_billing") return "Cobrança manual";
-  if (type === "billing_before") return "Lembrete antes do vencimento";
-  if (type === "billing_due") return "Cobrança no vencimento";
-  if (type === "billing_overdue") return "Cobrança em atraso";
-  if (type === "partner_withdrawal") return "Aviso de retirada";
-  return type ? type.replaceAll("_", " ") : "Mensagem";
-}
-
-const fieldClass =
-  "mt-2 w-full rounded-lg border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 export function WhatsAppSettingsPanel() {
-  const [connection, setConnection] = useState<WhatsAppStatus>({
-    status: "disconnected",
-  });
-  const [settings, setSettings] = useState<WhatsAppSettings>(emptySettings);
+  const [connection, setConnection] = useState<WhatsAppStatus>({ status: "disconnected" });
+  const [saved, setSaved] = useState<WhatsAppSettings>(emptySettings);
+  const [draft, setDraft] = useState<WhatsAppSettings>(emptySettings);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+  const [contacts, setContacts] = useState<WhatsAppContact[]>([]);
+  const [members, setMembers] = useState<WorkspaceMemberOption[]>([]);
+  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"connect" | "disconnect" | "save" | null>(
-    null,
-  );
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
+  const [busy, setBusy] = useState<"connect" | "disconnect" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("test");
+
+  const dirty = useMemo(() => editableSnapshot(draft) !== editableSnapshot(saved), [draft, saved]);
+  const patchDraft = useCallback((patch: Partial<WhatsAppSettings>) => setDraft((current) => ({ ...current, ...patch })), []);
 
   const loadStatus = useCallback(async () => {
-    const result = await API.get<WhatsAppStatus>("/whatsapp/status");
-    setConnection(result);
+    setConnection(await API.get<WhatsAppStatus>("/whatsapp/status"));
   }, []);
 
   const loadMessages = useCallback(async () => {
-    const result = await API.get<{ messages: WhatsAppMessage[] }>(
-      "/whatsapp/messages",
-    );
+    const result = await API.get<{ messages: WhatsAppMessage[] }>("/whatsapp/messages");
     setMessages(Array.isArray(result.messages) ? result.messages : []);
   }, []);
 
@@ -145,22 +82,22 @@ export function WhatsAppSettingsPanel() {
         API.get<{ settings: WhatsAppSettings }>("/whatsapp/settings"),
         API.get<{ messages: WhatsAppMessage[] }>("/whatsapp/messages"),
       ]);
+      const normalized = normalizeSettings(settingsResult.settings);
       setConnection(statusResult);
-      setSettings({
-        ...emptySettings,
-        ...settingsResult.settings,
-        pixKey: settingsResult.settings?.pixKey ?? "",
-        internalAlertPhone: settingsResult.settings?.internalAlertPhone ?? "",
-      });
-      setMessages(
-        Array.isArray(messagesResult.messages) ? messagesResult.messages : [],
-      );
+      setSaved(normalized);
+      setDraft(normalized);
+      setMessages(Array.isArray(messagesResult.messages) ? messagesResult.messages : []);
+      // Dados auxiliares: se falharem, o restante do painel continua funcionando.
+      const [contactsResult, membersResult, templatesResult] = await Promise.allSettled([
+        API.get<{ contacts: WhatsAppContact[] }>("/whatsapp/contacts"),
+        API.get<{ members: WorkspaceMemberOption[] }>("/whatsapp/members"),
+        API.get<{ templates: TemplateInfo[] }>("/whatsapp/templates"),
+      ]);
+      if (contactsResult.status === "fulfilled") setContacts(contactsResult.value.contacts ?? []);
+      if (membersResult.status === "fulfilled") setMembers(membersResult.value.members ?? []);
+      if (templatesResult.status === "fulfilled") setTemplates(templatesResult.value.templates ?? []);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível carregar o WhatsApp.",
-      );
+      setError(cause instanceof Error ? cause.message : "Não foi possível carregar o WhatsApp.");
     } finally {
       setLoading(false);
     }
@@ -170,14 +107,26 @@ export function WhatsAppSettingsPanel() {
     void loadAll();
   }, [loadAll]);
 
+  // Enquanto conecta, confere a cada 5 s; conectado, confere a cada 30 s para perceber quedas.
   useEffect(() => {
-    if (connection.status !== "connecting" && connection.status !== "qr")
-      return;
-    const interval = window.setInterval(() => {
-      void loadStatus().catch(() => undefined);
-    }, 5000);
+    const waiting = connection.status === "connecting" || connection.status === "qr";
+    if (!waiting && connection.status !== "connected") return;
+    const interval = window.setInterval(() => void loadStatus().catch(() => undefined), waiting ? 5000 : 30000);
     return () => window.clearInterval(interval);
   }, [connection.status, loadStatus]);
+
+  useEffect(() => {
+    if (tab !== "history") return;
+    const interval = window.setInterval(() => void loadMessages().catch(() => undefined), 20000);
+    return () => window.clearInterval(interval);
+  }, [tab, loadMessages]);
+
+  const refreshHistory = useCallback(() => {
+    setRefreshingHistory(true);
+    loadMessages()
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível atualizar o histórico."))
+      .finally(() => setRefreshingHistory(false));
+  }, [loadMessages]);
 
   const connect = async () => {
     setBusy("connect");
@@ -187,23 +136,14 @@ export function WhatsAppSettingsPanel() {
       await loadStatus();
       toast.success("Conexão iniciada. Leia o QR com o WhatsApp da empresa.");
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível iniciar a conexão.",
-      );
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a conexão.");
     } finally {
       setBusy(null);
     }
   };
 
   const disconnect = async () => {
-    if (
-      !window.confirm(
-        "Desconectar o WhatsApp da empresa? Os envios serão interrompidos.",
-      )
-    )
-      return;
+    if (!window.confirm("Desconectar o WhatsApp da empresa? Os envios serão interrompidos.")) return;
     setBusy("disconnect");
     setError(null);
     try {
@@ -211,496 +151,148 @@ export function WhatsAppSettingsPanel() {
       await loadStatus();
       toast.success("WhatsApp desconectado.");
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível desconectar.",
-      );
+      setError(cause instanceof Error ? cause.message : "Não foi possível desconectar.");
     } finally {
       setBusy(null);
     }
   };
 
-  const saveSettings = async (event: FormEvent) => {
-    event.preventDefault();
-    if (
-      [
-        settings.daysBeforeDue,
-        settings.daysAfterDue,
-        settings.dailySendHour,
-      ].some((value) => !Number.isInteger(value)) ||
-      settings.daysBeforeDue < 0 ||
-      settings.daysBeforeDue > 30 ||
-      settings.daysAfterDue < 0 ||
-      settings.daysAfterDue > 30 ||
-      settings.dailySendHour < 0 ||
-      settings.dailySendHour > 23
-    ) {
-      setError("Informe dias entre 0 e 30 e horário entre 0 e 23.");
-      return;
+  const save = async () => {
+    const numbers = [draft.daysBeforeDue, draft.daysAfterDue, draft.dailySendHour, draft.dailyMessageLimit];
+    if (numbers.some((value) => !Number.isInteger(value))) return setError("Preencha todos os números das regras de cobrança.");
+    if (draft.daysBeforeDue < 0 || draft.daysBeforeDue > 30 || draft.daysAfterDue < 0 || draft.daysAfterDue > 30) {
+      return setError("Os dias antes e depois do vencimento devem estar entre 0 e 30.");
     }
-    if (settings.autoBillingEnabled && !settings.pixKey.trim()) {
-      setError(
-        "Cadastre a chave Pix antes de ativar as cobranças automáticas.",
-      );
-      return;
-    }
-    if (
-      settings.withdrawalAlertsEnabled &&
-      !settings.internalAlertPhone.trim()
-    ) {
-      setError(
-        "Cadastre o WhatsApp interno antes de ativar os avisos de retirada.",
-      );
-      return;
+    if (draft.dailySendHour < 0 || draft.dailySendHour > 23) return setError("O horário de envio deve estar entre 0 e 23.");
+    if (draft.dailyMessageLimit < 1 || draft.dailyMessageLimit > 500) return setError("O limite de mensagens deve estar entre 1 e 500.");
+    if (!draft.assistantName.trim() || !draft.companyName.trim()) return setError("Informe o nome do assistente e da empresa.");
+    if (draft.autoBillingEnabled && !draft.pixKey.trim()) {
+      setTab("billing");
+      return setError("Cadastre a chave Pix antes de ativar as cobranças automáticas.");
     }
     setBusy("save");
     setError(null);
     try {
-      const result = await API.put<{ settings: WhatsAppSettings }>(
-        "/whatsapp/settings",
-        {
-          ...settings,
-          pixKey: (settings.pixKey ?? "").trim(),
-          internalAlertPhone: (settings.internalAlertPhone ?? "").replace(
-            /\D/g,
-            "",
-          ),
-        },
-      );
-      setSettings({
-        ...emptySettings,
-        ...result.settings,
-        pixKey: result.settings?.pixKey ?? "",
-        internalAlertPhone: result.settings?.internalAlertPhone ?? "",
+      const templatePatch: Record<string, string | null> = {};
+      for (const key of new Set([...Object.keys(saved.templates), ...Object.keys(draft.templates)])) {
+        templatePatch[key] = draft.templates[key] ?? null;
+      }
+      const { pixKeyResolved: _ignored, templates: _templates, ...rest } = draft;
+      const result = await API.put<{ settings: WhatsAppSettings }>("/whatsapp/settings", {
+        ...rest,
+        pixKey: draft.pixKey.trim(),
+        pixMerchantName: draft.pixMerchantName.trim(),
+        pixMerchantCity: draft.pixMerchantCity.trim(),
+        assistantName: draft.assistantName.trim(),
+        companyName: draft.companyName.trim(),
+        templates: templatePatch,
       });
-      toast.success("Regras de WhatsApp salvas.");
+      const normalized = normalizeSettings(result.settings);
+      setSaved(normalized);
+      setDraft(normalized);
+      toast.success("Configurações do WhatsApp salvas.");
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Não foi possível salvar as regras.",
-      );
+      const message = cause instanceof Error ? cause.message : "Não foi possível salvar as configurações.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(null);
     }
   };
 
-  const copy = statusCopy[connection.status] ?? statusCopy.disconnected;
-  const qrIsImage = Boolean(
-    connection.qr &&
-    (/^data:image\//.test(connection.qr) || /^https?:\/\//.test(connection.qr)),
-  );
+  const problems = messages.filter((message) => message.status === "failed").length;
+  const pending = messages.filter((message) => ["queued", "processing", "retry"].includes(message.status ?? "")).length;
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 animate-fade-up">
-      <div>
-        <div className="mb-2 flex items-center gap-3 text-primary">
-          <MessageCircle size={22} />
-          <span className="text-xs font-bold uppercase tracking-[0.2em]">
-            Canal da empresa
-          </span>
-        </div>
-        <h1 className="text-2xl font-bold text-foreground">WhatsApp</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Conecte o número corporativo, defina quando cobrar parcelas e receba
-          avisos de retiradas registradas no caixa.
-        </p>
-      </div>
-
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          <AlertCircle size={17} className="mt-0.5 shrink-0" />
-          {error}
-        </div>
-      )}
-
-      <section
-        className="glass shadow-card rounded-xl p-5 sm:p-6"
-        aria-label="Conexão WhatsApp"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 text-primary">
-              <MessageCircle size={23} />
+    <WhatsAppTooltipProvider>
+      <div className="mx-auto w-full max-w-5xl space-y-6 pb-4 animate-fade-up">
+        <header className="flex items-center gap-4">
+          <AssistantAvatar size={52} pulse={connection.status === "connected"} />
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-primary">
+              <MessageCircle size={16} />
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em]">Canal da empresa</span>
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-foreground">
-                Número conectado
-              </h2>
-              <div
-                className={`mt-1 flex items-center gap-2 text-sm font-semibold ${copy.tone}`}
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${connection.status === "connected" ? "bg-success" : connection.status === "disconnected" ? "bg-muted-foreground" : "bg-primary animate-pulse"}`}
-                />
-                {loading ? "Carregando..." : copy.label}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {connection.phone
-                  ? `+${connection.phone.replace(/\D/g, "")}`
-                  : connection.paired && connection.status !== "connected"
-                    ? "Aparelho pareado. Aguardando a conexão."
-                    : copy.detail}
-              </p>
-            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">WhatsApp</h1>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Conecte o número corporativo, defina quando e como cobrar, e deixe o {draft.assistantName || "Nexus"} falar com clientes e sócios.
+            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                void loadAll();
-              }}
-              disabled={loading || busy !== null}
-              className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
-            >
-              <RefreshCw size={14} /> Atualizar
+        </header>
+
+        {error && (
+          <div role="alert" className="animate-shake flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            <AlertCircle size={17} className="mt-0.5 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button type="button" onClick={() => setError(null)} className="text-xs font-semibold underline-offset-2 hover:underline">
+              Fechar
             </button>
-            {connection.status === "disconnected" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void connect();
-                }}
-                disabled={
-                  loading || busy !== null || connection.configured === false
-                }
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-glow transition hover:brightness-110 disabled:opacity-50"
-              >
-                <Power size={14} />{" "}
-                {busy === "connect" ? "Conectando..." : "Conectar"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  void disconnect();
-                }}
-                disabled={loading || busy !== null}
-                className="inline-flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-xs font-semibold text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
-              >
-                <Power size={14} />{" "}
-                {busy === "disconnect" ? "Desconectando..." : "Desconectar"}
-              </button>
-            )}
-          </div>
-        </div>
-        {connection.configured === false && (
-          <p
-            role="alert"
-            className="mt-4 rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-foreground"
-          >
-            A conexão precisa ser habilitada no servidor. Configure{" "}
-            <code>WHATSAPP_SESSION_KEY</code> e atualize o estado desta página.
-          </p>
-        )}
-        {connection.lastError && (
-          <p
-            role="alert"
-            className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
-          >
-            Última falha da conexão: {connection.lastError}
-          </p>
-        )}
-        {connection.status === "qr" && (
-          <div className="mt-6 flex flex-col items-center rounded-xl border border-border bg-background/70 p-5 text-center">
-            {qrIsImage ? (
-              <img
-                src={connection.qr}
-                alt="Código QR para conectar o WhatsApp da empresa"
-                className="h-56 w-56 rounded-lg bg-white p-2"
-              />
-            ) : (
-              <div className="flex h-56 w-56 items-center justify-center rounded-lg border border-border bg-input p-4 text-xs text-muted-foreground">
-                Aguardando a imagem do QR. Atualize a conexão se necessário.
-              </div>
-            )}
-            <p className="mt-3 text-xs text-muted-foreground">
-              WhatsApp da empresa → Aparelhos conectados → Conectar aparelho
-            </p>
           </div>
         )}
-      </section>
 
-      <form
-        onSubmit={(event) => {
-          void saveSettings(event);
-        }}
-        className="glass shadow-card space-y-6 rounded-xl p-5 sm:p-6"
-      >
-        <div className="flex items-start gap-3">
-          <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
-            <Clock3 size={19} />
-          </div>
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Cobrança de parcelas
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Mensagens apenas para lançamentos a receber de clientes com
-              autorização registrada.
-            </p>
-          </div>
-        </div>
-        <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-border bg-background/50 p-4">
-          <span>
-            <span className="block text-sm font-semibold text-foreground">
-              Cobrança automática
-            </span>
-            <span className="mt-1 block text-xs text-muted-foreground">
-              Envie lembretes conforme o vencimento da parcela.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.autoBillingEnabled}
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                autoBillingEnabled: event.target.checked,
-              }))
-            }
-            className="mt-1 h-4 w-4 accent-primary"
-          />
-        </label>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="text-xs font-semibold text-muted-foreground">
-            Dias antes do vencimento
-            <input
-              className={fieldClass}
-              type="number"
-              min={0}
-              max={30}
-              value={settings.daysBeforeDue}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  daysBeforeDue: Number(event.target.value),
-                }))
-              }
-            />
-          </label>
-          <label className="text-xs font-semibold text-muted-foreground">
-            Dias após o vencimento
-            <input
-              className={fieldClass}
-              type="number"
-              min={0}
-              max={30}
-              value={settings.daysAfterDue}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  daysAfterDue: Number(event.target.value),
-                }))
-              }
-            />
-          </label>
-          <label className="text-xs font-semibold text-muted-foreground">
-            Horário diário (Brasília)
-            <input
-              className={fieldClass}
-              type="number"
-              min={0}
-              max={23}
-              value={settings.dailySendHour}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  dailySendHour: Number(event.target.value),
-                }))
-              }
-            />
-            <span className="mt-1 block text-[11px] font-normal text-muted-foreground">
-              Hora de envio diário (0h a 23h). Ex: 10 = 10:00 da manhã.
-            </span>
-          </label>
-        </div>
-        <label className="flex cursor-pointer items-center gap-3 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={settings.sendOnDueDate}
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                sendOnDueDate: event.target.checked,
-              }))
-            }
-            className="h-4 w-4 accent-primary"
-          />{" "}
-          Enviar também no dia do vencimento
-        </label>
-        <label className="block text-xs font-semibold text-muted-foreground">
-          Chave Pix da empresa
-          <input
-            className={fieldClass}
-            type="text"
-            autoComplete="off"
-            value={settings.pixKey}
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                pixKey: event.target.value,
-              }))
-            }
-            placeholder="CNPJ, e-mail, telefone ou chave aleatória"
-          />
-          <span className="mt-1 block font-normal">
-            A chave salva aqui será usada nas mensagens de cobrança.
-          </span>
-        </label>
+        <ConnectionCard
+          connection={connection}
+          loading={loading}
+          busy={busy}
+          onRefresh={() => void loadAll()}
+          onConnect={() => void connect()}
+          onDisconnect={() => void disconnect()}
+        />
 
-        <div className="border-t border-border/70 pt-6">
-          <div className="mb-4 flex items-start gap-3">
-            <div className="rounded-lg bg-success/10 p-2.5 text-success">
-              <ShieldCheck size={19} />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-foreground">
-                Avisos internos de retirada
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Informe o número que receberá o aviso quando uma retirada de
-                sócio for liquidada no caixa.
-              </p>
-            </div>
-          </div>
-          <label className="flex cursor-pointer items-center gap-3 text-sm text-foreground">
-            <input
-              type="checkbox"
-              checked={settings.withdrawalAlertsEnabled}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  withdrawalAlertsEnabled: event.target.checked,
-                }))
-              }
-              className="h-4 w-4 accent-primary"
-            />{" "}
-            Avisar retiradas de pró-labore e sócios
-          </label>
-          <label className="mt-4 block text-xs font-semibold text-muted-foreground">
-            WhatsApp interno para avisos (múltiplos números permitidos)
-            <input
-              className={fieldClass}
-              type="text"
-              value={settings.internalAlertPhone}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  internalAlertPhone: event.target.value,
-                }))
-              }
-              placeholder="Ex: 14998364338, 11999998888 (separe por vírgula)"
-            />
-            <span className="mt-1 block text-[11px] font-normal text-muted-foreground">
-              Você pode cadastrar mais de um número (ex: todos os sócios e financeiro) separando por vírgula. Todos receberão o aviso simultaneamente.
-            </span>
-          </label>
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={loading || busy !== null}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-glow transition hover:brightness-110 disabled:opacity-50"
-          >
-            <Save size={15} />{" "}
-            {busy === "save" ? "Salvando..." : "Salvar regras"}
-          </button>
-        </div>
-      </form>
-
-      <section
-        className="glass shadow-card rounded-xl p-5 sm:p-6"
-        aria-label="Histórico de mensagens"
-      >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-              <Send size={18} className="text-primary" /> Histórico de envios
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Acompanhe mensagens enviadas, pendências e falhas das cobranças e
-              avisos.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              void loadMessages().catch((cause) =>
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : "Não foi possível atualizar o histórico.",
-                ),
-              );
-            }}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground"
-          >
-            <RefreshCw size={14} /> Atualizar histórico
-          </button>
-        </div>
-        {messages.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            Nenhuma mensagem registrada até agora.
-          </div>
-        ) : (
-          <div className="divide-y divide-border/60">
-            {messages.map((message, index) => {
-              const recipient =
-                message.clientName ??
-                message.recipient ??
-                message.recipientPhone ??
-                message.phone ??
-                message.to ??
-                "Destinatário não informado";
-              const messageStatus = message.status ?? "pending";
-              const success = messageStatus === "sent";
-              const failed = messageStatus === "failed";
-              return (
-                <div
-                  key={message.id ?? `${index}-${message.createdAt ?? ""}`}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+        <nav aria-label="Seções do WhatsApp" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+          {tabs.map((item) => {
+            const Icon = item.icon;
+            const active = tab === item.key;
+            const count = item.key === "history" ? (problems > 0 ? problems : pending) : item.key === "partners" ? contacts.length : 0;
+            return (
+              <Tip key={item.key} content={item.tip}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(item.key)}
+                  className={cn(
+                    "relative inline-flex shrink-0 items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                    active ? "border-primary/50 bg-primary/12 text-foreground shadow-glow" : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                      {success ? (
-                        <CheckCircle2 size={15} className="text-success" />
-                      ) : failed ? (
-                        <AlertCircle size={15} className="text-destructive" />
-                      ) : (
-                        <Clock3 size={15} className="text-primary" />
-                      )}
-                      {messageLabel(message)}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {recipient} ·{" "}
-                      {readableDate(message.sentAt ?? message.createdAt)}
-                    </p>
-                    {(message.lastError ??
-                      message.error ??
-                      message.errorMessage) && (
-                      <p className="mt-1 text-xs text-destructive">
-                        {message.lastError ??
-                          message.error ??
-                          message.errorMessage}
-                      </p>
-                    )}
-                  </div>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${success ? "bg-success/10 text-success" : failed ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"}`}
-                  >
-                    {success ? "Enviada" : failed ? "Falhou" : "Pendente"}
-                  </span>
-                </div>
-              );
-            })}
+                  <Icon size={16} className={cn(active && "text-primary")} />
+                  {item.label}
+                  {count > 0 && (
+                    <span className={cn("rounded-full px-1.5 text-[10px] font-bold", item.key === "history" && problems > 0 ? "bg-destructive/20 text-destructive" : "bg-primary/20 text-primary")}>{count}</span>
+                  )}
+                </button>
+              </Tip>
+            );
+          })}
+        </nav>
+
+        <div key={tab} className="animate-fade-up">
+          {tab === "test" && <TestSender connection={connection} settings={saved} contacts={contacts} templates={templates} onSent={() => void loadMessages().catch(() => undefined)} />}
+          {tab === "billing" && <BillingRules settings={draft} onChange={patchDraft} />}
+          {tab === "messages" && <MessageTemplates templates={templates} settings={draft} onChange={patchDraft} />}
+          {tab === "partners" && (
+            <PartnerContacts contacts={contacts} members={members} settings={draft} onSettings={patchDraft} onContactsChange={setContacts} />
+          )}
+          {tab === "history" && <MessageHistory messages={messages} refreshing={refreshingHistory} onRefresh={refreshHistory} />}
+        </div>
+
+        {dirty && (
+          <div className="glass shadow-elegant animate-fade-up sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border-primary/40 px-4 py-3">
+            <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-primary" /> Você tem alterações não salvas
+            </p>
+            <div className="flex gap-2">
+              <Btn size="sm" icon={<RotateCcw size={14} />} onClick={() => setDraft(saved)} disabled={busy !== null} tip="Descarta tudo o que foi alterado desde o último salvamento.">
+                Descartar
+              </Btn>
+              <Btn variant="primary" size="sm" icon={<Save size={14} />} loading={busy === "save"} disabled={loading || busy !== null} onClick={() => void save()} tip="Salva cobrança, Pix, mensagens e avisos de uma vez.">
+                {busy === "save" ? "Salvando…" : "Salvar alterações"}
+              </Btn>
+            </div>
           </div>
         )}
-      </section>
-    </div>
+      </div>
+    </WhatsAppTooltipProvider>
   );
 }

@@ -22,6 +22,8 @@ interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, workspaceName?: string) => Promise<void>;
   logout: () => void;
+  updateUser?: (updated: Partial<AuthUser>) => void;
+  refreshUser?: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -45,6 +47,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setBaseUrl(API_BASE);
     setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const stored = localStorage.getItem(TOKEN_KEY);
+    if (!stored) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${stored}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setState(s => ({ ...s, user: data.user }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const updateUser = useCallback((updated: Partial<AuthUser>) => {
+    setState(s => (s.user ? { ...s, user: { ...s.user, ...updated } } : s));
   }, []);
 
   // Restore session from localStorage
@@ -100,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout }}>
+    <AuthContext.Provider value={{ ...state, login, register, logout, updateUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

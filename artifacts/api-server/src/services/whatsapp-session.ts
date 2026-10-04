@@ -1,4 +1,4 @@
-import makeWASocket, { DisconnectReason, type WASocket } from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, generateWAMessageFromContent, proto, type WASocket } from "@whiskeysockets/baileys";
 import { db, clientsTable, whatsappConnectionsTable, whatsappMessagesTable } from "@workspace/db";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import pino from "pino";
@@ -16,6 +16,7 @@ type Session = {
   status: SessionStatus;
   qr: string | null;
   phone: string | null;
+  connectedAt: number | null;
   lastError: string | null;
   reconnectAttempt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -124,6 +125,7 @@ async function createSocket(workspaceId: string): Promise<void> {
     status: "connecting",
     qr: null,
     phone: null,
+    connectedAt: null,
     lastError: null,
     reconnectAttempt: existing?.reconnectAttempt ?? 0,
     reconnectTimer: null,
@@ -163,12 +165,14 @@ async function createSocket(workspaceId: string): Promise<void> {
       session.status = "connected";
       session.qr = null;
       session.phone = socket.user?.id?.split(":")[0]?.split("@")[0] ?? null;
+      session.connectedAt = Date.now();
       session.lastError = null;
       session.reconnectAttempt = 0;
       logger.info({ workspaceId }, "WhatsApp connected");
     } else if (update.connection === "close") {
       session.status = "disconnected";
       session.qr = null;
+      session.connectedAt = null;
       const reason = disconnectedReason(update.lastDisconnect?.error);
       session.lastError = reason ? `Conexão encerrada (${reason})` : "Conexão encerrada";
       if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.badSession) {
@@ -235,6 +239,7 @@ export async function getWhatsAppStatus(workspaceId: string): Promise<{
   paired: boolean;
   qr: string | null;
   phone: string | null;
+  connectedAt: string | null;
   lastError: string | null;
 }> {
   const configured = isWhatsAppEncryptionConfigured();
@@ -250,19 +255,179 @@ export async function getWhatsAppStatus(workspaceId: string): Promise<{
     paired: Boolean(stored?.credsCiphertext),
     qr: session?.qr ?? null,
     phone: session?.phone ?? null,
+    connectedAt: session?.connectedAt ? new Date(session.connectedAt).toISOString() : null,
     lastError: session?.lastError ?? null,
   };
 }
 
-export async function sendWhatsAppText(workspaceId: string, recipient: string, body: string, messageId: string): Promise<string | null> {
+function connectedSession(workspaceId: string): Session {
   const session = sessions.get(workspaceId);
   if (!session || session.status !== "connected") throw new Error("WhatsApp não conectado");
+  return session;
+}
+
+function stableMessageId(messageId: string): string {
+  return messageId.replace(/-/g, "").toUpperCase();
+}
+
+export async function sendWhatsAppText(workspaceId: string, recipient: string, body: string, messageId: string): Promise<string | null> {
+  const session = connectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
   const result = await session.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: body }, {
-    messageId: messageId.replace(/-/g, "").toUpperCase(),
+    messageId: stableMessageId(messageId),
   });
   return result?.key?.id ?? null;
+}
+
+/** Confirma se o número tem WhatsApp e devolve o JID real (trata o 9º dígito brasileiro). */
+export async function checkWhatsAppNumber(workspaceId: string, recipient: string): Promise<{
+  phone: string;
+  exists: boolean;
+  jid: string | null;
+}> {
+  const session = connectedSession(workspaceId);
+  const phone = normalizeWhatsAppPhone(recipient);
+  if (!phone) throw new Error("Telefone de destino inválido");
+  const [result] = (await session.socket.onWhatsApp(phone)) ?? [];
+  return { phone, exists: Boolean(result?.exists), jid: result?.exists ? result.jid : null };
+}
+
+export interface PixAttachment {
+  /** Pix Copia e Cola (BR Code). */
+  code: string;
+  /** Chave no formato aceito pelo BR Code (celular com +55). */
+  key: string;
+  /** CPF | CNPJ | EMAIL | PHONE | EVP */
+  keyType: string;
+  merchantName: string;
+  amountCents: number;
+  reference: string;
+  description: string;
+}
+
+export interface OutboundMessage {
+  text: string;
+  footer?: string;
+  /** Texto usado quando o botão nativo falha ou o modo é "texto". */
+  fallbackText?: string;
+  pix?: PixAttachment;
+  pixMode?: "native" | "text";
+}
+
+export interface SendOutcome {
+  waMessageId: string | null;
+  /** plain = só texto; native = botão de Pix; text_with_code = texto + código Copia e Cola. */
+  mode: "plain" | "native" | "text_with_code";
+  fallbackReason?: string;
+}
+
+function withFooter(text: string, footer?: string): string {
+  return footer ? `${text}\n\n_${footer}_` : text;
+}
+
+async function sendNativePix(session: Session, jid: string, message: OutboundMessage & { pix: PixAttachment }, messageId: string): Promise<string | null> {
+  const { pix } = message;
+  const money = (value: number) => ({ value, offset: 100 });
+  const buttonParams = {
+    reference_id: pix.reference.slice(0, 35),
+    type: "digital-goods",
+    payment_configuration: "",
+    payment_type: "br",
+    currency: "BRL",
+    total_amount: money(pix.amountCents),
+    order: {
+      status: "pending",
+      subtotal: money(pix.amountCents),
+      tax: money(0),
+      items: [{
+        retailer_id: pix.reference.slice(0, 35),
+        name: pix.description.slice(0, 60) || "Pagamento",
+        amount: money(pix.amountCents),
+        quantity: 1,
+      }],
+    },
+    payment_settings: [{
+      type: "pix_dynamic_code",
+      pix_dynamic_code: {
+        code: pix.code,
+        merchant_name: pix.merchantName,
+        key: pix.key,
+        key_type: pix.keyType,
+      },
+    }],
+  };
+  const content = proto.Message.create({
+    viewOnceMessage: {
+      message: {
+        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+        interactiveMessage: proto.Message.InteractiveMessage.create({
+          body: { text: message.text },
+          ...(message.footer ? { footer: { text: message.footer } } : {}),
+          nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+            buttons: [{ name: "review_and_pay", buttonParamsJson: JSON.stringify(buttonParams) }],
+            messageParamsJson: "",
+          }),
+        }),
+      },
+    },
+  });
+  const userJid = session.socket.user?.id;
+  if (!userJid) throw new Error("Sessão sem usuário");
+  const generated = generateWAMessageFromContent(jid, content, { userJid, messageId });
+  await session.socket.relayMessage(jid, generated.message!, {
+    messageId: generated.key.id!,
+    additionalNodes: [
+      {
+        tag: "biz",
+        attrs: {},
+        content: [{
+          tag: "interactive",
+          attrs: { type: "native_flow", v: "1" },
+          content: [{ tag: "native_flow", attrs: { v: "9", name: "mixed" } }],
+        }],
+      },
+      { tag: "bot", attrs: { biz_bot: "1" } },
+    ],
+  });
+  return generated.key.id ?? null;
+}
+
+/**
+ * Envia uma mensagem completa. Com Pix:
+ *  - modo "native": tenta o botão de Pix do WhatsApp e, se falhar, cai para texto + código;
+ *  - modo "text": envia o texto e, logo depois, só o código Copia e Cola (fácil de copiar).
+ * `jid` opcional permite usar o JID já confirmado por checkWhatsAppNumber.
+ */
+export async function sendWhatsAppMessage(
+  workspaceId: string,
+  recipient: string,
+  message: OutboundMessage,
+  messageId: string,
+  jid?: string | null,
+): Promise<SendOutcome> {
+  const session = connectedSession(workspaceId);
+  const phone = normalizeWhatsAppPhone(recipient);
+  if (!phone) throw new Error("Telefone de destino inválido");
+  const target = jid ?? `${phone}@s.whatsapp.net`;
+  const id = stableMessageId(messageId);
+
+  let fallbackReason: string | undefined;
+  if (message.pix && message.pixMode === "native") {
+    try {
+      const waMessageId = await sendNativePix(session, target, { ...message, pix: message.pix }, id);
+      return { waMessageId, mode: "native" };
+    } catch (error) {
+      fallbackReason = error instanceof Error ? error.message : "Falha no botão de Pix";
+      logger.warn({ workspaceId, reason: fallbackReason }, "WhatsApp native Pix failed; falling back to text");
+    }
+  }
+
+  const text = withFooter(message.pix && message.pixMode === "native" ? (message.fallbackText ?? message.text) : message.text, message.footer);
+  const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
+  if (!message.pix) return { waMessageId: sent?.key?.id ?? null, mode: "plain" };
+  await session.socket.sendMessage(target, { text: message.pix.code }, { messageId: `${id.slice(0, 28)}C0DE` });
+  return { waMessageId: sent?.key?.id ?? null, mode: "text_with_code", fallbackReason };
 }
 
 export async function restoreWhatsAppSessions(): Promise<void> {

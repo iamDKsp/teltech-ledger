@@ -9,11 +9,30 @@ import {
   Plus,
   Folder,
   CheckSquare,
-  Clock
+  Clock,
+  DollarSign,
+  ChevronRight,
+  ArrowUpRight
 } from "lucide-react";
 import { AppContext } from "../TeltechLedger";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+interface IncomingInstallment {
+  id: string;
+  description: string;
+  amount: number;
+  dueDate: string;
+  status: string;
+  installmentNumber?: number;
+  installmentsTotal?: number;
+  revenueType?: string;
+  paymentMethod?: string;
+  clientName?: string;
+  projectName?: string;
+  projectColor?: string;
+  urgencyGroup: "overdue" | "today" | "upcoming_month" | "future_later";
+}
 
 interface DashboardData {
   welcomeData: {
@@ -25,6 +44,15 @@ interface DashboardData {
   completedTodayCount: number;
   totalActiveProjectsCount: number;
   recentActivity: any[];
+  incomingInstallments?: IncomingInstallment[];
+  incomingInstallmentsSummary?: {
+    overdueCount: number;
+    todayCount: number;
+    monthUpcomingCount: number;
+    futureLaterCount: number;
+    totalCount: number;
+    totalAmountCents: number;
+  };
 }
 
 export function InicioPage() {
@@ -32,6 +60,7 @@ export function InicioPage() {
   const { setSidebarModule, projects } = useContext(AppContext);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [vencimentoFilter, setVencimentoFilter] = useState<"todos" | "overdue" | "today" | "upcoming">("todos");
 
   useEffect(() => {
     async function loadData() {
@@ -63,6 +92,25 @@ export function InicioPage() {
   const formattedDate = format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
   // Capitalize first letter of day
   const displayDate = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+
+  const formatBRL = (cents: number) => {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format((cents || 0) / 100);
+  };
+
+  const allInstallments = data.incomingInstallments || [];
+  const overdueCount = data.incomingInstallmentsSummary?.overdueCount ?? allInstallments.filter(i => i.urgencyGroup === "overdue").length;
+  const todayCount = data.incomingInstallmentsSummary?.todayCount ?? allInstallments.filter(i => i.urgencyGroup === "today").length;
+  const monthUpcomingCount = data.incomingInstallmentsSummary?.monthUpcomingCount ?? allInstallments.filter(i => i.urgencyGroup === "upcoming_month").length;
+
+  const filteredInstallments = allInstallments.filter(item => {
+    if (vencimentoFilter === "overdue") return item.urgencyGroup === "overdue";
+    if (vencimentoFilter === "today") return item.urgencyGroup === "today";
+    if (vencimentoFilter === "upcoming") return item.urgencyGroup === "upcoming_month" || item.urgencyGroup === "future_later";
+    return true;
+  });
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -327,6 +375,323 @@ export function InicioPage() {
             <p style={{ margin: "0 0 4px 0", color: "#888", fontSize: "14px" }}>Projetos Ativos</p>
             <p style={{ margin: 0, color: "#e0e0e0", fontSize: "24px", fontWeight: "600" }}>{data.totalActiveProjectsCount}</p>
           </div>
+        </div>
+      </div>
+
+      {/* ─── Vencimentos & Parcelas a Entrar (Fluxo de Recebimentos Prioritário) ─── */}
+      <div style={{
+        backgroundColor: "#161618",
+        border: overdueCount > 0 ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid #242424",
+        borderRadius: "14px",
+        padding: "clamp(16px, 2.5vw, 22px)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "14px",
+        boxShadow: overdueCount > 0 ? "0 4px 24px rgba(239,68,68,0.08)" : "0 4px 20px rgba(0,0,0,0.3)",
+        position: "relative",
+        overflow: "hidden"
+      }}>
+        {/* Subtle glow highlight if overdue items exist */}
+        {overdueCount > 0 && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 3,
+            background: "linear-gradient(90deg, #ef4444 0%, #f59e0b 100%)"
+          }} />
+        )}
+
+        {/* Section Header */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "10px"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: overdueCount > 0 
+                ? "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)" 
+                : "linear-gradient(135deg, #10B981 0%, #059669 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              boxShadow: overdueCount > 0 ? "0 4px 12px rgba(239,68,68,0.3)" : "0 4px 12px rgba(16,185,129,0.3)",
+              flexShrink: 0
+            }}>
+              <DollarSign size={20} />
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <h2 style={{ margin: 0, fontSize: "17px", fontWeight: "700", color: "#fafafa" }}>
+                  Vencimentos & Parcelas a Entrar
+                </h2>
+                {allInstallments.length > 0 && (
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 12,
+                    background: overdueCount > 0 ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.18)",
+                    color: overdueCount > 0 ? "#f87171" : "#10b981",
+                    border: `1px solid ${overdueCount > 0 ? "rgba(239,68,68,0.35)" : "rgba(16,185,129,0.35)"}`
+                  }}>
+                    {overdueCount > 0 ? `${overdueCount} atrasada(s)` : `${allInstallments.length} prevista(s)`}
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#888" }}>
+                {overdueCount > 0 
+                  ? "Atenção: cobranças vencidas aguardando liquidação prioritária"
+                  : todayCount > 0 
+                    ? "Parcelas com previsão de recebimento para hoje"
+                    : "Previsão de receitas e parcelas do mês organizadas por vencimento"}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {data.incomingInstallmentsSummary?.totalAmountCents !== undefined && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#10b981", background: "rgba(16,185,129,0.1)", padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(16,185,129,0.2)" }}>
+                {formatBRL(data.incomingInstallmentsSummary.totalAmountCents)}
+              </span>
+            )}
+            <button
+              onClick={() => navigate("/financeiro")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: "#e4e4e7",
+                fontSize: "12px",
+                fontWeight: "600",
+                cursor: "pointer",
+                transition: "all 0.15s ease"
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+                e.currentTarget.style.color = "#fff";
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                e.currentTarget.style.color = "#e4e4e7";
+              }}
+            >
+              <span>Financeiro</span>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Chips (if multiple groups exist) */}
+        {allInstallments.length > 1 && (overdueCount > 0 || todayCount > 0) && (
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+            <button
+              onClick={() => setVencimentoFilter("todos")}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: vencimentoFilter === "todos" ? "1px solid #7C5AC2" : "1px solid rgba(255,255,255,0.08)",
+                background: vencimentoFilter === "todos" ? "rgba(124,90,194,0.2)" : "rgba(255,255,255,0.04)",
+                color: vencimentoFilter === "todos" ? "#fff" : "#aaa",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer"
+              }}
+            >
+              Todas ({allInstallments.length})
+            </button>
+            {overdueCount > 0 && (
+              <button
+                onClick={() => setVencimentoFilter("overdue")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: vencimentoFilter === "overdue" ? "1px solid #ef4444" : "1px solid rgba(239,68,68,0.2)",
+                  background: vencimentoFilter === "overdue" ? "rgba(239,68,68,0.25)" : "rgba(239,68,68,0.1)",
+                  color: "#f87171",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer"
+                }}
+              >
+                Atrasadas ({overdueCount})
+              </button>
+            )}
+            {todayCount > 0 && (
+              <button
+                onClick={() => setVencimentoFilter("today")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: vencimentoFilter === "today" ? "1px solid #f59e0b" : "1px solid rgba(245,158,11,0.2)",
+                  background: vencimentoFilter === "today" ? "rgba(245,158,11,0.25)" : "rgba(245,158,11,0.1)",
+                  color: "#fbbf24",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer"
+                }}
+              >
+                Hoje ({todayCount})
+              </button>
+            )}
+            {monthUpcomingCount > 0 && (
+              <button
+                onClick={() => setVencimentoFilter("upcoming")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: vencimentoFilter === "upcoming" ? "1px solid #3b82f6" : "1px solid rgba(59,130,246,0.2)",
+                  background: vencimentoFilter === "upcoming" ? "rgba(59,130,246,0.25)" : "rgba(59,130,246,0.1)",
+                  color: "#93c5fd",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer"
+                }}
+              >
+                No Mês ({monthUpcomingCount})
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* List of Incoming Installments */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {filteredInstallments.length === 0 ? (
+            <div style={{
+              textAlign: "center",
+              color: "#888",
+              padding: "20px 16px",
+              background: "rgba(255,255,255,0.02)",
+              borderRadius: "10px",
+              border: "1px dashed rgba(255,255,255,0.08)"
+            }}>
+              <CheckCircle2 size={24} style={{ color: "#10b981", margin: "0 auto 6px auto" }} />
+              <p style={{ margin: 0, fontSize: "14px", color: "#ddd", fontWeight: 600 }}>
+                Nenhum vencimento pendente no período
+              </p>
+              <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#777" }}>
+                Todos os recebimentos deste mês estão devidamente liquidados.
+              </p>
+            </div>
+          ) : (
+            filteredInstallments.slice(0, 6).map(item => {
+              const isOverdue = item.urgencyGroup === "overdue";
+              const isToday = item.urgencyGroup === "today";
+              const dateStr = item.dueDate ? format(new Date(item.dueDate), "dd/MM/yyyy") : "--";
+
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => navigate("/financeiro")}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 14px",
+                    backgroundColor: isOverdue ? "rgba(239,68,68,0.06)" : "#202024",
+                    border: `1px solid ${isOverdue ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: "10px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    gap: "10px",
+                    flexWrap: "wrap"
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.borderColor = isOverdue ? "rgba(239,68,68,0.5)" : "#4a4a52";
+                    e.currentTarget.style.backgroundColor = isOverdue ? "rgba(239,68,68,0.1)" : "#28282d";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.borderColor = isOverdue ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.08)";
+                    e.currentTarget.style.backgroundColor = isOverdue ? "rgba(239,68,68,0.06)" : "#202024";
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 180, flex: 1 }}>
+                    <div style={{
+                      width: "4px",
+                      height: "32px",
+                      borderRadius: "2px",
+                      backgroundColor: isOverdue ? "#ef4444" : (isToday ? "#f59e0b" : "#10b981"),
+                      flexShrink: 0
+                    }} />
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "14px", fontWeight: "700", color: "#fafafa" }}>
+                          {item.clientName || "Cliente"}
+                        </span>
+                        {item.projectName && (
+                          <span style={{
+                            fontSize: "11px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: "rgba(255,255,255,0.06)",
+                            color: "#a1a1aa"
+                          }}>
+                            {item.projectName}
+                          </span>
+                        )}
+                        {item.installmentNumber && item.installmentsTotal && (
+                          <span style={{
+                            fontSize: "10px",
+                            padding: "1px 5px",
+                            borderRadius: "4px",
+                            background: "rgba(124,90,194,0.18)",
+                            color: "#c4b5fd",
+                            fontWeight: 600
+                          }}>
+                            Parcela {item.installmentNumber}/{item.installmentsTotal}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: "12px", color: "#888", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.description}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", justifyContent: "flex-end", flexShrink: 0 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: "15px", fontWeight: "800", color: isOverdue ? "#f87171" : "#10b981", letterSpacing: "-0.01em" }}>
+                        {formatBRL(item.amount)}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#888" }}>
+                        {dateStr}
+                      </div>
+                    </div>
+
+                    <span style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      padding: "3px 8px",
+                      borderRadius: "6px",
+                      whiteSpace: "nowrap",
+                      backgroundColor: isOverdue 
+                        ? "rgba(239,68,68,0.15)" 
+                        : (isToday ? "rgba(245,158,11,0.15)" : "rgba(59,130,246,0.15)"),
+                      color: isOverdue 
+                        ? "#ef4444" 
+                        : (isToday ? "#f59e0b" : "#60a5fa"),
+                      border: `1px solid ${isOverdue ? "rgba(239,68,68,0.3)" : (isToday ? "rgba(245,158,11,0.3)" : "rgba(59,130,246,0.3)")}`
+                    }}>
+                      {isOverdue ? "Atrasada" : (isToday ? "Vence Hoje" : "A Vencer")}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, boolean, pgEnum, uuid, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean, pgEnum, uuid, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { relations } from "drizzle-orm";
@@ -707,10 +707,48 @@ export const whatsappSettingsTable = pgTable("whatsapp_settings", {
   daysAfterDue: integer("days_after_due").notNull().default(3),
   dailySendHour: integer("daily_send_hour").notNull().default(10),
   pixKey: text("pix_key"),
+  // Legacy comma-separated list. Superseded by whatsapp_contacts; kept so that
+  // existing workspaces keep working until their numbers are migrated.
   internalAlertPhone: text("internal_alert_phone"),
   withdrawalAlertsEnabled: boolean("withdrawal_alerts_enabled").notNull().default(false),
+  // Pix delivery
+  pixKeyType: text("pix_key_type").notNull().default("auto"), // 'auto' | 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
+  pixMerchantName: text("pix_merchant_name"),
+  pixMerchantCity: text("pix_merchant_city"),
+  pixDeliveryMode: text("pix_delivery_mode").notNull().default("text"), // 'text' | 'native'
+  // Assistant persona and message behaviour
+  assistantName: text("assistant_name").notNull().default("Nexus"),
+  companyName: text("company_name").notNull().default("Teltech"),
+  receiptEnabled: boolean("receipt_enabled").notNull().default(true),
+  paymentAlertsEnabled: boolean("payment_alerts_enabled").notNull().default(false),
+  optOutHintEnabled: boolean("opt_out_hint_enabled").notNull().default(true),
+  dailyMessageLimit: integer("daily_message_limit").notNull().default(100),
+  // Custom message bodies keyed by template kind. Missing key = built-in default.
+  templates: jsonb("templates").$type<Record<string, string>>().notNull().default({}),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Internal recipients (partners, finance team). A phone number belongs to a
+// person so messages can greet and refer to them by name.
+export const whatsappContactsTable = pgTable("whatsapp_contacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  nickname: text("nickname"),
+  roleLabel: text("role_label"),
+  phone: text("phone").notNull(),
+  active: boolean("active").notNull().default(true),
+  notifyWithdrawals: boolean("notify_withdrawals").notNull().default(true),
+  notifyPayments: boolean("notify_payments").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("whatsapp_contacts_workspace_phone_uq").on(table.workspaceId, table.phone),
+]);
+
+export type WhatsappContact = typeof whatsappContactsTable.$inferSelect;
+export type WhatsappSettings = typeof whatsappSettingsTable.$inferSelect;
 
 export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
