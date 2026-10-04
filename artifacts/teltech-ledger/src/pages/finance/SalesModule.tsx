@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { X, Plus, Trash2, Repeat2, Receipt, AlertTriangle, ChevronDown, Layers, Sparkles, Pause, Play, Ban } from "lucide-react";
+import { Plus, Trash2, Repeat2, Receipt, AlertTriangle, ChevronDown, Layers, Sparkles, Pause, Play, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../../lib/api";
+import { Drawer, Select, Checkbox, DateInput, drawerBtn, confirmDialog } from "../../components/finance-ui";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -151,31 +152,6 @@ const inputStyle: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 };
 
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.85)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 120,
-  padding: 16,
-};
-
-const cardStyle: React.CSSProperties = {
-  width: "100%",
-  maxHeight: "92vh",
-  overflowY: "auto",
-  background: "linear-gradient(135deg, hsl(240 3% 18% / 0.98), hsl(240 4% 12% / 0.98))",
-  border: "1px solid hsl(240 4% 20%)",
-  borderRadius: 16,
-  padding: 24,
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-  boxShadow: "0 10px 40px -10px hsl(0 0% 0% / 0.55)",
-};
-
 function SectionCard({ active, onToggle, icon, title, subtitle, children }: {
   active: boolean;
   onToggle: () => void;
@@ -185,7 +161,7 @@ function SectionCard({ active, onToggle, icon, title, subtitle, children }: {
   children?: React.ReactNode;
 }) {
   return (
-    <div style={{ border: `1px solid ${active ? "rgba(139,92,246,0.45)" : "rgba(255,255,255,0.08)"}`, background: active ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", borderRadius: 12, overflow: "hidden" }}>
+    <div style={{ border: `1px solid ${active ? "rgba(139,92,246,0.45)" : "rgba(255,255,255,0.08)"}`, background: active ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", borderRadius: 12, flexShrink: 0 }}>
       <button
         type="button"
         onClick={onToggle}
@@ -385,36 +361,42 @@ export function SalesWizardModal({
   const startOpt = START_MODE_OPTIONS.find((o) => o.value === startMode);
 
   return (
-    <div style={overlayStyle}>
-      <div style={{ ...cardStyle, maxWidth: 680 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa" }}>Nova Venda</h3>
-            <p style={{ margin: "3px 0 0", fontSize: 12, color: "#888" }}>Configure uma vez — o sistema gera todas as cobranças.</p>
-          </div>
-          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}>
-            <X size={18} />
+    <Drawer
+      title="Nova Venda"
+      subtitle="Configure uma vez — o sistema gera todas as cobranças."
+      icon={<Receipt size={18} />}
+      onClose={onClose}
+      width={720}
+      footer={
+        <>
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
           </button>
-        </div>
+          <button type="button" onClick={handleSubmit} disabled={saving || !payload || !preview} style={drawerBtn.primary(saving || !payload || !preview)}>
+            {saving ? "Gerando cobranças..." : "Confirmar venda e gerar cobranças"}
+          </button>
+        </>
+      }
+    >
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
           <div>
             <label style={labelStyle}>Cliente *</label>
-            <select value={clientId} onChange={(e) => onPickClient(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            <Select value={clientId} onChange={(e) => onPickClient(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
               <option value="">— Selecione —</option>
               {activeClients.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <label style={labelStyle}>Produto / Projeto vinculado (opcional)</label>
-            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
               <option value="">— Sem vínculo —</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -461,13 +443,13 @@ export function SalesWizardModal({
               </div>
               <div>
                 <label style={labelStyle}>1º vencimento *</label>
-                <input type="date" value={entryFirstDue} onChange={(e) => setEntryFirstDue(e.target.value)} style={inputStyle} />
+                <DateInput  value={entryFirstDue} onChange={(e) => setEntryFirstDue(e.target.value)} style={inputStyle} />
               </div>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {milestones.map((m, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) minmax(0,1.1fr) auto", gap: 8, alignItems: "end" }}>
                   <div>
                     {i === 0 && <label style={labelStyle}>Marco</label>}
                     <input type="text" value={m.label} placeholder={`Marco ${i + 1}`} onChange={(e) => setMilestones(milestones.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} style={inputStyle} />
@@ -478,7 +460,7 @@ export function SalesWizardModal({
                   </div>
                   <div>
                     {i === 0 && <label style={labelStyle}>Vencimento</label>}
-                    <input type="date" value={m.dueDate} onChange={(e) => setMilestones(milestones.map((x, j) => (j === i ? { ...x, dueDate: e.target.value } : x)))} style={inputStyle} />
+                    <DateInput  value={m.dueDate} onChange={(e) => setMilestones(milestones.map((x, j) => (j === i ? { ...x, dueDate: e.target.value } : x)))} style={inputStyle} />
                   </div>
                   <button
                     type="button"
@@ -512,13 +494,13 @@ export function SalesWizardModal({
         >
           <div>
             <label style={labelStyle}>Quando a mensalidade começa?</label>
-            <select value={startMode} onChange={(e) => setStartMode(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            <Select value={startMode} onChange={(e) => setStartMode(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
               {START_MODE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value} disabled={o.needsEntry && !sellProject}>
                   {o.label}{o.needsEntry && !sellProject ? " (requer entrada)" : ""}
                 </option>
               ))}
-            </select>
+            </Select>
             {startOpt && <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>{startOpt.help}</div>}
           </div>
 
@@ -532,12 +514,12 @@ export function SalesWizardModal({
             {startMode === "fixed_date" && (
               <div>
                 <label style={labelStyle}>1º vencimento *</label>
-                <input type="date" value={fixedDate} onChange={(e) => setFixedDate(e.target.value)} style={inputStyle} />
+                <DateInput  value={fixedDate} onChange={(e) => setFixedDate(e.target.value)} style={inputStyle} />
               </div>
             )}
             <div>
               <label style={labelStyle}>Término (opcional)</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+              <DateInput  value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
             </div>
           </div>
 
@@ -562,7 +544,7 @@ export function SalesWizardModal({
                   return (
                     <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 130px", gap: 8, alignItems: "center", padding: "7px 10px", borderRadius: 8, background: checked ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.03)", border: `1px solid ${checked ? "rgba(139,92,246,0.3)" : "rgba(255,255,255,0.06)"}` }}>
                       <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#eee" }}>
-                        <input type="checkbox" checked={checked} onChange={() => toggleModule(m)} style={{ accentColor: "#8B5CF6" }} />
+                        <Checkbox  checked={checked} onChange={() => toggleModule(m)} style={{ accentColor: "#8B5CF6" }} />
                         <span>{m.name}</span>
                         <span style={{ fontSize: 11, color: "#666" }}>tabela {brl(m.defaultPrice)}</span>
                       </label>
@@ -658,21 +640,7 @@ export function SalesWizardModal({
           <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Condições negociadas, descontos..." style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button type="button" onClick={onClose} style={{ padding: "9px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving || !payload || !preview}
-            style={{ padding: "9px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: saving || !payload || !preview ? "not-allowed" : "pointer", opacity: saving || !payload || !preview ? 0.55 : 1 }}
-          >
-            {saving ? "Gerando cobranças..." : "Confirmar venda e gerar cobranças"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -697,7 +665,7 @@ function ModuleRow({ module, onSaved }: { module: SaasModule; onSaved: () => voi
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 120px auto auto", gap: 8, alignItems: "center", opacity: module.isActive ? 1 : 0.55 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 110px auto auto", gap: 8, alignItems: "center", opacity: module.isActive ? 1 : 0.55 }}>
       <input type="text" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
       <input type="text" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} style={inputStyle} />
       <button
@@ -757,20 +725,7 @@ export function ModulesCatalogModal({ onClose, onChanged }: { onClose: () => voi
   };
 
   return (
-    <div style={overlayStyle}>
-      <div style={{ ...cardStyle, maxWidth: 560 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa", display: "flex", alignItems: "center", gap: 8 }}>
-              <Layers size={16} /> Módulos do SaaS
-            </h3>
-            <p style={{ margin: "3px 0 0", fontSize: 12, color: "#888" }}>Preço de tabela. O valor de cada cliente é definido na venda.</p>
-          </div>
-          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}>
-            <X size={18} />
-          </button>
-        </div>
-
+    <Drawer title="Módulos do SaaS" subtitle="Preço de tabela. O valor de cada cliente é definido na venda." icon={<Layers size={18} />} onClose={onClose} width={560}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 120px auto", gap: 8, alignItems: "end" }}>
           <div>
             <label style={labelStyle}>Novo módulo</label>
@@ -794,8 +749,7 @@ export function ModulesCatalogModal({ onClose, onChanged }: { onClose: () => voi
             modules.map((m) => <ModuleRow key={m.id} module={m} onSaved={() => { load(); onChanged(); }} />)
           )}
         </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -856,7 +810,7 @@ function SubscriptionManager({ item, catalog, onChanged }: { item: SaleItemView;
         <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
           <div>
             <label style={labelStyle}>1º vencimento da mensalidade</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+            <DateInput  value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
           </div>
           <button type="button" disabled={busy || !startDate} onClick={start} style={{ padding: "9px 14px", borderRadius: 8, background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.35)", color: "#10B981", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
             Projeto entregue — iniciar mensalidade
@@ -878,8 +832,8 @@ function SubscriptionManager({ item, catalog, onChanged }: { item: SaleItemView;
                 return (
                   <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8, alignItems: "center" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#ddd", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        
                         checked={checked}
                         style={{ accentColor: "#8B5CF6" }}
                         onChange={() => {
@@ -906,7 +860,7 @@ function SubscriptionManager({ item, catalog, onChanged }: { item: SaleItemView;
           <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
             <div>
               <label style={labelStyle}>Vale a partir de</label>
-              <input type="date" value={effective} onChange={(e) => setEffective(e.target.value)} style={inputStyle} />
+              <DateInput  value={effective} onChange={(e) => setEffective(e.target.value)} style={inputStyle} />
             </div>
             <div style={{ fontSize: 12, color: "#A78BFA", fontWeight: 700, paddingBottom: 10 }}>Novo total: {brl(total)}/mês</div>
             <button type="button" disabled={busy || total <= 0} onClick={saveModules} style={{ marginLeft: "auto", padding: "9px 14px", borderRadius: 8, background: "rgba(139,92,246,0.2)", border: "1px solid rgba(139,92,246,0.35)", color: "#A78BFA", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: busy || total <= 0 ? 0.55 : 1 }}>
@@ -931,7 +885,7 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
   }, []);
 
   const changeStatus = async (status: "active" | "paused" | "cancelled") => {
-    if (status === "cancelled" && !window.confirm("Cancelar esta venda?\n\nAs cobranças que ainda não venceram serão canceladas. O que já está em aberto ou atrasado continua para cobrança.")) return;
+    if (status === "cancelled" && !(await confirmDialog({ title: "Cancelar esta venda?", message: "As cobranças que ainda não venceram serão canceladas. O que já está em aberto ou atrasado continua para cobrança.", confirmLabel: "Cancelar venda", cancelLabel: "Voltar", danger: true }))) return;
     try {
       setBusy(true);
       const res = await API.put(`/finance/sales/${sale.id}/status`, { status });
@@ -949,18 +903,36 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
   const subItems = sale.items.filter((i) => i.kind === "subscription");
 
   return (
-    <div style={overlayStyle}>
-      <div style={{ ...cardStyle, maxWidth: 620 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fafafa" }}>{sale.title}</h3>
-            <span style={{ fontSize: 11, fontWeight: 700, color: st.color }}>● {st.label}</span>
-            {sale.projectName && <span style={{ fontSize: 11, color: "#888" }}> · {sale.projectName}</span>}
-          </div>
-          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}>
-            <X size={18} />
-          </button>
-        </div>
+    <Drawer
+      title={sale.title}
+      subtitle={
+        <>
+          <span style={{ fontWeight: 700, color: st.color }}>● {st.label}</span>
+          {sale.projectName && <> · {sale.projectName}</>}
+        </>
+      }
+      icon={<Layers size={18} />}
+      onClose={onClose}
+      width={620}
+      footer={
+        sale.status !== "cancelled" ? (
+          <>
+            {sale.status === "active" ? (
+              <button type="button" disabled={busy} onClick={() => changeStatus("paused")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#F59E0B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                <Pause size={12} /> Pausar mensalidade
+              </button>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => changeStatus("active")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.3)", color: "#10B981", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                <Play size={12} /> Reativar
+              </button>
+            )}
+            <button type="button" disabled={busy} onClick={() => changeStatus("cancelled")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#EF4444", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              <Ban size={12} /> Cancelar venda
+            </button>
+          </>
+        ) : undefined
+      }
+    >
 
         {entryItems.map((i) => (
           <div key={i.id} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -976,24 +948,7 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
           <SubscriptionManager key={`${i.id}-${i.modules.length}-${i.status}`} item={i} catalog={catalog} onChanged={onChanged} />
         ))}
 
-        {sale.status !== "cancelled" && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12 }}>
-            {sale.status === "active" ? (
-              <button type="button" disabled={busy} onClick={() => changeStatus("paused")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#F59E0B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                <Pause size={12} /> Pausar mensalidade
-              </button>
-            ) : (
-              <button type="button" disabled={busy} onClick={() => changeStatus("active")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.3)", color: "#10B981", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                <Play size={12} /> Reativar
-              </button>
-            )}
-            <button type="button" disabled={busy} onClick={() => changeStatus("cancelled")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#EF4444", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-              <Ban size={12} /> Cancelar venda
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+    </Drawer>
   );
 }
 

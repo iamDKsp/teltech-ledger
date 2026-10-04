@@ -14,8 +14,12 @@ import {
   financialAuditLogsTable,
   financialSettingsTable,
   whatsappMessagesTable,
+  clientSalesTable,
+  saleItemsTable,
+  saleModulesTable,
+  tasksTable,
 } from "@workspace/db";
-import { eq, and, or, lt, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, lt, desc, sql, inArray, isNotNull } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
 import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
@@ -1809,6 +1813,88 @@ router.get("/export", requireAuth, async (req: Request, res: Response) => {
     res.send("\uFEFF" + csv);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── Reset do Módulo Financeiro ──────────────────────────────────────────────
+router.post("/reset-all", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+
+    const userInfo = await getUserInfo(req, workspaceId);
+    if (!userInfo || !["owner", "ceo", "cto", "admin"].includes(userInfo.role)) {
+      res.status(403).json({ error: "Apenas administradores ou sócios (CEO/CTO/Owner) podem resetar o financeiro." });
+      return;
+    }
+
+    const { confirm } = req.body || {};
+    if (confirm !== "RESET_FINANCE") {
+      res.status(400).json({ error: "Confirmação inválida. Envie { confirm: 'RESET_FINANCE' } para autorizar o reset." });
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      // 1. Desvincular clientes das tarefas do Kanban
+      await tx
+        .update(tasksTable)
+        .set({ clientId: null })
+        .where(isNotNull(tasksTable.clientId));
+
+      // 2. Limpar mensagens de cobrança e clientes no WhatsApp
+      await tx
+        .delete(whatsappMessagesTable)
+        .where(eq(whatsappMessagesTable.workspaceId, workspaceId));
+
+      // 3. Limpar logs de auditoria
+      await tx
+        .delete(financialAuditLogsTable)
+        .where(eq(financialAuditLogsTable.workspaceId, workspaceId));
+
+      // 4. Limpar transações
+      await tx
+        .delete(financialTransactionsTable)
+        .where(eq(financialTransactionsTable.workspaceId, workspaceId));
+
+      // 5. Limpar módulos, itens de vendas e vendas comerciais
+      await tx
+        .delete(saleModulesTable)
+        .where(eq(saleModulesTable.workspaceId, workspaceId));
+
+      await tx
+        .delete(saleItemsTable)
+        .where(eq(saleItemsTable.workspaceId, workspaceId));
+
+      await tx
+        .delete(clientSalesTable)
+        .where(eq(clientSalesTable.workspaceId, workspaceId));
+
+      // 6. Limpar contratos antigos
+      await tx
+        .delete(clientContractsTable)
+        .where(eq(clientContractsTable.workspaceId, workspaceId));
+
+      // 7. Limpar clientes
+      await tx
+        .delete(clientsTable)
+        .where(eq(clientsTable.workspaceId, workspaceId));
+
+      // 8. Limpar orçamentos
+      await tx
+        .delete(financialBudgetsTable)
+        .where(eq(financialBudgetsTable.workspaceId, workspaceId));
+
+      // 9. Zerar saldos das contas bancárias
+      await tx
+        .update(financialAccountsTable)
+        .set({ currentBalance: 0 })
+        .where(eq(financialAccountsTable.workspaceId, workspaceId));
+    });
+
+    res.json({ success: true, message: "Todos os dados do módulo financeiro foram resetados com sucesso." });
+  } catch (err) {
+    console.error("Erro ao resetar financeiro:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -50,6 +50,7 @@ import {
   Coins,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Drawer, Select, Checkbox, DateInput, Tip, FinanceUiRoot, drawerBtn, confirmDialog } from "../components/finance-ui";
 import {
   SalesWizardModal,
   ModulesCatalogModal,
@@ -789,7 +790,7 @@ export function FinanceiroPage() {
   };
 
   const handleDeleteTx = async (id: string) => {
-    if (!confirm("Tem certeza que deseja remover este lançamento financeiro?")) return;
+    if (!(await confirmDialog({ title: "Remover lançamento", message: "Tem certeza que deseja remover este lançamento financeiro?", confirmLabel: "Remover", danger: true }))) return;
     try {
       await API.delete(`/finance/transactions/${id}`);
       toast.success("Lançamento removido.");
@@ -806,7 +807,7 @@ export function FinanceiroPage() {
       ? `Deseja realmente excluir definitivamente o cadastro do cliente "${client.name}"?\n\n(Se não houver faturas vinculadas, ele será totalmente removido do sistema).`
       : `Deseja encerrar o contrato e desativar o cliente "${client.name}"?\n\n- Cobranças automáticas pelo WhatsApp serão suspensas imediatamente.\n- Se houver faturas e histórico contábil, eles serão mantidos em segurança.\n- Se for um cadastro sem faturas, ele será excluído.`;
 
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await confirmDialog({ title: isAlreadyInactive ? "Excluir cliente" : "Encerrar contrato", message: confirmMsg, confirmLabel: isAlreadyInactive ? "Excluir" : "Encerrar contrato", danger: true }))) return;
 
     try {
       const res = await API.delete(`/finance/clients/${client.id}`);
@@ -849,7 +850,7 @@ export function FinanceiroPage() {
       return;
     }
     if (selectedTx.pauseBilling) {
-      if (!confirm("Esta parcela está marcada como 'Cobrança Pausada'. Deseja realmente enviar a cobrança via WhatsApp?")) {
+      if (!(await confirmDialog({ title: "Cobrança pausada", message: "Esta parcela está marcada como 'Cobrança Pausada'. Deseja realmente enviar a cobrança via WhatsApp?", confirmLabel: "Enviar mesmo assim" }))) {
         return;
       }
     }
@@ -1307,99 +1308,63 @@ export function FinanceiroPage() {
       )}
 
       {rejectingTxId && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.8)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
+        <Drawer
+          title="Reprovação de Despesa (Alçada)"
+          icon={<AlertTriangle size={18} style={{ color: "#EF4444" }} />}
+          width={480}
+          onClose={() => {
+            setRejectingTxId(null);
+            setRejectionReason("");
           }}
-        >
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 440,
-              background: "#18181c",
-              border: "1px solid rgba(239,68,68,0.4)",
-              borderRadius: 14,
-              padding: 24,
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ padding: 8, borderRadius: 8, background: "rgba(239,68,68,0.15)", color: "#EF4444" }}>
-                <AlertTriangle style={{ width: 20, height: 20 }} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
-                Reprovação de Despesa (Alçada)
-              </h3>
-            </div>
-            <p style={{ margin: 0, fontSize: 13, color: "#a1a1aa", lineHeight: 1.5 }}>
-              Informe a justificativa corporativa para a reprovação desta solicitação. A razão será gravada na trilha de auditoria.
-            </p>
-            <textarea
-              rows={3}
-              placeholder="Ex: Cotação acima do teto estipulado / Aguardar fechamento do trimestre..."
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              style={{
-                width: "100%",
-                background: "#111113",
-                border: "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 8,
-                padding: "10px",
-                color: "#fff",
-                fontSize: 13,
-                resize: "none",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          footer={
+            <>
               <button
+                type="button"
                 onClick={() => {
                   setRejectingTxId(null);
                   setRejectionReason("");
                 }}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  color: "#ccc",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
+                style={drawerBtn.ghost}
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={handleConfirmReject}
                 disabled={!rejectionReason.trim()}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 8,
-                  background: "#EF4444",
-                  border: "none",
-                  color: "#fff",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: rejectionReason.trim() ? "pointer" : "not-allowed",
-                  opacity: rejectionReason.trim() ? 1 : 0.5,
-                }}
+                style={{ ...drawerBtn.primary(!rejectionReason.trim()), background: "#EF4444" }}
               >
                 Confirmar Reprovação
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p style={{ margin: 0, fontSize: 13, color: "#a1a1aa", lineHeight: 1.5 }}>
+            Informe a justificativa corporativa para a reprovação desta solicitação. A razão será gravada na trilha de auditoria.
+          </p>
+          <textarea
+            rows={5}
+            placeholder="Ex: Cotação acima do teto estipulado / Aguardar fechamento do trimestre..."
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+            style={{
+              width: "100%",
+              background: "#111113",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 8,
+              padding: "10px",
+              color: "#fff",
+              fontSize: 13,
+              resize: "vertical",
+              outline: "none",
+              boxSizing: "border-box",
+              fontFamily: "inherit",
+            }}
+          />
+        </Drawer>
       )}
+
+      <FinanceUiRoot>{null}</FinanceUiRoot>
     </div>
   );
 }
@@ -2271,10 +2236,11 @@ function TransactionsLedgerView({
           />
         </div>
 
-        <select
+        <Select
           value={selectedAccountId}
           onChange={(e) => setSelectedAccountId(e.target.value)}
           style={{
+            width: 230,
             background: "#18181c",
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
@@ -2288,12 +2254,13 @@ function TransactionsLedgerView({
           {accounts.map(a => (
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
-        </select>
+        </Select>
 
-        <select
+        <Select
           value={selectedProjectId}
           onChange={(e) => setSelectedProjectId(e.target.value)}
           style={{
+            width: 230,
             background: "#18181c",
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
@@ -2307,7 +2274,7 @@ function TransactionsLedgerView({
           {projects.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {/* ─── Ledger Accounting Table / Mobile Cards ───────────────────────── */}
@@ -2925,10 +2892,13 @@ function ClientsView({
                   </div>
                 ) : (
                   <div style={{ display: "flex", gap: 8 }}>
+                    <Tip
+                      style={{ flex: 1 }}
+                      text={!client.whatsappOptIn ? "Registre a autorização na ficha do cliente" : !client.phone ? "Cadastre o WhatsApp do cliente" : client.status === "inactive" ? "Cliente inativo" : !pendingTxs.length ? "Nenhuma parcela em aberto" : ""}
+                    >
                     <button
                       onClick={() => onSendWhatsApp(client, pendingTxs[0])}
                       disabled={!canSendBilling || sendingBillingId === pendingTxs[0]?.id}
-                      title={!client.whatsappOptIn ? "Registre a autorização na ficha do cliente" : !client.phone ? "Cadastre o WhatsApp do cliente" : client.status === "inactive" ? "Cliente inativo" : !pendingTxs.length ? "Nenhuma parcela em aberto" : undefined}
                       style={{
                         flex: 1,
                         padding: "8px 10px",
@@ -2948,6 +2918,7 @@ function ClientsView({
                     >
                       <Send style={{ width: 13, height: 13 }} /> {sendingBillingId === pendingTxs[0]?.id ? "Enviando..." : "Cobrança WhatsApp"}
                     </button>
+                    </Tip>
                     <button
                       onClick={() => onNewTxForClient(client.id)}
                       style={{
@@ -3750,6 +3721,10 @@ function TransactionModal({
       toast.error("Por favor, preencha a descrição e um valor válido.");
       return;
     }
+    if (!dueDate) {
+      toast.error("Informe a data de vencimento.");
+      return;
+    }
 
     try {
       setSaving(true);
@@ -3796,18 +3771,24 @@ function TransactionModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: isMobile ? 12 : 16 }}>
-      <div style={{ width: "100%", maxWidth: 560, maxHeight: "90dvh", overflowY: "auto", background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: isMobile ? "16px" : "24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
-            {tx ? "Editar Lançamento" : initialClientId ? "Faturar Cliente (A Receber)" : "Novo Lançamento Financeiro"}
-          </h3>
-          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer" }}>
-            <X style={{ width: 20, height: 20 }} />
+    <Drawer
+      title={tx ? "Editar Lançamento" : initialClientId ? "Faturar Cliente (A Receber)" : "Novo Lançamento Financeiro"}
+      icon={<Receipt size={18} />}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      width={560}
+      footer={
+        <>
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
           </button>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <button type="submit" disabled={saving} style={drawerBtn.primary(saving)}>
+            {saving ? "Salvando..." : tx ? "Salvar Alterações" : "Concluir Lançamento"}
+          </button>
+        </>
+      }
+    >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {/* Type Selector */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <button
@@ -3870,9 +3851,7 @@ function TransactionModal({
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Vencimento *</label>
-              <input
-                type="date"
-                required
+              <DateInput
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "9px 10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
@@ -3883,7 +3862,7 @@ function TransactionModal({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Conta Bancária</label>
-              <select
+              <Select
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -3891,25 +3870,25 @@ function TransactionModal({
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Status Inicial</label>
-              <select
+              <Select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as TxStatus)}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
               >
                 <option value="pending">Pendente</option>
                 <option value="paid">Liquidado / Pago</option>
-              </select>
+              </Select>
             </div>
           </div>
 
           {type === "outflow" && (
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Tipo de Custo (DRE)</label>
-              <select
+              <Select
                 value={costType}
                 onChange={(e) => setCostType(e.target.value as CostType)}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -3919,14 +3898,14 @@ function TransactionModal({
                 <option value="partner_withdrawal">Pró-labore / Retirada de Sócio</option>
                 <option value="tax">Impostos / Simples Nacional</option>
                 <option value="investment">Investimento / Expansão</option>
-              </select>
+              </Select>
             </div>
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Projeto / Produto</label>
-              <select
+              <Select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -3935,12 +3914,12 @@ function TransactionModal({
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Cliente ou Sócio</label>
               {type === "inflow" ? (
-                <select
+                <Select
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -3949,9 +3928,9 @@ function TransactionModal({
                   {clients.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                </select>
+                </Select>
               ) : (
-                <select
+                <Select
                   value={partnerId}
                   onChange={(e) => setPartnerId(e.target.value)}
                   style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -3960,7 +3939,7 @@ function TransactionModal({
                   {partners.map(p => (
                     <option key={p.id} value={p.id}>{p.name} ({p.role.toUpperCase()})</option>
                   ))}
-                </select>
+                </Select>
               )}
             </div>
           </div>
@@ -3969,8 +3948,8 @@ function TransactionModal({
             <div style={{ display: "flex", flexDirection: "column", gap: 10, background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: "#ccc" }}>Gerar Parcelamento em Lote?</label>
-                <input
-                  type="checkbox"
+                <Checkbox
+                  
                   checked={isInstallment}
                   onChange={(e) => setIsInstallment(e.target.checked)}
                 />
@@ -3979,15 +3958,15 @@ function TransactionModal({
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 12, color: "#888" }}>Número de parcelas:</span>
-                    <select
-                      value={installmentsCount}
+                    <Select
+                      value={String(installmentsCount)}
                       onChange={(e) => setInstallmentsCount(parseInt(e.target.value))}
-                      style={{ background: "#111113", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px", color: "#fff" }}
+                      style={{ width: 160, background: "#111113", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "6px 8px", color: "#fff", fontSize: 13 }}
                     >
                       {[2, 3, 4, 5, 6, 10, 12, 24, 36, 48].map(n => (
                         <option key={n} value={n}>{n}x mensais</option>
                       ))}
-                    </select>
+                    </Select>
                   </div>
 
                   {/* Seletor de Modo de Parcelamento */}
@@ -4075,8 +4054,8 @@ function TransactionModal({
           {type === "inflow" && (
             <div style={{ background: "hsl(240 3% 7% / 0.55)", border: "1px solid hsl(240 4% 20%)", borderRadius: 8, padding: "12px", display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
+                <Checkbox
+                  
                   checked={pauseBilling}
                   onChange={(e) => setPauseBilling(e.target.checked)}
                   style={{ accentColor: "hsl(265 85% 62%)" }}
@@ -4089,25 +4068,8 @@ function TransactionModal({
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ padding: "9px 16px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 13, cursor: "pointer" }}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              style={{ padding: "9px 20px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-            >
-              {saving ? "Salvando..." : tx ? "Salvar Alterações" : "Concluir Lançamento"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+      </Drawer>
   );
 }
 
@@ -4166,7 +4128,7 @@ function AccountModal({
   const handleDeactivate = async () => {
     if (!account) return;
     const confirmMsg = `Deseja realmente desativar a conta "${account.name}"?\n\n- Se não houver movimentações, ela será removida do sistema.\n- Se houver movimentações, ela será arquivada preservando todo o histórico contábil e auditoria.`;
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await confirmDialog({ title: "Desativar conta", message: confirmMsg, confirmLabel: "Desativar", danger: true }))) return;
 
     try {
       setDeactivating(true);
@@ -4182,22 +4144,43 @@ function AccountModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
-            {account ? "Gerenciar Conta Bancária" : "Nova Conta Bancária"}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}
-          >
-            <X size={18} />
+    <Drawer
+      title={account ? "Gerenciar Conta Bancária" : "Nova Conta Bancária"}
+      icon={<Wallet size={18} />}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      width={460}
+      footer={
+        <>
+          {account && (
+            <button
+              type="button"
+              onClick={handleDeactivate}
+              disabled={deactivating}
+              style={{
+                marginRight: "auto",
+                padding: "8px 12px",
+                borderRadius: 8,
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.25)",
+                color: "#EF4444",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {deactivating ? "Processando..." : "Desativar Conta"}
+            </button>
+          )}
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
           </button>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <button type="submit" disabled={saving} style={drawerBtn.primary(saving)}>
+            {saving ? "Salvando..." : account ? "Salvar Alterações" : "Salvar Conta"}
+          </button>
+        </>
+      }
+    >
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Nome da Conta *</label>
             <input
@@ -4213,7 +4196,7 @@ function AccountModal({
           <div style={{ display: "grid", gridTemplateColumns: account ? "1fr" : "1fr 1fr", gap: 12 }}>
             <div>
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Tipo</label>
-              <select
+              <Select
                 value={type}
                 onChange={(e) => setType(e.target.value as "checking" | "credit_card" | "investment" | "cash")}
                 style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none" }}
@@ -4222,7 +4205,7 @@ function AccountModal({
                 <option value="cash">Caixa Reserva</option>
                 <option value="investment">Investimentos</option>
                 <option value="credit_card">Cartão Corporativo</option>
-              </select>
+              </Select>
             </div>
             {!account && (
               <div>
@@ -4249,46 +4232,7 @@ function AccountModal({
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: account ? "space-between" : "flex-end", alignItems: "center", gap: 10, marginTop: 8 }}>
-            {account && (
-              <button
-                type="button"
-                onClick={handleDeactivate}
-                disabled={deactivating}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  background: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.25)",
-                  color: "#EF4444",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                {deactivating ? "Processando..." : "Desativar Conta"}
-              </button>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={onClose}
-                style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-              >
-                {saving ? "Salvando..." : account ? "Salvar Alterações" : "Salvar Conta"}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -4336,10 +4280,23 @@ function BudgetModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#18181c", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>Novo Teto Orçamentário</h3>
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <Drawer
+      title="Novo Teto Orçamentário"
+      icon={<Target size={18} />}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      width={460}
+      footer={
+        <>
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
+          </button>
+          <button type="submit" disabled={saving} style={drawerBtn.primary(saving)}>
+            {saving ? "Salvando..." : "Salvar Teto"}
+          </button>
+        </>
+      }
+    >
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Área / Departamento *</label>
             <input
@@ -4363,18 +4320,7 @@ function BudgetModal({
               style={{ width: "100%", background: "#111113", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
             />
           </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-            <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12 }}>
-              Cancelar
-            </button>
-            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700 }}>
-              {saving ? "Salvando..." : "Salvar Teto"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -4568,37 +4514,62 @@ function ClientModal({
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, padding: 16 }}>
-      <div style={{ width: "100%", maxWidth: 500, maxHeight: "92vh", overflowY: "auto", background: "linear-gradient(135deg, hsl(240 3% 18% / 0.95), hsl(240 4% 12% / 0.95))", border: "1px solid hsl(240 4% 20%)", borderRadius: 16, padding: "24px", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 10px 40px -10px hsl(0 0% 0% / 0.55)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fafafa" }}>
-              {client ? "Editar Cliente" : "Novo Cliente Corporativo"}
-            </h3>
-            {client && (
-              <span style={{
-                fontSize: 11,
-                padding: "3px 8px",
-                borderRadius: 6,
-                fontWeight: 700,
-                background: client.status === "inactive" ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
-                color: client.status === "inactive" ? "#EF4444" : "#10B981",
-                border: client.status === "inactive" ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(16,185,129,0.3)",
-              }}>
-                {client.status === "inactive" ? "Contrato Cancelado / Inativo" : "Contrato Ativo"}
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}
-          >
-            <X size={18} />
+    <Drawer
+      title={
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {client ? "Editar Cliente" : "Novo Cliente Corporativo"}
+          {client && (
+            <span style={{
+              fontSize: 11,
+              padding: "3px 8px",
+              borderRadius: 6,
+              fontWeight: 700,
+              background: client.status === "inactive" ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
+              color: client.status === "inactive" ? "#EF4444" : "#10B981",
+              border: client.status === "inactive" ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(16,185,129,0.3)",
+            }}>
+              {client.status === "inactive" ? "Contrato Cancelado / Inativo" : "Contrato Ativo"}
+            </span>
+          )}
+        </span>
+      }
+      icon={<Building2 size={18} />}
+      onClose={onClose}
+      width={560}
+      footer={
+        <>
+          {client && onDelete && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginRight: "auto" }}>
+              {client.status === "inactive" && onReactivate && (
+                <button
+                  type="button"
+                  disabled={saving || processingAction}
+                  onClick={handleReactivate}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.35)", color: "#10B981", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                >
+                  <RefreshCw size={13} /> Reativar Contrato
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={saving || processingAction}
+                onClick={handleCancelOrDelete}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#EF4444", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              >
+                <Trash2 size={13} /> {client.status === "inactive" ? "Excluir Definitivo" : "Cancelar Contrato / Excluir"}
+              </button>
+            </div>
+          )}
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
           </button>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <button type="submit" form="client-form" disabled={saving || processingAction} style={drawerBtn.primary(saving || processingAction)}>
+            {saving ? "Salvando..." : client ? "Salvar Alterações" : "Salvar Cliente"}
+          </button>
+        </>
+      }
+    >
+        <form id="client-form" onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {/* Nome */}
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Razão Social / Nome *</label>
@@ -4610,7 +4581,7 @@ function ClientModal({
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><FolderOpen size={12} /> Produto / Projeto Contratado</span>
             </label>
-            <select
+            <Select
               value={projectId}
               onChange={e => setProjectId(e.target.value)}
               style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}
@@ -4619,7 +4590,7 @@ function ClientModal({
               {projects.map((p: any) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {/* CNPJ + Telefone */}
@@ -4642,96 +4613,13 @@ function ClientModal({
 
           {/* WhatsApp opt-in */}
           <label style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 10, border: "1px solid hsl(240 4% 20%)", background: "hsl(240 3% 7% / 0.55)", cursor: "pointer" }}>
-            <input type="checkbox" checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} style={{ marginTop: 3, accentColor: "hsl(265 85% 62%)" }} />
+            <Checkbox  checked={whatsappOptIn} onChange={(e) => setWhatsappOptIn(e.target.checked)} style={{ marginTop: 3, accentColor: "hsl(265 85% 62%)" }} />
             <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#fafafa" }}>Cliente autorizou cobranças pelo WhatsApp</span>
               <span style={{ fontSize: 11, lineHeight: 1.5, color: "hsl(240 5% 65%)" }}>Marque apenas após confirmar a autorização com o cliente.</span>
             </span>
           </label>
 
-          {/* Botões do form principal */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-            <div>
-              {client && onDelete && (
-                client.status === "inactive" ? (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {onReactivate && (
-                      <button
-                        type="button"
-                        disabled={saving || processingAction}
-                        onClick={handleReactivate}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "8px 12px",
-                          borderRadius: 8,
-                          background: "rgba(16,185,129,0.15)",
-                          border: "1px solid rgba(16,185,129,0.35)",
-                          color: "#10B981",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <RefreshCw size={13} /> Reativar Contrato
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={saving || processingAction}
-                      onClick={handleCancelOrDelete}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        background: "rgba(239,68,68,0.12)",
-                        border: "1px solid rgba(239,68,68,0.3)",
-                        color: "#EF4444",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <Trash2 size={13} /> Excluir Definitivo
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={saving || processingAction}
-                    onClick={handleCancelOrDelete}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: "rgba(239,68,68,0.12)",
-                      border: "1px solid rgba(239,68,68,0.3)",
-                      color: "#EF4444",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Trash2 size={13} /> Cancelar Contrato / Excluir
-                  </button>
-                )
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button type="button" onClick={onClose} style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}>
-                Cancelar
-              </button>
-              <button type="submit" disabled={saving || processingAction} style={{ padding: "8px 18px", borderRadius: 8, background: "#8B5CF6", border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                {saving ? "Salvando..." : client ? "Salvar Alterações" : "Salvar Cliente"}
-              </button>
-            </div>
-          </div>
         </form>
 
         {/* ── Seção de Contrato (só quando editando) ── */}
@@ -4826,13 +4714,13 @@ function ClientModal({
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <div>
                         <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Início do Contrato</label>
-                        <input type="date" value={contractStartDate} onChange={e => setContractStartDate(e.target.value)}
+                        <DateInput  value={contractStartDate} onChange={e => setContractStartDate(e.target.value)}
                           style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
                         />
                       </div>
                       <div>
                         <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 4 }}>Fim do Contrato</label>
-                        <input type="date" value={contractEndDate} onChange={e => setContractEndDate(e.target.value)}
+                        <DateInput  value={contractEndDate} onChange={e => setContractEndDate(e.target.value)}
                           style={{ width: "100%", background: "#0e0e11", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "9px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}
                         />
                       </div>
@@ -4911,7 +4799,6 @@ function ClientModal({
             )}
           </div>
         )}
-      </div>
-    </div>
+    </Drawer>
   );
 }
