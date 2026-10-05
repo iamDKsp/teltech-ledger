@@ -211,6 +211,46 @@ interface ProjectProfitability {
   marginPercent: number;
 }
 
+export interface ProductMacroMonth {
+  key: string;       // "YYYY-MM"
+  label: string;     // "mai/26"
+  shortLabel: string;// "Mai"
+  year: number;
+  month: number;
+  isCurrent: boolean;
+  isPast: boolean;
+  isFuture: boolean;
+}
+
+export interface ProductMonthlyAmount {
+  paid: number;
+  pending: number;
+  total: number;
+  recurring: number;
+  oneTime: number;
+  txCount: number;
+}
+
+export interface ProductMacroRow {
+  productId: string;
+  productName: string;
+  productColor: string;
+  productIcon: string | null;
+  status?: string;
+  activeClientsCount: number;
+  months: Record<string, ProductMonthlyAmount>;
+  totalPeriod: ProductMonthlyAmount;
+  averageMonthly: number;
+  sharePercent: number;
+}
+
+export interface ProductMacroReport {
+  months: ProductMacroMonth[];
+  products: ProductMacroRow[];
+  totalsByMonth: Record<string, ProductMonthlyAmount>;
+  grandTotal: ProductMonthlyAmount;
+}
+
 interface DashboardData {
   mrr: number;
   oneTimeContracted?: number;
@@ -264,6 +304,7 @@ interface DashboardData {
   budgetProgress: BudgetData[];
   chartData: Array<{ month: string; inflow: number; outflow: number; balance: number }>;
   upcoming: Transaction[];
+  productMacroReport?: ProductMacroReport;
   selectedMonth: number;
   selectedYear: number;
 }
@@ -488,6 +529,1116 @@ function EmptyState({
         >
           <Sparkles style={{ width: 12, height: 12, color: "#F59E0B" }} />
           <span>Dica: {tip}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Design System: Cockpit Macro Report by Product & Month ──────────────────
+
+interface CockpitProductMacroReportProps {
+  report?: ProductMacroReport;
+  selectedMonth: number;
+  selectedYear: number;
+  onGoToClients?: () => void;
+  onGoToTransactions?: () => void;
+}
+
+function CockpitProductMacroReport({
+  report,
+  selectedMonth,
+  selectedYear,
+  onGoToClients,
+  onGoToTransactions,
+}: CockpitProductMacroReportProps) {
+  const isMobile = useIsMobile();
+  const [periodFilter, setPeriodFilter] = useState<"6m" | "12m" | "past" | "future">("6m");
+  const [metricMode, setMetricMode] = useState<"total" | "paid" | "pending">("total");
+  const [natureFilter, setNatureFilter] = useState<"all" | "recurring" | "one_time">("all");
+  const [viewMode, setViewMode] = useState<"matrix" | "cards">("matrix");
+  const [selectedCell, setSelectedCell] = useState<{
+    product: ProductMacroRow;
+    month: ProductMacroMonth;
+  } | null>(null);
+
+  if (!report || !report.months || report.months.length === 0) {
+    return null;
+  }
+
+  // Determine visible months
+  const allMonths = report.months;
+  const currentOrSelectedIdx = allMonths.findIndex(
+    (m) => m.year === selectedYear && m.month === selectedMonth
+  );
+  const anchorIdx = currentOrSelectedIdx >= 0 ? currentOrSelectedIdx : allMonths.findIndex((m) => m.isCurrent);
+  const safeAnchor = anchorIdx >= 0 ? anchorIdx : 0;
+
+  let visibleMonths: ProductMacroMonth[] = allMonths;
+  if (periodFilter === "6m") {
+    const start = Math.max(0, Math.min(safeAnchor - 2, allMonths.length - 6));
+    visibleMonths = allMonths.slice(start, start + 6);
+  } else if (periodFilter === "past") {
+    visibleMonths = allMonths.filter((m) => m.isPast || m.isCurrent);
+  } else if (periodFilter === "future") {
+    visibleMonths = allMonths.filter((m) => m.isFuture || m.isCurrent);
+  }
+
+  // Helper to extract value based on metricMode & natureFilter
+  const getCellValue = (amounts?: ProductMonthlyAmount | null): number => {
+    if (!amounts) return 0;
+    if (natureFilter === "recurring") return amounts.recurring || 0;
+    if (natureFilter === "one_time") return amounts.oneTime || 0;
+    if (metricMode === "paid") return amounts.paid || 0;
+    if (metricMode === "pending") return amounts.pending || 0;
+    return amounts.total || 0;
+  };
+
+  const products = report.products || [];
+
+  // Compute row totals for the visible period
+  const productRowsCalculated = products.map((p) => {
+    const visibleTotal = visibleMonths.reduce((sum, m) => sum + getCellValue(p.months[m.key]), 0);
+    const visiblePaid = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.paid || 0), 0);
+    const visiblePending = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.pending || 0), 0);
+    const visibleRecurring = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.recurring || 0), 0);
+    const visibleOneTime = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.oneTime || 0), 0);
+    const averageMonthly = visibleMonths.length > 0 ? Math.round(visibleTotal / visibleMonths.length) : 0;
+
+    return {
+      ...p,
+      visibleTotal,
+      visiblePaid,
+      visiblePending,
+      visibleRecurring,
+      visibleOneTime,
+      averageMonthly,
+    };
+  });
+
+  // Calculate totals per visible month
+  const monthTotalsCalculated: Record<string, number> = {};
+  for (const m of visibleMonths) {
+    monthTotalsCalculated[m.key] = products.reduce((sum, p) => sum + getCellValue(p.months[m.key]), 0);
+  }
+
+  const grandVisibleTotal = Object.values(monthTotalsCalculated).reduce((sum, v) => sum + v, 0);
+  const totalRecurringVisible = productRowsCalculated.reduce((sum, p) => sum + p.visibleRecurring, 0);
+  const totalOneTimeVisible = productRowsCalculated.reduce((sum, p) => sum + p.visibleOneTime, 0);
+
+  // Key Analytical Highlights
+  const topProduct = [...productRowsCalculated].sort((a, b) => b.visibleTotal - a.visibleTotal)[0];
+  const peakMonth = [...visibleMonths].sort((a, b) => (monthTotalsCalculated[b.key] || 0) - (monthTotalsCalculated[a.key] || 0))[0];
+  const peakMonthTotal = peakMonth ? monthTotalsCalculated[peakMonth.key] || 0 : 0;
+
+  return (
+    <div
+      style={{
+        background: "linear-gradient(135deg, rgba(26,26,30,0.98), rgba(20,20,24,0.98))",
+        border: "1px solid rgba(139,92,246,0.25)",
+        borderRadius: 14,
+        padding: isMobile ? "16px 14px" : "24px 26px",
+        boxShadow: "0 10px 40px -10px rgba(0,0,0,0.55)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {/* Decorative Glow Orb */}
+      <div
+        style={{
+          position: "absolute",
+          top: -40,
+          right: -40,
+          width: 180,
+          height: 180,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 70%)",
+          pointerEvents: "none",
+        }}
+      />
+
+      {/* ─── Header ──────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: isMobile ? "flex-start" : "center",
+          flexDirection: isMobile ? "column" : "row",
+          gap: 14,
+          marginBottom: 18,
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          paddingBottom: 16,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          <div
+            style={{
+              padding: 9,
+              borderRadius: 10,
+              background: "rgba(139,92,246,0.15)",
+              border: "1px solid rgba(139,92,246,0.3)",
+              color: "#A78BFA",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginTop: 2,
+            }}
+          >
+            <Layers style={{ width: 20, height: 20 }} />
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fafafa", letterSpacing: "-0.01em" }}>
+                Relatório Macro: Faturamento por Produto & Mês
+              </h3>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 12,
+                  background: "rgba(139,92,246,0.15)",
+                  color: "#C4B5FD",
+                  border: "1px solid rgba(139,92,246,0.3)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Cockpit Executivo
+              </span>
+            </div>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
+              Matriz consolidada de receitas por produto/sistema e competência mensal (realizado x a faturar)
+            </p>
+          </div>
+        </div>
+
+        {/* KPI Badges */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 8,
+              padding: "6px 12px",
+            }}
+          >
+            <span style={{ fontSize: 10, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 600 }}>Total no Período</span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: "#10B981" }}>{formatBRL(grandVisibleTotal)}</span>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              background: "rgba(139,92,246,0.08)",
+              border: "1px solid rgba(139,92,246,0.2)",
+              borderRadius: 8,
+              padding: "6px 12px",
+            }}
+          >
+            <span style={{ fontSize: 10, color: "#A78BFA", textTransform: "uppercase", fontWeight: 600 }}>MRR Contratado</span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: "#C4B5FD" }}>{formatBRL(totalRecurringVisible)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Controls & Filters Strip ────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 18,
+          background: "rgba(0,0,0,0.2)",
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,0.05)",
+        }}
+      >
+        {/* Left Filters: Período & Status & Natureza */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Período Selector */}
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+            {[
+              { id: "6m", label: "Semestre (6M)" },
+              { id: "12m", label: "Ano (12M)" },
+              { id: "past", label: "Histórico" },
+              { id: "future", label: "Projeção" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setPeriodFilter(tab.id as any)}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  fontSize: 11,
+                  fontWeight: periodFilter === tab.id ? 700 : 500,
+                  background: periodFilter === tab.id ? "#8B5CF6" : "transparent",
+                  color: periodFilter === tab.id ? "#fff" : "#a1a1aa",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Metric Status Selector */}
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+            {[
+              { id: "total", label: "Total Contratado" },
+              { id: "paid", label: "Realizado (Pago)" },
+              { id: "pending", label: "Previsto (Aberto)" },
+            ].map((btn) => (
+              <button
+                key={btn.id}
+                onClick={() => setMetricMode(btn.id as any)}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  fontSize: 11,
+                  fontWeight: metricMode === btn.id ? 700 : 500,
+                  background: metricMode === btn.id ? "rgba(16,185,129,0.25)" : "transparent",
+                  color: metricMode === btn.id ? "#10B981" : "#a1a1aa",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Natureza Filter */}
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+            {[
+              { id: "all", label: "Todas" },
+              { id: "recurring", label: "MRR / Mensalidade" },
+              { id: "one_time", label: "Entradas / Setup" },
+            ].map((btn) => (
+              <button
+                key={btn.id}
+                onClick={() => setNatureFilter(btn.id as any)}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  border: "none",
+                  fontSize: 11,
+                  fontWeight: natureFilter === btn.id ? 700 : 500,
+                  background: natureFilter === btn.id ? "rgba(245,158,11,0.25)" : "transparent",
+                  color: natureFilter === btn.id ? "#F59E0B" : "#a1a1aa",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* View Mode Toggle: Matriz vs Cards */}
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+          <button
+            onClick={() => setViewMode("matrix")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: 11,
+              fontWeight: viewMode === "matrix" ? 700 : 500,
+              background: viewMode === "matrix" ? "rgba(255,255,255,0.15)" : "transparent",
+              color: viewMode === "matrix" ? "#fff" : "#a1a1aa",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <BarChart3 style={{ width: 13, height: 13 }} /> Matriz Mês a Mês
+          </button>
+          <button
+            onClick={() => setViewMode("cards")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: 11,
+              fontWeight: viewMode === "cards" ? 700 : 500,
+              background: viewMode === "cards" ? "rgba(255,255,255,0.15)" : "transparent",
+              color: viewMode === "cards" ? "#fff" : "#a1a1aa",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <PieChart style={{ width: 13, height: 13 }} /> Cards por Produto
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Mode 1: Matriz Mês a Mês (Tabela) ────────────────────────────── */}
+      {viewMode === "matrix" && (
+        <div
+          style={{
+            overflowX: "auto",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(18,18,22,0.9)",
+            marginBottom: 16,
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+            <thead>
+              <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                {/* Sticky Product Header */}
+                <th
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 2,
+                    background: "rgba(24,24,28,0.98)",
+                    padding: "12px 14px",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    minWidth: 220,
+                    borderRight: "1px solid rgba(255,255,255,0.06)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                    fontSize: 11,
+                  }}
+                >
+                  Produto / Sistema
+                </th>
+
+                {/* Visible Month Headers */}
+                {visibleMonths.map((m) => {
+                  const isCurrent = m.isCurrent;
+                  return (
+                    <th
+                      key={m.key}
+                      style={{
+                        padding: "10px 14px",
+                        fontWeight: 700,
+                        color: isCurrent ? "#C4B5FD" : "#a1a1aa",
+                        background: isCurrent ? "rgba(139,92,246,0.12)" : "transparent",
+                        borderRight: "1px solid rgba(255,255,255,0.04)",
+                        minWidth: 110,
+                        textAlign: "right",
+                        textTransform: "capitalize",
+                        fontSize: 11,
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+                        <span>{m.label}</span>
+                        {isCurrent && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              color: "#8B5CF6",
+                              background: "rgba(139,92,246,0.2)",
+                              padding: "1px 5px",
+                              borderRadius: 4,
+                              textTransform: "uppercase",
+                            }}
+                          >
+                            Atual
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
+
+                {/* Total Period Column */}
+                <th
+                  style={{
+                    padding: "12px 16px",
+                    fontWeight: 800,
+                    color: "#fafafa",
+                    background: "rgba(255,255,255,0.04)",
+                    minWidth: 120,
+                    textAlign: "right",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  Total Período
+                </th>
+
+                {/* Average Column */}
+                <th
+                  style={{
+                    padding: "12px 14px",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    minWidth: 110,
+                    textAlign: "right",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Média / Mês
+                </th>
+
+                {/* Share % Column */}
+                <th
+                  style={{
+                    padding: "12px 14px",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    minWidth: 90,
+                    textAlign: "right",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  % Share
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {productRowsCalculated.map((prod) => {
+                const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
+                return (
+                  <tr
+                    key={prod.productId}
+                    style={{
+                      borderBottom: "1px solid rgba(255,255,255,0.05)",
+                      transition: "background 0.15s ease",
+                    }}
+                  >
+                    {/* Sticky Product Cell */}
+                    <td
+                      style={{
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 1,
+                        background: "rgba(22,22,26,0.98)",
+                        padding: "12px 14px",
+                        borderRight: "1px solid rgba(255,255,255,0.06)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: prod.productColor,
+                            boxShadow: `0 0 8px ${prod.productColor}80`,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontWeight: 700, color: "#fff", fontSize: 13 }}>
+                            {prod.productName}
+                          </span>
+                          <span style={{ fontSize: 10, color: "#71717a" }}>
+                            {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente ativo" : "clientes ativos"}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Month Amounts */}
+                    {visibleMonths.map((m) => {
+                      const mData = prod.months[m.key];
+                      const val = getCellValue(mData);
+                      const isCurrent = m.isCurrent;
+                      const hasPaid = (mData?.paid || 0) > 0;
+                      const hasPending = (mData?.pending || 0) > 0;
+
+                      return (
+                        <td
+                          key={m.key}
+                          onClick={() => setSelectedCell({ product: prod, month: m })}
+                          title={`Clique para ver detalhes de ${prod.productName} em ${m.label}`}
+                          style={{
+                            padding: "10px 14px",
+                            textAlign: "right",
+                            background: isCurrent ? "rgba(139,92,246,0.05)" : "transparent",
+                            borderRight: "1px solid rgba(255,255,255,0.04)",
+                            cursor: "pointer",
+                            transition: "background 0.2s ease",
+                          }}
+                        >
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                            <span
+                              style={{
+                                fontWeight: val > 0 ? 700 : 400,
+                                color: val > 0 ? (metricMode === "paid" ? "#10B981" : metricMode === "pending" ? "#F59E0B" : "#fafafa") : "#52525b",
+                                fontSize: 12,
+                              }}
+                            >
+                              {val > 0 ? formatBRL(val) : "—"}
+                            </span>
+
+                            {/* Micro-pills for breakdown indicator */}
+                            {metricMode === "total" && val > 0 && (
+                              <div style={{ display: "flex", gap: 3, marginTop: 2 }}>
+                                {hasPaid && (
+                                  <span
+                                    title={`Realizado: ${formatBRL(mData?.paid)}`}
+                                    style={{ width: 5, height: 5, borderRadius: "50%", background: "#10B981" }}
+                                  />
+                                )}
+                                {hasPending && (
+                                  <span
+                                    title={`A Receber: ${formatBRL(mData?.pending)}`}
+                                    style={{ width: 5, height: 5, borderRadius: "50%", background: "#F59E0B" }}
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+
+                    {/* Total Period for Row */}
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        textAlign: "right",
+                        background: "rgba(255,255,255,0.02)",
+                        fontWeight: 800,
+                        color: prod.visibleTotal > 0 ? "#10B981" : "#52525b",
+                        fontSize: 13,
+                      }}
+                    >
+                      {formatBRL(prod.visibleTotal)}
+                    </td>
+
+                    {/* Average Monthly */}
+                    <td
+                      style={{
+                        padding: "12px 14px",
+                        textAlign: "right",
+                        fontWeight: 600,
+                        color: "#a1a1aa",
+                        fontSize: 12,
+                      }}
+                    >
+                      {formatBRL(prod.averageMonthly)}
+                    </td>
+
+                    {/* Share Percentage */}
+                    <td
+                      style={{
+                        padding: "12px 14px",
+                        textAlign: "right",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                        <div
+                          style={{
+                            width: 32,
+                            height: 4,
+                            background: "rgba(255,255,255,0.08)",
+                            borderRadius: 2,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${Math.min(sharePercent, 100)}%`,
+                              height: "100%",
+                              background: prod.productColor,
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: prod.visibleTotal > 0 ? "#fff" : "#52525b" }}>
+                          {sharePercent}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+
+            {/* Total Row (TOTAL GERAL TELTECH) */}
+            <tfoot>
+              <tr
+                style={{
+                  background: "rgba(139,92,246,0.08)",
+                  borderTop: "2px solid rgba(139,92,246,0.3)",
+                }}
+              >
+                <td
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 1,
+                    background: "rgba(26,22,34,0.98)",
+                    padding: "14px",
+                    fontWeight: 800,
+                    color: "#fafafa",
+                    borderRight: "1px solid rgba(255,255,255,0.06)",
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Coins style={{ width: 14, height: 14, color: "#A78BFA" }} />
+                    TOTAL GERAL TELTECH
+                  </div>
+                </td>
+
+                {visibleMonths.map((m) => {
+                  const mTotal = monthTotalsCalculated[m.key] || 0;
+                  const isCurrent = m.isCurrent;
+                  return (
+                    <td
+                      key={m.key}
+                      style={{
+                        padding: "14px",
+                        textAlign: "right",
+                        fontWeight: 800,
+                        color: mTotal > 0 ? (isCurrent ? "#C4B5FD" : "#fafafa") : "#52525b",
+                        background: isCurrent ? "rgba(139,92,246,0.12)" : "transparent",
+                        borderRight: "1px solid rgba(255,255,255,0.04)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {formatBRL(mTotal)}
+                    </td>
+                  );
+                })}
+
+                {/* Grand Total */}
+                <td
+                  style={{
+                    padding: "14px 16px",
+                    textAlign: "right",
+                    fontWeight: 900,
+                    color: "#10B981",
+                    fontSize: 14,
+                    background: "rgba(16,185,129,0.1)",
+                  }}
+                >
+                  {formatBRL(grandVisibleTotal)}
+                </td>
+
+                {/* Grand Average */}
+                <td
+                  style={{
+                    padding: "14px",
+                    textAlign: "right",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    fontSize: 12,
+                  }}
+                >
+                  {formatBRL(visibleMonths.length > 0 ? Math.round(grandVisibleTotal / visibleMonths.length) : 0)}
+                </td>
+
+                {/* 100% */}
+                <td
+                  style={{
+                    padding: "14px",
+                    textAlign: "right",
+                    fontWeight: 800,
+                    color: "#fafafa",
+                    fontSize: 12,
+                  }}
+                >
+                  100%
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* ─── Mode 2: Cards por Produto ────────────────────────────────────── */}
+      {viewMode === "cards" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))",
+            gap: 16,
+            marginBottom: 16,
+          }}
+        >
+          {productRowsCalculated.map((prod) => {
+            const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
+            return (
+              <div
+                key={prod.productId}
+                style={{
+                  background: "rgba(22,22,26,0.8)",
+                  border: `1px solid ${prod.productColor}35`,
+                  borderRadius: 12,
+                  padding: 18,
+                  position: "relative",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+                }}
+              >
+                {/* Top Color Accent Line */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: 3,
+                    background: prod.productColor,
+                  }}
+                />
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: prod.productColor,
+                        boxShadow: `0 0 8px ${prod.productColor}80`,
+                      }}
+                    />
+                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>
+                      {prod.productName}
+                    </h4>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 12,
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#a1a1aa",
+                    }}
+                  >
+                    {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente" : "clientes"}
+                  </span>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: 11, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 600 }}>
+                    Faturamento no Período
+                  </span>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: "#fafafa", marginTop: 2 }}>
+                    {formatBRL(prod.visibleTotal)}
+                  </div>
+                </div>
+
+                {/* Progress Share Bar */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#a1a1aa" }}>
+                    <span>Participação Teltech</span>
+                    <span style={{ fontWeight: 700, color: "#fff" }}>{sharePercent}%</span>
+                  </div>
+                  <div style={{ width: "100%", height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: `${Math.min(sharePercent, 100)}%`,
+                        height: "100%",
+                        background: prod.productColor,
+                        borderRadius: 3,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Sub Metrics: MRR x OneTime */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                    background: "rgba(0,0,0,0.25)",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 600, textTransform: "uppercase" }}>Recorrente (MRR)</span>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fafafa", marginTop: 1 }}>
+                      {formatBRL(prod.visibleRecurring)}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 10, color: "#60A5FA", fontWeight: 600, textTransform: "uppercase" }}>Pontual (Projetos)</span>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fafafa", marginTop: 1 }}>
+                      {formatBRL(prod.visibleOneTime)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Average Monthly */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#71717a", paddingTop: 4 }}>
+                  <span>Média no Período:</span>
+                  <span style={{ fontWeight: 600, color: "#a1a1aa" }}>{formatBRL(prod.averageMonthly)}/mês</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── Executive Analytics Highlights Strip ────────────────────────── */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+          gap: 12,
+          padding: "12px 16px",
+          background: "rgba(139,92,246,0.06)",
+          border: "1px solid rgba(139,92,246,0.18)",
+          borderRadius: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Crown style={{ width: 18, height: 18, color: "#F59E0B" }} />
+          <div>
+            <div style={{ fontSize: 10, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 700 }}>Produto Carro-Chefe</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>
+              {topProduct && topProduct.visibleTotal > 0
+                ? `${topProduct.productName} (${grandVisibleTotal > 0 ? Math.round((topProduct.visibleTotal / grandVisibleTotal) * 100) : 0}%)`
+                : "Sem receitas no período"}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Repeat2 style={{ width: 18, height: 18, color: "#10B981" }} />
+          <div>
+            <div style={{ fontSize: 10, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 700 }}>Mix de Receita Teltech</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>
+              {grandVisibleTotal > 0
+                ? `${Math.round((totalRecurringVisible / grandVisibleTotal) * 100)}% Recorrente | ${Math.round((totalOneTimeVisible / grandVisibleTotal) * 100)}% Pontual`
+                : "Aguardando faturamentos"}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <TrendingUp style={{ width: 18, height: 18, color: "#8B5CF6" }} />
+          <div>
+            <div style={{ fontSize: 10, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 700 }}>Mês com Maior Volume</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>
+              {peakMonth && peakMonthTotal > 0 ? `${peakMonth.label} — ${formatBRL(peakMonthTotal)}` : "Sem faturamento"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Cell Details Drawer / Modal ─────────────────────────────────── */}
+      {selectedCell && (
+        <div
+          onClick={() => setSelectedCell(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(6px)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "linear-gradient(135deg, rgba(30,30,36,0.98), rgba(20,20,24,0.98))",
+              border: "1px solid rgba(139,92,246,0.35)",
+              borderRadius: 14,
+              padding: 24,
+              width: "100%",
+              maxWidth: 420,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    background: selectedCell.product.productColor,
+                    boxShadow: `0 0 10px ${selectedCell.product.productColor}80`,
+                  }}
+                />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fff" }}>
+                    {selectedCell.product.productName}
+                  </h3>
+                  <span style={{ fontSize: 12, color: "#a1a1aa" }}>
+                    Competência: <strong style={{ color: "#fafafa" }}>{selectedCell.month.label}</strong>
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedCell(null)}
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "none",
+                  borderRadius: 6,
+                  color: "#a1a1aa",
+                  padding: 6,
+                  cursor: "pointer",
+                }}
+              >
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            {/* Breakdown Cards */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(() => {
+                const cellData = selectedCell.product.months[selectedCell.month.key];
+                const total = cellData?.total || 0;
+                const paid = cellData?.paid || 0;
+                const pending = cellData?.pending || 0;
+                const recurring = cellData?.recurring || 0;
+                const oneTime = cellData?.oneTime || 0;
+                const txCount = cellData?.txCount || 0;
+
+                return (
+                  <>
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        background: "rgba(139,92,246,0.1)",
+                        borderRadius: 10,
+                        border: "1px solid rgba(139,92,246,0.25)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#fafafa" }}>Total Faturado no Mês</span>
+                      <span style={{ fontSize: 18, fontWeight: 900, color: "#10B981" }}>{formatBRL(total)}</span>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          background: "rgba(16,185,129,0.08)",
+                          borderRadius: 8,
+                          border: "1px solid rgba(16,185,129,0.2)",
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#10B981", textTransform: "uppercase" }}>Realizado (Pago)</span>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginTop: 2 }}>{formatBRL(paid)}</div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          background: "rgba(245,158,11,0.08)",
+                          borderRadius: 8,
+                          border: "1px solid rgba(245,158,11,0.2)",
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#F59E0B", textTransform: "uppercase" }}>A Receber (Aberto)</span>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", marginTop: 2 }}>{formatBRL(pending)}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          background: "rgba(255,255,255,0.04)",
+                          borderRadius: 8,
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase" }}>Recorrente (MRR)</span>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#C4B5FD", marginTop: 2 }}>{formatBRL(recurring)}</div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          background: "rgba(255,255,255,0.04)",
+                          borderRadius: 8,
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase" }}>Pontual (Projetos)</span>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#60A5FA", marginTop: 2 }}>{formatBRL(oneTime)}</div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#71717a", padding: "4px 2px" }}>
+                      <span>Transações vinculadas:</span>
+                      <strong style={{ color: "#a1a1aa" }}>{txCount} lançamentos</strong>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <button
+                onClick={() => {
+                  setSelectedCell(null);
+                  if (onGoToTransactions) onGoToTransactions();
+                }}
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  background: "#8B5CF6",
+                  border: "none",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Abrir Extrato de Transações
+              </button>
+              <button
+                onClick={() => setSelectedCell(null)}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#e4e4e7",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1233,6 +2384,7 @@ export function FinanceiroPage() {
                 onReject={(id) => setRejectingTxId(id)}
                 onSendWhatsApp={handleSendWhatsAppPix}
                 onMarkPaid={handleMarkPaid}
+                onResetAll={loadAllData}
               />
             )}
 
@@ -1277,6 +2429,7 @@ export function FinanceiroPage() {
                 onDeleteClient={handleDeleteClient}
                 onReactivateClient={handleReactivateClient}
                 sendingBillingId={sendingBillingId}
+                onResetAll={loadAllData}
                 onNewTxForClient={(clientId) => {
                   setEditingTx(null);
                   setTxInitialClientId(clientId);
@@ -1318,6 +2471,7 @@ export function FinanceiroPage() {
                 pendingApprovals={pendingApprovals}
                 onApprove={handleApprove}
                 onReject={(id) => setRejectingTxId(id)}
+                onResetAll={loadAllData}
                 onNewTx={() => setShowTxModal(true)}
               />
             )}
@@ -1510,6 +2664,7 @@ function CockpitView({
   onReject,
   onSendWhatsApp,
   onMarkPaid,
+  onResetAll,
 }: {
   dashboard: DashboardData | null;
   clients: Client[];
@@ -1519,9 +2674,28 @@ function CockpitView({
   onReject: (id: string) => void;
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onMarkPaid: (tx: Transaction) => void;
+  onResetAll?: () => void;
 }) {
   const isMobile = useIsMobile();
   if (!dashboard) return null;
+
+  const handleResetFinance = async () => {
+    const ok = await confirmDialog({
+      title: "Resetar Todo o Módulo Financeiro?",
+      message: "Esta ação apagará permanentemente todas as transações, contratos, vendas comerciais, cobranças WhatsApp e clientes cadastrados para você começar o financeiro limpo do zero. Deseja continuar?",
+      confirmLabel: "Sim, Resetar Tudo",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      toast.success("Base financeira resetada com sucesso!");
+      if (onResetAll) onResetAll();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || err.message || "Erro ao resetar base");
+    }
+  };
 
   // Runway Human Label
   let runwayText = "Sem queima no período";
@@ -1545,6 +2719,35 @@ function CockpitView({
 
   return (
     <div style={{ padding: isMobile ? "12px 14px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+      {/* ─── Top Bar: Cockpit Title & Quick Admin Action ─────────────────────── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Visão Executiva & Diretoria Teltech
+          </span>
+        </div>
+        <button
+          onClick={handleResetFinance}
+          title="Apagar todas as transações, clientes, contratos e histórico para recomeçar o financeiro do zero"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            borderRadius: 8,
+            background: "rgba(239,68,68,0.1)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            color: "#EF4444",
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Trash2 style={{ width: 13, height: 13 }} /> Resetar Base do Zero
+        </button>
+      </div>
+
       {/* ─── Row 1: The 4 Noble KPIs ────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
         {/* 1. Caixa Disponível */}
@@ -1640,6 +2843,15 @@ function CockpitView({
           ))}
         </div>
       )}
+
+      {/* ─── Relatório Macro: Faturamento por Produto & Mês ─────────────── */}
+      <CockpitProductMacroReport
+        report={dashboard.productMacroReport}
+        selectedMonth={dashboard.selectedMonth}
+        selectedYear={dashboard.selectedYear}
+        onGoToClients={() => onGoToTab("clients")}
+        onGoToTransactions={() => onGoToTab("transactions")}
+      />
 
       {/* ─── Row 2: 2-Column Grid (Left: 2/3 Content, Right: 1/3 Pendencies) ─── */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr", gap: 20, alignItems: "start" }}>
@@ -2724,6 +3936,7 @@ function ClientsView({
   onManageSale,
   onOpenModules,
   sendingBillingId,
+  onResetAll,
 }: {
   clients: Client[];
   transactions: Transaction[];
@@ -2738,9 +3951,33 @@ function ClientsView({
   onManageSale: (sale: SaleView) => void;
   onOpenModules: () => void;
   sendingBillingId: string | null;
+  onResetAll?: () => void;
 }) {
   const isMobile = useIsMobile();
+  const [resetting, setResetting] = useState(false);
   const [searchClient, setSearchClient] = useState("");
+
+  const handleResetFinance = async () => {
+    const ok = await confirmDialog({
+      title: "Resetar Todo o Módulo Financeiro?",
+      message: "Esta ação apagará todos os clientes, contratos, vendas comerciais, faturas geradas e zerará o Livro Caixa e os saldos das contas para iniciar um ciclo limpo. Confirma?",
+      confirmLabel: "Sim, Resetar Tudo",
+      cancelLabel: "Cancelar",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      setResetting(true);
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      toast.success("Módulo financeiro zerado com sucesso!");
+      onResetAll?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao resetar financeiro.");
+    } finally {
+      setResetting(false);
+    }
+  };
   const [statusFilter, setStatusFilter] = useState<"active" | "all" | "inactive">("active");
 
   const activeCount = clients.filter(c => c.status !== "inactive").length;
@@ -2821,6 +4058,29 @@ function ClientsView({
           >
             <Sparkles style={{ width: 15, height: 15 }} /> Nova Venda
           </button>
+          {onResetAll && (
+            <button
+              type="button"
+              disabled={resetting}
+              onClick={handleResetFinance}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.25)",
+                color: "#EF4444",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: resetting ? "not-allowed" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+              title="Zerar dados financeiros e reiniciar ciclo limpo"
+            >
+              <Trash2 style={{ width: 14, height: 14 }} /> {resetting ? "Resetando..." : "Resetar Base"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -3523,13 +4783,38 @@ function ApprovalsGovernanceView({
   onApprove,
   onReject,
   onNewTx,
+  onResetAll,
 }: {
   pendingApprovals: Transaction[];
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   onNewTx: () => void;
+  onResetAll?: () => void;
 }) {
   const isMobile = useIsMobile();
+  const [resetting, setResetting] = useState(false);
+
+  const handleResetFinance = async () => {
+    const ok = await confirmDialog({
+      title: "Resetar Todo o Módulo Financeiro?",
+      message: "Esta ação apagará todos os clientes, contratos, vendas comerciais, faturas geradas e zerará o Livro Caixa e os saldos das contas para iniciar um ciclo limpo. Confirma?",
+      confirmLabel: "Sim, Resetar Tudo",
+      cancelLabel: "Cancelar",
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      setResetting(true);
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      toast.success("Módulo financeiro zerado com sucesso!");
+      onResetAll?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao resetar financeiro.");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
@@ -3654,6 +4939,54 @@ function ApprovalsGovernanceView({
             tip="Governança Paritária: Tarcísio Silva e Lucas Andre possuem alçada igualitária de 50/50 para todas as aprovações da Teltech."
           />
         )}
+      </div>
+
+      {/* Zona de Manutenção & Reset (Diretoria) */}
+      <div
+        style={{
+          marginTop: 10,
+          background: "rgba(239,68,68,0.05)",
+          border: "1px dashed rgba(239,68,68,0.3)",
+          borderRadius: 12,
+          padding: "16px 20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 14,
+        }}
+      >
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Trash2 size={16} style={{ color: "#EF4444" }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+              Reset do Módulo Financeiro (Deliberação Executiva)
+            </span>
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "#a1a1aa" }}>
+            Limpa todas as vendas, clientes, contratos e lançamentos do Livro Caixa para iniciar um novo ciclo zerado.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={resetting}
+          onClick={handleResetFinance}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 8,
+            background: "rgba(239,68,68,0.15)",
+            border: "1px solid rgba(239,68,68,0.4)",
+            color: "#EF4444",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: resetting ? "not-allowed" : "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <Trash2 size={13} /> {resetting ? "Resetando..." : "Resetar Base Financeira"}
+        </button>
       </div>
     </div>
   );

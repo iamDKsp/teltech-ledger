@@ -58,6 +58,18 @@ test("Cenário A: entrada em 3x, mensalidade só depois de quitar", () => {
   assert.equal(iso(start), "2027-01-10");
 });
 
+test("Cenário A2: entrada no dia 04 e cobrança no dia 10 (não cai no mesmo mês da entrada)", () => {
+  const entry = buildEntrySchedule({
+    mode: "installments",
+    label: "Entrada",
+    totalAmount: 420000,
+    installmentsCount: 1,
+    firstDueDate: d("2026-10-04"),
+  });
+  const start = resolveSubscriptionStart({ startMode: "after_entry", billingDay: 10, entry });
+  assert.equal(iso(start), "2026-11-10");
+});
+
 test("Cenário B: entrada à vista, mensalidade junto (mesmo mês)", () => {
   const entry = buildEntrySchedule({ mode: "installments", label: "Entrada", totalAmount: 500000, installmentsCount: 1, firstDueDate: d("2026-10-10") });
   const start = resolveSubscriptionStart({ startMode: "with_entry", billingDay: 10, entry });

@@ -118,7 +118,9 @@ export function resolveSubscriptionStart(input: {
     }
     case "after_entry": {
       if (!input.entry?.length) return null;
-      return firstOccurrenceOfDay(input.entry[input.entry.length - 1].dueDate, input.billingDay, false);
+      const lastDue = input.entry[input.entry.length - 1].dueDate;
+      const nextMonth = addMonthsClamped(new Date(Date.UTC(lastDue.getUTCFullYear(), lastDue.getUTCMonth(), 1, 12, 0, 0)), 1);
+      return firstOccurrenceOfDay(nextMonth, input.billingDay, true);
     }
     case "fixed_date":
       return input.fixedDate ?? null;

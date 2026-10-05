@@ -134,7 +134,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     const startOfMonth = new Date(reqYear, reqMonth, 1);
     const endOfMonth = new Date(reqYear, reqMonth + 1, 0, 23, 59, 59);
 
-    const [transactions, accounts, categories, settingsList, budgets, users, clients] = await Promise.all([
+    const [transactions, accounts, categories, settingsList, budgets, users, clients, projects] = await Promise.all([
       db.select().from(financialTransactionsTable).where(eq(financialTransactionsTable.workspaceId, workspaceId)),
       db.select().from(financialAccountsTable).where(and(eq(financialAccountsTable.workspaceId, workspaceId), eq(financialAccountsTable.isActive, true))),
       db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.workspaceId, workspaceId)),
@@ -142,6 +142,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
       db.select().from(financialBudgetsTable).where(and(eq(financialBudgetsTable.workspaceId, workspaceId), eq(financialBudgetsTable.year, reqYear), eq(financialBudgetsTable.month, reqMonth + 1))),
       db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email }).from(usersTable),
       db.select().from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId)),
+      db.select().from(projectsTable).where(eq(projectsTable.workspaceId, workspaceId)),
     ]);
 
     const settings = settingsList[0] ?? { taxRatePercent: 600, emergencyReserveTarget: 5000000 };
@@ -333,6 +334,205 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .slice(0, 5);
 
+    // ── Relatório Macro: Faturamento por Produto & Mês ─────────────────────
+    interface MacroMonthItem {
+      key: string;       // "YYYY-MM"
+      label: string;     // "mai/26"
+      shortLabel: string;// "Mai"
+      year: number;
+      month: number;
+      isCurrent: boolean;
+      isPast: boolean;
+      isFuture: boolean;
+    }
+
+    interface MacroAmountItem {
+      paid: number;
+      pending: number;
+      total: number;
+      recurring: number;
+      oneTime: number;
+      txCount: number;
+    }
+
+    const macroMonths: MacroMonthItem[] = [];
+    const macroMonthKeysSet = new Set<string>();
+
+    for (let offset = -5; offset <= 6; offset++) {
+      const d = new Date(reqYear, reqMonth + offset, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      macroMonthKeysSet.add(key);
+
+      const isCurrentMonth = y === now.getFullYear() && d.getMonth() === now.getMonth();
+      const isPastMonth = d < new Date(now.getFullYear(), now.getMonth(), 1);
+      const isFutureMonth = d > new Date(now.getFullYear(), now.getMonth(), 1);
+
+      macroMonths.push({
+        key,
+        label: d.toLocaleString("pt-BR", { month: "short", year: "2-digit" }),
+        shortLabel: d.toLocaleString("pt-BR", { month: "short" }),
+        year: y,
+        month: m,
+        isCurrent: isCurrentMonth,
+        isPast: isPastMonth,
+        isFuture: isFutureMonth,
+      });
+    }
+
+    const createEmptyAmount = (): MacroAmountItem => ({
+      paid: 0,
+      pending: 0,
+      total: 0,
+      recurring: 0,
+      oneTime: 0,
+      txCount: 0,
+    });
+
+    const clientMap = new Map(clients.map(c => [c.id, c]));
+
+    const productRowsMap = new Map<string, {
+      productId: string;
+      productName: string;
+      productColor: string;
+      productIcon: string | null;
+      status: string;
+      activeClientsCount: number;
+      months: Record<string, MacroAmountItem>;
+      totalPeriod: MacroAmountItem;
+      averageMonthly: number;
+      sharePercent: number;
+    }>();
+
+    for (const p of projects) {
+      const activeClients = clients.filter(c => c.projectId === p.id && c.status === "active").length;
+      const monthsRecord: Record<string, MacroAmountItem> = {};
+      for (const m of macroMonths) {
+        monthsRecord[m.key] = createEmptyAmount();
+      }
+      productRowsMap.set(p.id, {
+        productId: p.id,
+        productName: p.name,
+        productColor: p.color || "#8B5CF6",
+        productIcon: p.icon ?? null,
+        status: p.status || "active",
+        activeClientsCount: activeClients,
+        months: monthsRecord,
+        totalPeriod: createEmptyAmount(),
+        averageMonthly: 0,
+        sharePercent: 0,
+      });
+    }
+
+    // Unallocated / Serviços Avulsos / Geral
+    const unallocatedActiveClients = clients.filter(c => !c.projectId && c.status === "active").length;
+    const unallocatedMonthsRecord: Record<string, MacroAmountItem> = {};
+    for (const m of macroMonths) {
+      unallocatedMonthsRecord[m.key] = createEmptyAmount();
+    }
+    productRowsMap.set("unallocated", {
+      productId: "unallocated",
+      productName: "Serviços Avulsos / Geral",
+      productColor: "#71717A",
+      productIcon: "Layers",
+      status: "active",
+      activeClientsCount: unallocatedActiveClients,
+      months: unallocatedMonthsRecord,
+      totalPeriod: createEmptyAmount(),
+      averageMonthly: 0,
+      sharePercent: 0,
+    });
+
+    const totalsByMonth: Record<string, MacroAmountItem> = {};
+    for (const m of macroMonths) {
+      totalsByMonth[m.key] = createEmptyAmount();
+    }
+    const macroGrandTotal = createEmptyAmount();
+
+    for (const tx of transactions) {
+      if (tx.type !== "inflow" || tx.status === "cancelled") continue;
+
+      const txDate = new Date(tx.dueDate);
+      const txMonthKey = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!macroMonthKeysSet.has(txMonthKey)) continue;
+
+      let targetId = tx.projectId;
+      if (!targetId && tx.clientId) {
+        targetId = clientMap.get(tx.clientId)?.projectId ?? null;
+      }
+      if (!targetId || !productRowsMap.has(targetId)) {
+        targetId = "unallocated";
+      }
+
+      const prod = productRowsMap.get(targetId)!;
+      const amt = tx.amount || 0;
+      const isPaid = tx.status === "paid";
+      const isPending = tx.status === "pending";
+      const isRec = tx.revenueType === "recurring" || (tx.isRecurring && tx.revenueType !== "one_time");
+
+      // Acumula no produto no mês
+      const prodMonth = prod.months[txMonthKey];
+      if (isPaid) prodMonth.paid += amt;
+      if (isPending) prodMonth.pending += amt;
+      prodMonth.total += amt;
+      if (isRec) prodMonth.recurring += amt;
+      else prodMonth.oneTime += amt;
+      prodMonth.txCount += 1;
+
+      // Acumula no total do período do produto
+      if (isPaid) prod.totalPeriod.paid += amt;
+      if (isPending) prod.totalPeriod.pending += amt;
+      prod.totalPeriod.total += amt;
+      if (isRec) prod.totalPeriod.recurring += amt;
+      else prod.totalPeriod.oneTime += amt;
+      prod.totalPeriod.txCount += 1;
+
+      // Acumula nos totais do mês da Teltech
+      const monthTot = totalsByMonth[txMonthKey];
+      if (isPaid) monthTot.paid += amt;
+      if (isPending) monthTot.pending += amt;
+      monthTot.total += amt;
+      if (isRec) monthTot.recurring += amt;
+      else monthTot.oneTime += amt;
+      monthTot.txCount += 1;
+
+      // Acumula no Total Geral
+      if (isPaid) macroGrandTotal.paid += amt;
+      if (isPending) macroGrandTotal.pending += amt;
+      macroGrandTotal.total += amt;
+      if (isRec) macroGrandTotal.recurring += amt;
+      else macroGrandTotal.oneTime += amt;
+      macroGrandTotal.txCount += 1;
+    }
+
+    const productRows = Array.from(productRowsMap.values());
+    for (const p of productRows) {
+      p.averageMonthly = macroMonths.length > 0 ? Math.round(p.totalPeriod.total / macroMonths.length) : 0;
+      p.sharePercent = macroGrandTotal.total > 0 ? Math.round((p.totalPeriod.total / macroGrandTotal.total) * 100) : 0;
+    }
+
+    const finalProducts = productRows.filter(p => {
+      if (p.productId === "unallocated" && p.totalPeriod.total === 0 && p.activeClientsCount === 0) {
+        return false;
+      }
+      return true;
+    });
+
+    finalProducts.sort((a, b) => {
+      if (b.totalPeriod.total !== a.totalPeriod.total) {
+        return b.totalPeriod.total - a.totalPeriod.total;
+      }
+      return a.productName.localeCompare(b.productName);
+    });
+
+    const productMacroReport = {
+      months: macroMonths,
+      products: finalProducts,
+      totalsByMonth,
+      grandTotal: macroGrandTotal,
+    };
+
     res.json({
       dashboard: {
         mrr,
@@ -359,6 +559,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
         budgetProgress,
         chartData,
         upcoming,
+        productMacroReport,
         selectedMonth: reqMonth + 1,
         selectedYear: reqYear,
       }
