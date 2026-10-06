@@ -202,10 +202,24 @@ export function SalesWizardModal({
 
   const [clientId, setClientId] = useState(initialClientId && activeClients.some((c) => c.id === initialClientId) ? initialClientId : "");
   const [projectId, setProjectId] = useState(() => clients.find((c) => c.id === initialClientId)?.projectId ?? "");
+  const [sellerId, setSellerId] = useState("");
+  const [hunterId, setHunterId] = useState("");
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string; role: string; roleTitle: string }>>([]);
   const [notes, setNotes] = useState("");
 
   const [sellProject, setSellProject] = useState(true);
   const [sellSub, setSellSub] = useState(true);
+
+  // Carregar colaboradores ativos (Vendedores, Hunters, etc.)
+  useEffect(() => {
+    API.get("/finance/team/members")
+      .then((res) => {
+        if (res?.members) {
+          setTeamMembers(res.members.filter((m: any) => m.status === "active"));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Entrada / Projeto
   const [entryLabel, setEntryLabel] = useState("Entrada");
@@ -274,7 +288,13 @@ export function SalesWizardModal({
   // Monta o corpo da requisição; retorna null enquanto o formulário estiver incompleto.
   const payload = useMemo(() => {
     if (!clientId || (!sellProject && !sellSub)) return null;
-    const body: Record<string, unknown> = { clientId, projectId: projectId || null, notes: notes.trim() || null };
+    const body: Record<string, unknown> = {
+      clientId,
+      projectId: projectId || null,
+      sellerId: sellerId || null,
+      hunterId: hunterId || null,
+      notes: notes.trim() || null,
+    };
 
     if (sellProject) {
       if (entryMode === "installments") {
@@ -312,7 +332,7 @@ export function SalesWizardModal({
       body.subscription = sub;
     }
     return body;
-  }, [clientId, projectId, notes, sellProject, sellSub, entryMode, entryLabel, entryTotal, entryCount, entryFirstDue, milestones, subLabel, startMode, billingDay, fixedDate, endDate, useModules, selectedModules, fixedAmount]);
+  }, [clientId, projectId, sellerId, hunterId, notes, sellProject, sellSub, entryMode, entryLabel, entryTotal, entryCount, entryFirstDue, milestones, subLabel, startMode, billingDay, fixedDate, endDate, useModules, selectedModules, fixedAmount]);
 
   // Preview ao vivo (debounce) — o servidor é a única fonte das regras de cronograma.
   useEffect(() => {
@@ -395,6 +415,24 @@ export function SalesWizardModal({
               <option value="">— Sem vínculo —</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <label style={labelStyle}>Closer / Vendedor Responsável</label>
+            <Select value={sellerId} onChange={(e) => setSellerId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+              <option value="">— Selecione o Vendedor —</option>
+              {teamMembers.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.roleTitle})</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <label style={labelStyle}>Hunter / SDR Prospecção</label>
+            <Select value={hunterId} onChange={(e) => setHunterId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+              <option value="">— Sem Hunter —</option>
+              {teamMembers.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.roleTitle})</option>
               ))}
             </Select>
           </div>

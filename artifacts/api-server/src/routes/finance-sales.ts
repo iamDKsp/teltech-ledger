@@ -92,6 +92,8 @@ function isUuid(v: unknown): v is string {
 interface NormalizedSale {
   clientId: string;
   projectId: string | null;
+  sellerId: string | null;
+  hunterId: string | null;
   title: string | null;
   notes: string | null;
   entry: null | {
@@ -219,6 +221,8 @@ function normalizeSaleInput(body: any): NormalizedSale {
   return {
     clientId: body.clientId,
     projectId: isUuid(body.projectId) ? body.projectId : null,
+    sellerId: isUuid(body.sellerId) ? body.sellerId : null,
+    hunterId: isUuid(body.hunterId) ? body.hunterId : null,
     title: typeof body.title === "string" && body.title.trim() ? body.title.trim() : null,
     notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim() : null,
     entry,
@@ -433,6 +437,8 @@ router.post("/sales", requireAuth, async (req: Request, res: Response) => {
           workspaceId,
           clientId: client.id,
           projectId: n.projectId,
+          sellerId: n.sellerId,
+          hunterId: n.hunterId,
           title: defaultTitle(n, client.name),
           notes: n.notes,
         })
@@ -569,6 +575,8 @@ router.get("/sales", requireAuth, async (req: Request, res: Response) => {
       clientName,
       projectId: sale.projectId,
       projectName,
+      sellerId: sale.sellerId,
+      hunterId: sale.hunterId,
       title: sale.title,
       status: sale.status,
       notes: sale.notes,

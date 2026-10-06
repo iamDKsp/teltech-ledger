@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import makeWASocket, { DisconnectReason, generateWAMessageFromContent, proto, type WASocket } from "@whiskeysockets/baileys";
-import { db, clientsTable, whatsappConnectionsTable, whatsappMessagesTable } from "@workspace/db";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { db, clientsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable } from "@workspace/db";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import pino from "pino";
 import QRCode from "qrcode";
 import { logger } from "../lib/logger";
@@ -86,6 +87,78 @@ async function processOptOut(workspaceId: string, messages: any[]): Promise<void
   }
 }
 
+export function extractMessageText(message: any): string | null {
+  if (!message) return null;
+  if (typeof message.conversation === "string" && message.conversation.trim()) return message.conversation.trim();
+  if (typeof message.extendedTextMessage?.text === "string" && message.extendedTextMessage.text.trim()) return message.extendedTextMessage.text.trim();
+  if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") return message.buttonsResponseMessage.selectedDisplayText.trim();
+  if (typeof message.templateButtonReplyMessage?.selectedDisplayText === "string") return message.templateButtonReplyMessage.selectedDisplayText.trim();
+  if (typeof message.listResponseMessage?.title === "string") return message.listResponseMessage.title.trim();
+  if (typeof message.imageMessage?.caption === "string") return message.imageMessage.caption.trim();
+  if (typeof message.documentMessage?.caption === "string") return message.documentMessage.caption.trim();
+  return null;
+}
+
+async function processIncomingMessages(workspaceId: string, session: Session, messages: any[]): Promise<void> {
+  for (const item of messages) {
+    if (item.key?.fromMe) continue;
+    const jid: string | undefined = item.key?.remoteJidAlt?.endsWith("@s.whatsapp.net")
+      ? item.key.remoteJidAlt
+      : item.key?.remoteJid;
+    if (!jid?.endsWith("@s.whatsapp.net")) continue;
+    const text = extractMessageText(item.message);
+    if (!text) continue;
+    const sender = normalizeWhatsAppPhone(jid.split("@")[0]);
+    if (!sender) continue;
+
+    try {
+      const clients = await db.select({
+        id: clientsTable.id,
+        name: clientsTable.name,
+        phone: clientsTable.phone,
+      }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId));
+
+      const matchingClient = clients.find((c) => normalizeWhatsAppPhone(c.phone) === sender);
+
+      let transactionId: string | null = null;
+      if (matchingClient) {
+        const [latestTx] = await db.select({ id: financialTransactionsTable.id })
+          .from(financialTransactionsTable)
+          .where(and(eq(financialTransactionsTable.workspaceId, workspaceId), eq(financialTransactionsTable.clientId, matchingClient.id)))
+          .orderBy(desc(financialTransactionsTable.dueDate))
+          .limit(1);
+        transactionId = latestTx?.id ?? null;
+      }
+
+      const dedupeKey = `inbound:${workspaceId}:${item.key?.id || `${sender}_${Date.now()}`}`;
+      const sentAt = item.messageTimestamp
+        ? new Date(Number(item.messageTimestamp) * 1000)
+        : new Date();
+
+      await db.insert(whatsappMessagesTable).values({
+        workspaceId,
+        clientId: matchingClient?.id ?? null,
+        transactionId,
+        dedupeKey,
+        kind: "client_reply",
+        recipient: session.phone ?? "Nexus",
+        senderPhone: sender,
+        senderName: matchingClient?.name ?? item.pushName ?? "Cliente",
+        direction: "inbound",
+        body: text,
+        status: "received",
+        isRead: false,
+        sentAt,
+        waMessageId: item.key?.id ?? null,
+      }).onConflictDoNothing();
+
+      logger.info({ workspaceId, sender, clientName: matchingClient?.name }, "WhatsApp incoming message recorded from client");
+    } catch (err) {
+      logger.error({ err, workspaceId, sender }, "Failed to persist WhatsApp incoming message");
+    }
+  }
+}
+
 function disconnectedReason(error: unknown): number | undefined {
   return (error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
 }
@@ -146,6 +219,9 @@ async function createSocket(workspaceId: string): Promise<void> {
     if (sessions.get(workspaceId) !== session || session.stopped) return;
     void processOptOut(workspaceId, messages).catch((error) => {
       logger.error({ err: error, workspaceId }, "WhatsApp opt-out processing failed");
+    });
+    void processIncomingMessages(workspaceId, session, messages).catch((error) => {
+      logger.error({ err: error, workspaceId }, "WhatsApp incoming message processing failed");
     });
   });
 
@@ -457,3 +533,42 @@ export async function stopWhatsAppSessions(): Promise<void> {
   sessions.clear();
   await Promise.all(pending);
 }
+
+export async function sendManualTextMessage(
+  workspaceId: string,
+  recipient: string,
+  text: string,
+  options?: { clientId?: string | null; transactionId?: string | null; senderName?: string }
+): Promise<typeof whatsappMessagesTable.$inferSelect> {
+  const session = connectedSession(workspaceId);
+  const phone = normalizeWhatsAppPhone(recipient);
+  if (!phone) throw new Error("Telefone de destino inválido");
+
+  const messageId = randomUUID();
+  const id = stableMessageId(messageId);
+  const target = `${phone}@s.whatsapp.net`;
+
+  const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
+  const waMessageId = sent?.key?.id ?? null;
+
+  const [created] = await db.insert(whatsappMessagesTable).values({
+    id: messageId,
+    workspaceId,
+    clientId: options?.clientId ?? null,
+    transactionId: options?.transactionId ?? null,
+    dedupeKey: `manual:${workspaceId}:${messageId}`,
+    kind: "manual_chat",
+    recipient: phone,
+    senderPhone: session.phone ?? null,
+    senderName: options?.senderName ?? "Nexus",
+    direction: "outbound",
+    body: text,
+    status: "sent",
+    isRead: true,
+    sentAt: new Date(),
+    waMessageId,
+  }).returning();
+
+  return created;
+}
+

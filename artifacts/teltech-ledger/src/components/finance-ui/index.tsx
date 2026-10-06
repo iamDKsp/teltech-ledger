@@ -629,8 +629,10 @@ export interface ConfirmOptions {
   title?: string;
   message: string;
   confirmLabel?: string;
+  confirmText?: string;
   cancelLabel?: string;
   danger?: boolean;
+  variant?: string;
 }
 
 type ConfirmRequest = ConfirmOptions & { resolve: (ok: boolean) => void };

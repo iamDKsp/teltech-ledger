@@ -474,6 +474,35 @@ export const saasModulesTable = pgTable("saas_modules", {
 
 export type SaasModule = typeof saasModulesTable.$inferSelect;
 
+// ─── Team & Employees Module ─────────────────────────────────────────────────
+
+export const teamMembersTable = pgTable("team_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  role: text("role").notNull().default("vendedor"), // 'pos_venda' | 'vendedor' | 'hunter' | 'personnalite' | 'custom'
+  roleTitle: text("role_title").notNull().default("Vendedor"),
+  baseSalary: integer("base_salary").notNull().default(0), // em centavos (ex: 151800 para R$ 1.518,00)
+  commissionType: text("commission_type").notNull().default("first_installment"), // 'first_installment' | 'project_percentage' | 'both' | 'none'
+  projectPercentage: integer("project_percentage").notNull().default(0), // basis points (2500 = 25%)
+  targetClients: integer("target_clients").notNull().default(4),
+  targetBonus: integer("target_bonus").notNull().default(80000), // R$ 800,00 no nível inicial
+  careerLevel: integer("career_level").notNull().default(1),
+  consecutiveTargetMonths: integer("consecutive_target_months").notNull().default(0),
+  pixKey: text("pix_key"),
+  status: text("status").notNull().default("active"), // 'active' | 'inactive'
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertTeamMemberSchema = createInsertSchema(teamMembersTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type TeamMember = typeof teamMembersTable.$inferSelect;
+
 // ─── Client Sales (Venda / Contrato comercial) ────────────────────────────────
 // Uma venda agrupa os itens de cobrança de um cliente:
 //   - item 'project'      → entrada/projeto (pontual; parcelas fixas ou marcos)
@@ -484,6 +513,8 @@ export const clientSalesTable = pgTable("client_sales", {
   workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
   clientId: uuid("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
+  sellerId: uuid("seller_id").references(() => teamMembersTable.id, { onDelete: "set null" }),
+  hunterId: uuid("hunter_id").references(() => teamMembersTable.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   status: text("status").notNull().default("active"), // 'active' | 'paused' | 'cancelled' | 'completed'
   notes: text("notes"),
@@ -491,6 +522,8 @@ export const clientSalesTable = pgTable("client_sales", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const insertClientSaleSchema = createInsertSchema(clientSalesTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertClientSale = z.infer<typeof insertClientSaleSchema>;
 export type ClientSale = typeof clientSalesTable.$inferSelect;
 
 export const saleItemsTable = pgTable("sale_items", {
@@ -658,6 +691,9 @@ export const financialTransactionsTable = pgTable("financial_transactions", {
   revenueType: text("revenue_type"),     // 'recurring' | 'one_time' (null = não vinculado a venda)
   referenceMonth: text("reference_month"), // 'YYYY-MM' competência da mensalidade
 
+  // Vínculo com membro de equipe / colaborador
+  teamMemberId: uuid("team_member_id").references(() => teamMembersTable.id, { onDelete: "set null" }),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -665,6 +701,31 @@ export const financialTransactionsTable = pgTable("financial_transactions", {
 export const insertFinancialTransactionSchema = createInsertSchema(financialTransactionsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertFinancialTransaction = z.infer<typeof insertFinancialTransactionSchema>;
 export type FinancialTransaction = typeof financialTransactionsTable.$inferSelect;
+
+// ─── Team Commissions & Target Bonuses ───────────────────────────────────────
+
+export const teamCommissionsTable = pgTable("team_commissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  memberId: uuid("member_id").notNull().references(() => teamMembersTable.id, { onDelete: "cascade" }),
+  saleId: uuid("sale_id").references(() => clientSalesTable.id, { onDelete: "set null" }),
+  saleItemId: uuid("sale_item_id").references(() => saleItemsTable.id, { onDelete: "set null" }),
+  clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
+  type: text("type").notNull(), // 'first_installment' | 'project_percentage' | 'target_bonus' | 'base_salary'
+  referenceMonth: text("reference_month").notNull(), // 'YYYY-MM'
+  amount: integer("amount").notNull().default(0), // em centavos
+  status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'paid' | 'cancelled'
+  transactionId: uuid("transaction_id").references(() => financialTransactionsTable.id, { onDelete: "set null" }),
+  paidAt: timestamp("paid_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertTeamCommissionSchema = createInsertSchema(teamCommissionsTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTeamCommission = z.infer<typeof insertTeamCommissionSchema>;
+export type TeamCommission = typeof teamCommissionsTable.$inferSelect;
 
 // ─── Financial Audit Logs ───────────────────────────────────────────────────
 
@@ -758,8 +819,12 @@ export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   dedupeKey: text("dedupe_key").notNull().unique(),
   kind: text("kind").notNull(),
   recipient: text("recipient").notNull(),
+  senderPhone: text("sender_phone"),
+  senderName: text("sender_name"),
+  direction: text("direction").notNull().default("outbound"), // 'outbound' | 'inbound'
   body: text("body").notNull(),
   status: text("status").notNull().default("queued"),
+  isRead: boolean("is_read").notNull().default(false),
   attempts: integer("attempts").notNull().default(0),
   nextAttemptAt: timestamp("next_attempt_at").notNull().defaultNow(),
   sentAt: timestamp("sent_at"),
@@ -768,6 +833,10 @@ export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const insertWhatsappMessageSchema = createInsertSchema(whatsappMessagesTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertWhatsappMessage = z.infer<typeof insertWhatsappMessageSchema>;
+export type WhatsappMessage = typeof whatsappMessagesTable.$inferSelect;
 
 // ─── Financial Relations ──────────────────────────────────────────────────────
 
@@ -804,6 +873,7 @@ export const financialTransactionsRelations = relations(financialTransactionsTab
   account: one(financialAccountsTable, { fields: [financialTransactionsTable.accountId], references: [financialAccountsTable.id] }),
   partner: one(usersTable, { fields: [financialTransactionsTable.partnerId], references: [usersTable.id] }),
   approver: one(usersTable, { fields: [financialTransactionsTable.approvedBy], references: [usersTable.id] }),
+  teamMember: one(teamMembersTable, { fields: [financialTransactionsTable.teamMemberId], references: [teamMembersTable.id] }),
   auditLogs: many(financialAuditLogsTable),
 }));
 
@@ -811,3 +881,32 @@ export const financialAuditLogsRelations = relations(financialAuditLogsTable, ({
   transaction: one(financialTransactionsTable, { fields: [financialAuditLogsTable.transactionId], references: [financialTransactionsTable.id] }),
   user: one(usersTable, { fields: [financialAuditLogsTable.userId], references: [usersTable.id] }),
 }));
+
+export const clientSalesRelations = relations(clientSalesTable, ({ one, many }) => ({
+  workspace: one(workspacesTable, { fields: [clientSalesTable.workspaceId], references: [workspacesTable.id] }),
+  client: one(clientsTable, { fields: [clientSalesTable.clientId], references: [clientsTable.id] }),
+  project: one(projectsTable, { fields: [clientSalesTable.projectId], references: [projectsTable.id] }),
+  seller: one(teamMembersTable, { fields: [clientSalesTable.sellerId], references: [teamMembersTable.id] }),
+  hunter: one(teamMembersTable, { fields: [clientSalesTable.hunterId], references: [teamMembersTable.id] }),
+  items: many(saleItemsTable),
+  transactions: many(financialTransactionsTable),
+}));
+
+export const teamMembersRelations = relations(teamMembersTable, ({ one, many }) => ({
+  workspace: one(workspacesTable, { fields: [teamMembersTable.workspaceId], references: [workspacesTable.id] }),
+  user: one(usersTable, { fields: [teamMembersTable.userId], references: [usersTable.id] }),
+  commissions: many(teamCommissionsTable),
+  salesAsSeller: many(clientSalesTable, { relationName: "sales_as_seller" }),
+  salesAsHunter: many(clientSalesTable, { relationName: "sales_as_hunter" }),
+  transactions: many(financialTransactionsTable),
+}));
+
+export const teamCommissionsRelations = relations(teamCommissionsTable, ({ one }) => ({
+  workspace: one(workspacesTable, { fields: [teamCommissionsTable.workspaceId], references: [workspacesTable.id] }),
+  member: one(teamMembersTable, { fields: [teamCommissionsTable.memberId], references: [teamMembersTable.id] }),
+  sale: one(clientSalesTable, { fields: [teamCommissionsTable.saleId], references: [clientSalesTable.id] }),
+  client: one(clientsTable, { fields: [teamCommissionsTable.clientId], references: [clientsTable.id] }),
+  project: one(projectsTable, { fields: [teamCommissionsTable.projectId], references: [projectsTable.id] }),
+  transaction: one(financialTransactionsTable, { fields: [teamCommissionsTable.transactionId], references: [financialTransactionsTable.id] }),
+}));
+

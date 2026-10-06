@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, createContext, useContext } f
 import { useLocation } from "wouter";
 import { useAuth } from "./lib/auth-context";
 import { FinanceiroPage } from "./pages/FinanceiroPage";
+import { MonitoramentoPage } from "./pages/MonitoramentoPage";
 import { MembersPage } from "./pages/MembersPage";
 import { ComingSoon } from "./pages/ComingSoon";
 import { InicioPage } from "./pages/InicioPage";
@@ -26,6 +27,7 @@ import {
   FolderKanban, 
   CheckSquare, 
   DollarSign, 
+  MessageSquare, 
   MoreHorizontal, 
   Menu, 
   X, 
@@ -1496,6 +1498,7 @@ const NAV_ITEMS = [
   { icon:"home", label:"Início" }, { icon:"dashboard", label:"Painel" },
   { icon:"projects", label:"Projetos" }, { icon:"tasks", label:"Minhas Tarefas" },
   { icon:"members", label:"Membros" }, { icon:"finance", label:"Financeiro" },
+  { icon:"monitoring", label:"Monitoramento" },
   { icon:"goals", label:"Metas" }, { icon:"settings", label:"Configurações" },
 ];
 const PROJECT_ITEMS = [
@@ -1513,6 +1516,7 @@ function NavIcon({ icon }: { icon:string }) {
     tasks:<><path d="M9 12l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none"/></>,
     members:<><circle cx="9" cy="8" r="4" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M17 8a3 3 0 010 6M21 20c0-2.5-1.8-4.6-4-5.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></>,
     finance:<><line x1="12" y1="1" x2="12" y2="23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/></>,
+    monitoring:<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>,
     goals:<><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" fill="none"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="1.5" fill="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></>,
     settings:<><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/></>,
   };
@@ -1563,6 +1567,7 @@ function Sidebar() {
     else if (label === "Minhas Tarefas") navigate("/minhas-tarefas");
     else if (label === "Membros") navigate("/membros");
     else if (label === "Financeiro") navigate("/financeiro");
+    else if (label === "Monitoramento") navigate("/monitoramento");
     else if (label === "Metas") navigate("/metas");
     else if (label === "Configurações") navigate("/configuracoes");
     else if (label === "Projetos") navigate("/projetos");
@@ -2059,6 +2064,7 @@ function MobileDrawer({
     { label: "Minhas Tarefas", path: "/minhas-tarefas", icon: CheckSquare },
     { label: "Painel Global", path: "/painel", icon: Activity },
     { label: "Financeiro", path: "/financeiro", icon: DollarSign },
+    { label: "Monitoramento Nexus", path: "/monitoramento", icon: MessageSquare },
     { label: "Metas & OKRs", path: "/metas", icon: Target },
     { label: "Membros da Equipe", path: "/membros", icon: Users },
     { label: "Configurações", path: "/configuracoes", icon: Settings },
@@ -2674,6 +2680,7 @@ function MainContent() {
     if (sidebarModule === "Minhas Tarefas") return <MinhasTarefasPage />;
     if (sidebarModule === "Membros") return <MembersPage />;
     if (sidebarModule === "Financeiro") return <FinanceiroPage />;
+    if (sidebarModule === "Monitoramento") return <MonitoramentoPage />;
     if (sidebarModule === "Metas") return <MetasPage />;
     if (sidebarModule === "Painel") return <PainelPage />;
     if (sidebarModule === "Configurações") {
@@ -2763,6 +2770,7 @@ export function TeltechLedger() {
     else if (p === "/minhas-tarefas") setSidebarModule("Minhas Tarefas");
     else if (p === "/membros") setSidebarModule("Membros");
     else if (p === "/financeiro") setSidebarModule("Financeiro");
+    else if (p === "/monitoramento") setSidebarModule("Monitoramento");
     else if (p === "/metas") setSidebarModule("Metas");
     else if (p === "/configuracoes") setSidebarModule("Configurações");
     else if (p.startsWith("/projetos")) {

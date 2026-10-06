@@ -78,8 +78,26 @@ export async function runOneTimeFinancialReset() {
   }
 }
 
+export async function ensureSchemaUpgrades() {
+  try {
+    await pool.query(`
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'outbound';
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS sender_phone TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS sender_name TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false;
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_direction ON whatsapp_messages (direction);
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_client_id ON whatsapp_messages (client_id);
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_recipient ON whatsapp_messages (recipient);
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_sender_phone ON whatsapp_messages (sender_phone);
+    `);
+  } catch (err) {
+    console.error("  ❌ [Migrations] Falha ao verificar/aplicar schema upgrades de whatsapp_messages:", err);
+  }
+}
+
 export async function bootstrapWorkspace() {
   console.log("🌱 Checking workspace bootstrap...");
+  await ensureSchemaUpgrades();
 
   // Check if workspace exists
   const [existingWs] = await db

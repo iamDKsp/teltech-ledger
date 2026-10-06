@@ -49,6 +49,7 @@ import {
   FolderOpen,
   Repeat2,
   Coins,
+  Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer, Select, Checkbox, DateInput, Tip, FinanceUiRoot, drawerBtn, confirmDialog } from "../components/finance-ui";
@@ -59,6 +60,7 @@ import {
   ClientSalesSummary,
   type SaleView,
 } from "./finance/SalesModule";
+import { TeamModule } from "./finance/TeamModule";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -315,6 +317,7 @@ type TabType =
   | "transactions"
   | "clients"
   | "accounts"
+  | "team"
   | "dre"
   | "budgets"
   | "approvals"
@@ -2825,6 +2828,7 @@ export function FinanceiroPage() {
           { key: "transactions", label: "Livro Caixa",           shortLabel: "Extrato",   icon: FileText, badge: transactions.length },
           { key: "clients",      label: "Clientes & Cobranças",  shortLabel: "Clientes",  icon: Users },
           { key: "accounts",     label: "Contas & Conciliação",  shortLabel: "Contas",    icon: Building2 },
+          { key: "team",         label: "Equipe & Metas",        shortLabel: "Equipe",    icon: Trophy },
           { key: "dre",          label: "DRE & Rentabilidade",   shortLabel: "DRE",       icon: Scale },
           { key: "budgets",      label: "Orçamentos & Metas",    shortLabel: "Metas",     icon: Target },
           { key: "approvals",    label: "Governança & Alçadas",  shortLabel: "Alçadas",   icon: ShieldCheck, badge: pendingApprovals.length, alert: pendingApprovals.length > 0 },
@@ -2962,6 +2966,10 @@ export function FinanceiroPage() {
                 }}
                 onNewTx={() => setShowTxModal(true)}
               />
+            )}
+
+            {activeTab === "team" && (
+              <TeamModule onGoToTransactions={() => setActiveTab("transactions")} />
             )}
 
             {activeTab === "dre" && (
