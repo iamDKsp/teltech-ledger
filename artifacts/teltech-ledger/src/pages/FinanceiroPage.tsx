@@ -537,6 +537,107 @@ function EmptyState({
 
 // ─── Design System: Cockpit Macro Report by Product & Month ──────────────────
 
+interface ProductAvatarProps {
+  productId?: string;
+  productName: string;
+  productColor?: string;
+  productIcon?: string | null;
+  size?: number;
+  borderRadius?: number;
+  className?: string;
+  style?: React.CSSProperties;
+}
+
+export function ProductAvatar({
+  productId,
+  productName,
+  productColor,
+  productIcon,
+  size = 26,
+  borderRadius,
+  className,
+  style,
+}: ProductAvatarProps) {
+  const { projects } = useContext(AppContext);
+  const [imgError, setImgError] = useState(false);
+
+  // Match by id or by name
+  const matchedProj = projects?.find(
+    (p) =>
+      (productId && p.id === productId) ||
+      (p.name && productName && p.name.trim().toLowerCase() === productName.trim().toLowerCase())
+  );
+
+  const candidateIcon = productIcon || matchedProj?.icon || null;
+  const color = productColor || matchedProj?.color || "#8B5CF6";
+  const isUnallocated = productId === "unallocated" || candidateIcon === "Layers";
+
+  const isImage = Boolean(
+    candidateIcon &&
+      !isUnallocated &&
+      (candidateIcon.startsWith("http://") ||
+        candidateIcon.startsWith("https://") ||
+        candidateIcon.startsWith("//") ||
+        candidateIcon.startsWith("data:") ||
+        candidateIcon.startsWith("/") ||
+        candidateIcon.startsWith("blob:") ||
+        /\.(png|jpe?g|svg|webp|gif|avif)($|\?)/i.test(candidateIcon))
+  );
+
+  const rad = borderRadius ?? Math.max(6, Math.round(size * 0.28));
+  const initial = productName?.trim() ? productName.trim()[0].toUpperCase() : "P";
+
+  return (
+    <div
+      className={className}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: rad,
+        background: isImage && !imgError ? "rgba(255,255,255,0.06)" : color,
+        border: isImage && !imgError ? `1px solid rgba(255,255,255,0.18)` : `1px solid ${color}60`,
+        boxShadow: `0 2px 8px ${color}35`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        overflow: "hidden",
+        position: "relative",
+        ...style,
+      }}
+    >
+      {isImage && !imgError ? (
+        <img
+          src={candidateIcon!}
+          alt={productName}
+          onError={() => setImgError(true)}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+        />
+      ) : isUnallocated ? (
+        <Layers style={{ width: Math.round(size * 0.52), height: Math.round(size * 0.52), color: "#fff" }} />
+      ) : (
+        <span
+          style={{
+            fontSize: Math.max(10, Math.round(size * 0.44)),
+            fontWeight: 800,
+            color: "#fff",
+            lineHeight: 1,
+            textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+            userSelect: "none",
+          }}
+        >
+          {initial}
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface CockpitProductMacroReportProps {
   report?: ProductMacroReport;
   selectedMonth: number;
@@ -1034,15 +1135,13 @@ function CockpitProductMacroReport({
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span
-                          style={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: "50%",
-                            background: prod.productColor,
-                            boxShadow: `0 0 8px ${prod.productColor}80`,
-                            flexShrink: 0,
-                          }}
+                        <ProductAvatar
+                          productId={prod.productId}
+                          productName={prod.productName}
+                          productColor={prod.productColor}
+                          productIcon={prod.productIcon}
+                          size={26}
+                          borderRadius={7}
                         />
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           <span style={{ fontWeight: 700, color: "#fff", fontSize: 13 }}>
@@ -1307,16 +1406,15 @@ function CockpitProductMacroReport({
                   }}
                 />
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        background: prod.productColor,
-                        boxShadow: `0 0 8px ${prod.productColor}80`,
-                      }}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <ProductAvatar
+                      productId={prod.productId}
+                      productName={prod.productName}
+                      productColor={prod.productColor}
+                      productIcon={prod.productIcon}
+                      size={32}
+                      borderRadius={8}
                     />
                     <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>
                       {prod.productName}
@@ -1413,7 +1511,18 @@ function CockpitProductMacroReport({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Crown style={{ width: 18, height: 18, color: "#F59E0B" }} />
+          {topProduct && topProduct.visibleTotal > 0 ? (
+            <ProductAvatar
+              productId={topProduct.productId}
+              productName={topProduct.productName}
+              productColor={topProduct.productColor}
+              productIcon={topProduct.productIcon}
+              size={26}
+              borderRadius={7}
+            />
+          ) : (
+            <Crown style={{ width: 18, height: 18, color: "#F59E0B" }} />
+          )}
           <div>
             <div style={{ fontSize: 10, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 700 }}>Produto Carro-Chefe</div>
             <div style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>
@@ -1479,15 +1588,14 @@ function CockpitProductMacroReport({
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: selectedCell.product.productColor,
-                    boxShadow: `0 0 10px ${selectedCell.product.productColor}80`,
-                  }}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <ProductAvatar
+                  productId={selectedCell.product.productId}
+                  productName={selectedCell.product.productName}
+                  productColor={selectedCell.product.productColor}
+                  productIcon={selectedCell.product.productIcon}
+                  size={36}
+                  borderRadius={9}
                 />
                 <div>
                   <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fff" }}>
@@ -3809,8 +3917,14 @@ function TransactionsLedgerView({
                         {/* Projeto */}
                         <td style={{ padding: "14px 16px", whiteSpace: "nowrap" }}>
                           {tx.projectName ? (
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: tx.projectColor || "#ccc" }}>
-                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: tx.projectColor || "#888" }} />
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 600, color: tx.projectColor || "#ccc" }}>
+                              <ProductAvatar
+                                productId={tx.projectId || undefined}
+                                productName={tx.projectName}
+                                productColor={tx.projectColor || undefined}
+                                size={18}
+                                borderRadius={5}
+                              />
                               {tx.projectName}
                             </span>
                           ) : (
@@ -4167,13 +4281,20 @@ function ClientsView({
                     {client.projectId && client.projectName && (
                       <div style={{ marginTop: 5 }}>
                         <span style={{
-                          display: "inline-flex", alignItems: "center", gap: 4,
+                          display: "inline-flex", alignItems: "center", gap: 6,
                           fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
                           background: `${client.projectColor || "#7C5AC2"}22`,
                           border: `1px solid ${client.projectColor || "#7C5AC2"}44`,
                           color: client.projectColor || "#A78BFA",
                         }}>
-                          <FolderOpen size={9} /> {client.projectName}
+                          <ProductAvatar
+                            productId={client.projectId}
+                            productName={client.projectName}
+                            productColor={client.projectColor || undefined}
+                            size={14}
+                            borderRadius={3}
+                          />
+                          {client.projectName}
                         </span>
                       </div>
                     )}
