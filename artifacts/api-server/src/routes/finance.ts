@@ -17,6 +17,7 @@ import {
   clientSalesTable,
   saleItemsTable,
   saleModulesTable,
+  teamCommissionsTable,
   tasksTable,
 } from "@workspace/db";
 import { eq, and, or, lt, desc, sql, inArray, isNotNull } from "drizzle-orm";
@@ -2058,7 +2059,11 @@ router.post("/reset-all", requireAuth, async (req: Request, res: Response) => {
         .delete(financialTransactionsTable)
         .where(eq(financialTransactionsTable.workspaceId, workspaceId));
 
-      // 5. Limpar módulos, itens de vendas e vendas comerciais
+      // 5. Limpar comissões, módulos, itens de vendas e vendas comerciais
+      await tx
+        .delete(teamCommissionsTable)
+        .where(eq(teamCommissionsTable.workspaceId, workspaceId));
+
       await tx
         .delete(saleModulesTable)
         .where(eq(saleModulesTable.workspaceId, workspaceId));

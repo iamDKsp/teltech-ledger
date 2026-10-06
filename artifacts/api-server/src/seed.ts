@@ -43,6 +43,7 @@ export async function runOneTimeFinancialReset() {
       await client.query("DELETE FROM financial_transactions;");
 
       // 5. Limpar módulos contratados, itens de vendas e vendas comerciais
+      await client.query("DELETE FROM team_commissions;");
       await client.query("DELETE FROM sale_modules;");
       await client.query("DELETE FROM sale_items;");
       await client.query("DELETE FROM client_sales;");
@@ -80,6 +81,7 @@ export async function runOneTimeFinancialReset() {
 
 export async function ensureSchemaUpgrades() {
   try {
+    // 1. WhatsApp monitoring upgrades
     await pool.query(`
       ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'outbound';
       ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS sender_phone TEXT;
@@ -90,8 +92,141 @@ export async function ensureSchemaUpgrades() {
       CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_recipient ON whatsapp_messages (recipient);
       CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_sender_phone ON whatsapp_messages (sender_phone);
     `);
+
+    // 2. Client contract columns upgrade
+    await pool.query(`
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS monthly_amount integer;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS billing_day integer;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS contract_status text DEFAULT 'active';
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS contract_start_date timestamp;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS contract_end_date timestamp;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS total_installments integer;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS contract_notes text;
+    `);
+
+    // 3. Sales model upgrades (saas_modules, client_sales, sale_items, sale_modules)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS saas_modules (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        description text,
+        default_price integer NOT NULL DEFAULT 0,
+        is_active boolean NOT NULL DEFAULT true,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS client_sales (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        project_id uuid REFERENCES projects(id) ON DELETE SET NULL,
+        title text NOT NULL,
+        status text NOT NULL DEFAULT 'active',
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        sale_id uuid NOT NULL REFERENCES client_sales(id) ON DELETE CASCADE,
+        kind text NOT NULL,
+        label text NOT NULL,
+        total_amount integer NOT NULL DEFAULT 0,
+        installments_count integer NOT NULL DEFAULT 1,
+        first_due_date timestamp,
+        payment_mode text NOT NULL DEFAULT 'installments',
+        start_mode text,
+        billing_day integer NOT NULL DEFAULT 1,
+        start_date timestamp,
+        end_date timestamp,
+        fixed_amount integer,
+        generated_through text,
+        status text NOT NULL DEFAULT 'active',
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS sale_modules (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        sale_item_id uuid NOT NULL REFERENCES sale_items(id) ON DELETE CASCADE,
+        module_id uuid NOT NULL REFERENCES saas_modules(id) ON DELETE RESTRICT,
+        price integer NOT NULL DEFAULT 0,
+        start_date timestamp NOT NULL DEFAULT now(),
+        end_date timestamp,
+        created_at timestamp NOT NULL DEFAULT now()
+      );
+
+      ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS sale_id uuid REFERENCES client_sales(id) ON DELETE SET NULL;
+      ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS sale_item_id uuid REFERENCES sale_items(id) ON DELETE SET NULL;
+      ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS revenue_type text;
+      ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS reference_month text;
+    `);
+
+    // 4. Team & Commissions upgrades (team_members, team_commissions, seller_id, hunter_id, team_member_id)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS team_members (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+        name text NOT NULL,
+        email text,
+        phone text,
+        role text NOT NULL DEFAULT 'vendedor',
+        role_title text NOT NULL DEFAULT 'Vendedor',
+        base_salary integer NOT NULL DEFAULT 0,
+        commission_type text NOT NULL DEFAULT 'first_installment',
+        project_percentage integer NOT NULL DEFAULT 0,
+        target_clients integer NOT NULL DEFAULT 4,
+        target_bonus integer NOT NULL DEFAULT 80000,
+        career_level integer NOT NULL DEFAULT 1,
+        consecutive_target_months integer NOT NULL DEFAULT 0,
+        pix_key text,
+        status text NOT NULL DEFAULT 'active',
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS team_commissions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        member_id uuid NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
+        sale_id uuid REFERENCES client_sales(id) ON DELETE SET NULL,
+        sale_item_id uuid REFERENCES sale_items(id) ON DELETE SET NULL,
+        client_id uuid REFERENCES clients(id) ON DELETE SET NULL,
+        project_id uuid REFERENCES projects(id) ON DELETE SET NULL,
+        type text NOT NULL,
+        reference_month text NOT NULL,
+        amount integer NOT NULL DEFAULT 0,
+        status text NOT NULL DEFAULT 'pending',
+        transaction_id uuid REFERENCES financial_transactions(id) ON DELETE SET NULL,
+        paid_at timestamp,
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      ALTER TABLE client_sales ADD COLUMN IF NOT EXISTS seller_id uuid REFERENCES team_members(id) ON DELETE SET NULL;
+      ALTER TABLE client_sales ADD COLUMN IF NOT EXISTS hunter_id uuid REFERENCES team_members(id) ON DELETE SET NULL;
+      ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS team_member_id uuid REFERENCES team_members(id) ON DELETE SET NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_team_members_ws ON team_members(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_team_commissions_ws ON team_commissions(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_team_commissions_member ON team_commissions(member_id);
+      CREATE INDEX IF NOT EXISTS idx_team_commissions_ref_month ON team_commissions(reference_month);
+      CREATE INDEX IF NOT EXISTS idx_client_sales_seller ON client_sales(seller_id);
+      CREATE INDEX IF NOT EXISTS idx_client_sales_hunter ON client_sales(hunter_id);
+      CREATE INDEX IF NOT EXISTS idx_fin_tx_team_member ON financial_transactions(team_member_id);
+    `);
+
+    console.log("  ✅ [Migrations] Schema upgrades aplicados com sucesso.");
   } catch (err) {
-    console.error("  ❌ [Migrations] Falha ao verificar/aplicar schema upgrades de whatsapp_messages:", err);
+    console.error("  ❌ [Migrations] Falha ao verificar/aplicar schema upgrades:", err);
   }
 }
 
