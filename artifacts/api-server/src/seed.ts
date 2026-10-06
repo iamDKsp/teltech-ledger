@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
 
 export async function runOneTimeFinancialReset() {
-  const migrationId = "2026-10-05_reset_financial_module_v3";
+  const migrationId = "2026-10-05_reset_financial_module_v4";
   try {
     // 1. Garantir que a tabela de migrações do sistema existe
     await pool.query(`
