@@ -38,6 +38,7 @@ import {
   Target,
   AlertCircle,
   Eye,
+  EyeOff,
   RefreshCw,
   SlidersHorizontal,
   Layers,
@@ -663,6 +664,45 @@ function CockpitProductMacroReport({
     month: ProductMacroMonth;
   } | null>(null);
 
+  // Hidden products state with localStorage persistence
+  const [hiddenProductIds, setHiddenProductIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("teltech_macro_hidden_products");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [productsDropdownOpen, setProductsDropdownOpen] = useState(false);
+  const productsDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("teltech_macro_hidden_products", JSON.stringify(hiddenProductIds));
+    } catch {}
+  }, [hiddenProductIds]);
+
+  useEffect(() => {
+    if (!productsDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (productsDropdownRef.current && !productsDropdownRef.current.contains(e.target as Node)) {
+        setProductsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [productsDropdownOpen]);
+
+  const toggleProductVisibility = (productId: string) => {
+    setHiddenProductIds((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
+  };
+
+  const showAllProducts = () => {
+    setHiddenProductIds([]);
+  };
+
   if (!report || !report.months || report.months.length === 0) {
     return null;
   }
@@ -697,8 +737,8 @@ function CockpitProductMacroReport({
 
   const products = report.products || [];
 
-  // Compute row totals for the visible period
-  const productRowsCalculated = products.map((p) => {
+  // Compute row totals for all products in the visible period
+  const allProductRowsCalculated = products.map((p) => {
     const visibleTotal = visibleMonths.reduce((sum, m) => sum + getCellValue(p.months[m.key]), 0);
     const visiblePaid = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.paid || 0), 0);
     const visiblePending = visibleMonths.reduce((sum, m) => sum + (p.months[m.key]?.pending || 0), 0);
@@ -717,10 +757,25 @@ function CockpitProductMacroReport({
     };
   });
 
-  // Calculate totals per visible month
+  const hideZeroRevenueProducts = () => {
+    const zeroIds = allProductRowsCalculated
+      .filter((p) => p.visibleTotal === 0)
+      .map((p) => p.productId);
+    setHiddenProductIds(zeroIds);
+  };
+
+  // Filter ONLY active (non-hidden) products for display and aggregation
+  const productRowsCalculated = allProductRowsCalculated.filter(
+    (p) => !hiddenProductIds.includes(p.productId)
+  );
+
+  // Calculate totals per visible month ONLY with active products
   const monthTotalsCalculated: Record<string, number> = {};
   for (const m of visibleMonths) {
-    monthTotalsCalculated[m.key] = products.reduce((sum, p) => sum + getCellValue(p.months[m.key]), 0);
+    monthTotalsCalculated[m.key] = productRowsCalculated.reduce(
+      (sum, p) => sum + getCellValue(p.months[m.key]),
+      0
+    );
   }
 
   const grandVisibleTotal = Object.values(monthTotalsCalculated).reduce((sum, v) => sum + v, 0);
@@ -729,7 +784,9 @@ function CockpitProductMacroReport({
 
   // Key Analytical Highlights
   const topProduct = [...productRowsCalculated].sort((a, b) => b.visibleTotal - a.visibleTotal)[0];
-  const peakMonth = [...visibleMonths].sort((a, b) => (monthTotalsCalculated[b.key] || 0) - (monthTotalsCalculated[a.key] || 0))[0];
+  const peakMonth = [...visibleMonths].sort(
+    (a, b) => (monthTotalsCalculated[b.key] || 0) - (monthTotalsCalculated[a.key] || 0)
+  )[0];
   const peakMonthTotal = peakMonth ? monthTotalsCalculated[peakMonth.key] || 0 : 0;
 
   return (
@@ -946,6 +1003,166 @@ function CockpitProductMacroReport({
               </button>
             ))}
           </div>
+
+          {/* Product Filter Dropdown */}
+          <div ref={productsDropdownRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setProductsDropdownOpen(!productsDropdownOpen)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 7,
+                border: hiddenProductIds.length > 0 ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.1)",
+                fontSize: 11,
+                fontWeight: 600,
+                background: hiddenProductIds.length > 0 ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.06)",
+                color: hiddenProductIds.length > 0 ? "#FCA5A5" : "#e4e4e7",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.2s ease",
+              }}
+            >
+              <SlidersHorizontal style={{ width: 12, height: 12 }} />
+              <span>
+                Produtos ({productRowsCalculated.length}/{products.length})
+              </span>
+              {hiddenProductIds.length > 0 && (
+                <span
+                  style={{
+                    background: "#EF4444",
+                    color: "#fff",
+                    fontSize: 9,
+                    fontWeight: 800,
+                    padding: "1px 5px",
+                    borderRadius: 10,
+                  }}
+                >
+                  {hiddenProductIds.length} oculto{hiddenProductIds.length > 1 ? "s" : ""}
+                </span>
+              )}
+              <ChevronDown style={{ width: 12, height: 12, opacity: 0.7 }} />
+            </button>
+
+            {productsDropdownOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  left: 0,
+                  zIndex: 60,
+                  minWidth: 290,
+                  maxWidth: 340,
+                  background: "#18181b",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 10,
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.75)",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    Produtos Contabilizados
+                  </span>
+                  <span style={{ fontSize: 10, color: "#a1a1aa" }}>
+                    {productRowsCalculated.length} de {products.length} ativos
+                  </span>
+                </div>
+
+                {/* Quick actions */}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={showAllProducts}
+                    disabled={hiddenProductIds.length === 0}
+                    style={{
+                      flex: 1,
+                      padding: "4px 8px",
+                      borderRadius: 5,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.05)",
+                      color: hiddenProductIds.length === 0 ? "#52525b" : "#e4e4e7",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: hiddenProductIds.length === 0 ? "default" : "pointer",
+                    }}
+                  >
+                    Mostrar Todos
+                  </button>
+                  <button
+                    onClick={hideZeroRevenueProducts}
+                    style={{
+                      flex: 1,
+                      padding: "4px 8px",
+                      borderRadius: 5,
+                      border: "1px solid rgba(139,92,246,0.3)",
+                      background: "rgba(139,92,246,0.12)",
+                      color: "#C4B5FD",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Ocultar Sem Receita (R$ 0)
+                  </button>
+                </div>
+
+                {/* Product List */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 280, overflowY: "auto", paddingRight: 2 }}>
+                  {allProductRowsCalculated.map((prod) => {
+                    const isHidden = hiddenProductIds.includes(prod.productId);
+                    return (
+                      <div
+                        key={prod.productId}
+                        onClick={() => toggleProductVisibility(prod.productId)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          background: isHidden ? "rgba(255,255,255,0.02)" : "rgba(255,255,255,0.06)",
+                          border: isHidden ? "1px solid rgba(255,255,255,0.04)" : "1px solid rgba(255,255,255,0.08)",
+                          cursor: "pointer",
+                          opacity: isHidden ? 0.45 : 1,
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          <ProductAvatar
+                            productId={prod.productId}
+                            productName={prod.productName}
+                            productColor={prod.productColor}
+                            productIcon={prod.productIcon}
+                            size={22}
+                            borderRadius={5}
+                          />
+                          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: isHidden ? "#71717a" : "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {prod.productName}
+                            </span>
+                            <span style={{ fontSize: 10, color: isHidden ? "#52525b" : "#10B981", fontWeight: 600 }}>
+                              {formatBRL(prod.visibleTotal)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                          {isHidden ? (
+                            <EyeOff style={{ width: 14, height: 14, color: "#EF4444" }} />
+                          ) : (
+                            <Eye style={{ width: 14, height: 14, color: "#10B981" }} />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* View Mode Toggle: Matriz vs Cards */}
@@ -988,6 +1205,49 @@ function CockpitProductMacroReport({
           </button>
         </div>
       </div>
+
+      {/* ─── Hidden Products Notice Banner ─────────────────────────────── */}
+      {hiddenProductIds.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: 8,
+            padding: "8px 14px",
+            marginBottom: 16,
+            fontSize: 12,
+            color: "#FCA5A5",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <EyeOff style={{ width: 15, height: 15, color: "#EF4444", flexShrink: 0 }} />
+            <span>
+              <strong>{hiddenProductIds.length} {hiddenProductIds.length === 1 ? "produto oculto" : "produtos ocultos"}</strong> da consolidação macro. Os totais acima e abaixo foram recalculados considerando apenas os produtos ativos.
+            </span>
+          </div>
+          <button
+            onClick={showAllProducts}
+            style={{
+              background: "rgba(239,68,68,0.2)",
+              border: "1px solid rgba(239,68,68,0.4)",
+              color: "#fff",
+              borderRadius: 6,
+              padding: "3px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Restaurar Todos ({products.length})
+          </button>
+        </div>
+      )}
 
       {/* ─── Mode 1: Matriz Mês a Mês (Tabela) ────────────────────────────── */}
       {viewMode === "matrix" && (
@@ -1113,46 +1373,114 @@ function CockpitProductMacroReport({
             </thead>
 
             <tbody>
-              {productRowsCalculated.map((prod) => {
-                const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
-                return (
-                  <tr
-                    key={prod.productId}
+              {productRowsCalculated.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={visibleMonths.length + 4}
                     style={{
-                      borderBottom: "1px solid rgba(255,255,255,0.05)",
-                      transition: "background 0.15s ease",
+                      padding: "40px 20px",
+                      textAlign: "center",
+                      color: "#a1a1aa",
                     }}
                   >
-                    {/* Sticky Product Cell */}
-                    <td
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                      <EyeOff style={{ width: 28, height: 28, color: "#EF4444" }} />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                        Todos os produtos foram ocultados
+                      </span>
+                      <span style={{ fontSize: 12, color: "#71717a" }}>
+                        Nenhum produto está sendo considerado no cálculo macro no momento.
+                      </span>
+                      <button
+                        onClick={showAllProducts}
+                        style={{
+                          marginTop: 6,
+                          padding: "6px 14px",
+                          borderRadius: 6,
+                          background: "#8B5CF6",
+                          border: "none",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Restaurar Todos os Produtos ({products.length})
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                productRowsCalculated.map((prod) => {
+                  const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
+                  return (
+                    <tr
+                      key={prod.productId}
                       style={{
-                        position: "sticky",
-                        left: 0,
-                        zIndex: 1,
-                        background: "rgba(22,22,26,0.98)",
-                        padding: "12px 14px",
-                        borderRight: "1px solid rgba(255,255,255,0.06)",
+                        borderBottom: "1px solid rgba(255,255,255,0.05)",
+                        transition: "background 0.15s ease",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <ProductAvatar
-                          productId={prod.productId}
-                          productName={prod.productName}
-                          productColor={prod.productColor}
-                          productIcon={prod.productIcon}
-                          size={26}
-                          borderRadius={7}
-                        />
-                        <div style={{ display: "flex", flexDirection: "column" }}>
-                          <span style={{ fontWeight: 700, color: "#fff", fontSize: 13 }}>
-                            {prod.productName}
-                          </span>
-                          <span style={{ fontSize: 10, color: "#71717a" }}>
-                            {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente ativo" : "clientes ativos"}
-                          </span>
+                      {/* Sticky Product Cell */}
+                      <td
+                        style={{
+                          position: "sticky",
+                          left: 0,
+                          zIndex: 1,
+                          background: "rgba(22,22,26,0.98)",
+                          padding: "12px 14px",
+                          borderRight: "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <ProductAvatar
+                            productId={prod.productId}
+                            productName={prod.productName}
+                            productColor={prod.productColor}
+                            productIcon={prod.productIcon}
+                            size={26}
+                            borderRadius={7}
+                          />
+                          <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+                            <span style={{ fontWeight: 700, color: "#fff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {prod.productName}
+                            </span>
+                            <span style={{ fontSize: 10, color: "#71717a" }}>
+                              {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente ativo" : "clientes ativos"}
+                            </span>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleProductVisibility(prod.productId);
+                            }}
+                            title={`Ocultar ${prod.productName} e recalcular totais`}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#71717a",
+                              padding: "4px 6px",
+                              cursor: "pointer",
+                              borderRadius: 4,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              transition: "all 0.15s ease",
+                              marginLeft: "auto",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = "#EF4444";
+                              e.currentTarget.style.background = "rgba(239,68,68,0.15)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = "#71717a";
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            <EyeOff style={{ width: 14, height: 14 }} />
+                          </button>
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
                     {/* Month Amounts */}
                     {visibleMonths.map((m) => {
@@ -1268,8 +1596,9 @@ function CockpitProductMacroReport({
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
+              })
+            )}
+          </tbody>
 
             {/* Total Row (TOTAL GERAL TELTECH) */}
             <tfoot>
@@ -1376,63 +1705,134 @@ function CockpitProductMacroReport({
             marginBottom: 16,
           }}
         >
-          {productRowsCalculated.map((prod) => {
-            const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
-            return (
-              <div
-                key={prod.productId}
+          {productRowsCalculated.length === 0 ? (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                padding: "40px 20px",
+                background: "rgba(22,22,26,0.6)",
+                border: "1px dashed rgba(255,255,255,0.12)",
+                borderRadius: 12,
+                textAlign: "center",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <EyeOff style={{ width: 28, height: 28, color: "#EF4444" }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                Todos os produtos foram ocultados
+              </span>
+              <span style={{ fontSize: 12, color: "#71717a" }}>
+                Nenhum produto está sendo considerado no cálculo macro no momento.
+              </span>
+              <button
+                onClick={showAllProducts}
                 style={{
-                  background: "rgba(22,22,26,0.8)",
-                  border: `1px solid ${prod.productColor}35`,
-                  borderRadius: 12,
-                  padding: 18,
-                  position: "relative",
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+                  marginTop: 6,
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  background: "#8B5CF6",
+                  border: "none",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
                 }}
               >
-                {/* Top Color Accent Line */}
+                Restaurar Todos os Produtos ({products.length})
+              </button>
+            </div>
+          ) : (
+            productRowsCalculated.map((prod) => {
+              const sharePercent = grandVisibleTotal > 0 ? Math.round((prod.visibleTotal / grandVisibleTotal) * 100) : 0;
+              return (
                 <div
+                  key={prod.productId}
                   style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: 3,
-                    background: prod.productColor,
+                    background: "rgba(22,22,26,0.8)",
+                    border: `1px solid ${prod.productColor}35`,
+                    borderRadius: 12,
+                    padding: 18,
+                    position: "relative",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
                   }}
-                />
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <ProductAvatar
-                      productId={prod.productId}
-                      productName={prod.productName}
-                      productColor={prod.productColor}
-                      productIcon={prod.productIcon}
-                      size={32}
-                      borderRadius={8}
-                    />
-                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>
-                      {prod.productName}
-                    </h4>
-                  </div>
-                  <span
+                >
+                  {/* Top Color Accent Line */}
+                  <div
                     style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      padding: "2px 8px",
-                      borderRadius: 12,
-                      background: "rgba(255,255,255,0.06)",
-                      color: "#a1a1aa",
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 3,
+                      background: prod.productColor,
                     }}
-                  >
-                    {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente" : "clientes"}
-                  </span>
-                </div>
+                  />
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <ProductAvatar
+                        productId={prod.productId}
+                        productName={prod.productName}
+                        productColor={prod.productColor}
+                        productIcon={prod.productIcon}
+                        size={32}
+                        borderRadius={8}
+                      />
+                      <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>
+                        {prod.productName}
+                      </h4>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 12,
+                          background: "rgba(255,255,255,0.06)",
+                          color: "#a1a1aa",
+                        }}
+                      >
+                        {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente" : "clientes"}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleProductVisibility(prod.productId);
+                        }}
+                        title={`Ocultar ${prod.productName} e recalcular totais`}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#71717a",
+                          padding: "4px",
+                          cursor: "pointer",
+                          borderRadius: 4,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          transition: "all 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = "#EF4444";
+                          e.currentTarget.style.background = "rgba(239,68,68,0.15)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = "#71717a";
+                          e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <EyeOff style={{ width: 14, height: 14 }} />
+                      </button>
+                    </div>
+                  </div>
 
                 <div>
                   <span style={{ fontSize: 11, color: "#a1a1aa", textTransform: "uppercase", fontWeight: 600 }}>
@@ -1494,7 +1894,8 @@ function CockpitProductMacroReport({
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </div>
       )}
 
