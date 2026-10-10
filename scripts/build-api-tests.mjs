@@ -16,7 +16,7 @@ await build({
   outdir: path.join(apiDir, "dist", "tests"), outExtension: { ".js": ".mjs" }, logLevel: "error",
   banner: { js: "import { createRequire as createTestRequire } from 'node:module'; const require = createTestRequire(import.meta.url);" },
   plugins: [{ name: "runtime-packages", setup(builder) {
-    builder.onResolve({ filter: /^(pg|pino|express|@whiskeysockets\/baileys)(\/.*)?$/ }, (args) => {
+    builder.onResolve({ filter: /^(pg|pino|express|sharp|@whiskeysockets\/baileys)(\/.*)?$/ }, (args) => {
       const importerRequire = createRequire(args.importer || path.join(apiDir, "package.json"));
       return { path: pathToFileURL(importerRequire.resolve(args.path)).href, external: true };
     });

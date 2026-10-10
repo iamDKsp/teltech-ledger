@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import makeWASocket, { DisconnectReason, generateWAMessageFromContent, proto, type WASocket } from "@whiskeysockets/baileys";
-import { db, clientsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable } from "@workspace/db";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { db, clientsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable, whatsappContactsTable, usersTable, workspaceMembersTable } from "@workspace/db";
+import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import pino from "pino";
 import QRCode from "qrcode";
 import { logger } from "../lib/logger";
@@ -250,16 +250,69 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
 
     const isFromMe = Boolean(item.key?.fromMe);
 
-    try {
-      const clients = await db.select({
-        id: clientsTable.id,
-        name: clientsTable.name,
-        phone: clientsTable.phone,
-      }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId));
+    // If outbound, check if already recorded by sendManualTextMessage or queue to prevent duplicates
+    if (isFromMe && item.key?.id) {
+      try {
+        const [existing] = await db.select({ id: whatsappMessagesTable.id })
+          .from(whatsappMessagesTable)
+          .where(and(
+            eq(whatsappMessagesTable.workspaceId, workspaceId),
+            or(
+              eq(whatsappMessagesTable.waMessageId, item.key.id),
+              eq(whatsappMessagesTable.dedupeKey, `outbound:${workspaceId}:${item.key.id}`),
+              eq(whatsappMessagesTable.dedupeKey, `manual:${workspaceId}:${item.key.id}`)
+            )
+          ))
+          .limit(1);
 
-      const matchingClient = clients.find(
+        if (existing) {
+          // Message already persisted when sent from web cockpit
+          continue;
+        }
+      } catch (err) {
+        logger.warn({ err, workspaceId, waId: item.key.id }, "Error checking existing message deduplication");
+      }
+    }
+
+    try {
+      const [clients, contacts, members] = await Promise.all([
+        db.select({
+          id: clientsTable.id,
+          name: clientsTable.name,
+          phone: clientsTable.phone,
+        }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId)),
+        db.select({
+          id: whatsappContactsTable.id,
+          name: whatsappContactsTable.name,
+          nickname: whatsappContactsTable.nickname,
+          roleLabel: whatsappContactsTable.roleLabel,
+          phone: whatsappContactsTable.phone,
+          userId: whatsappContactsTable.userId,
+        }).from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, workspaceId)),
+        db.select({
+          id: usersTable.id,
+          name: usersTable.name,
+          phone: usersTable.phone,
+          role: workspaceMembersTable.role,
+        }).from(usersTable)
+          .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
+          .where(eq(workspaceMembersTable.workspaceId, workspaceId)),
+      ]);
+
+      const matchingContact = contacts.find(
         (c) => phonesMatch(c.phone, jidClean) || phonesMatch(c.phone, canonicalSender) || phonesMatch(c.phone, normalizedSender)
       );
+
+      const matchingMember = !matchingContact ? members.find(
+        (m) => phonesMatch(m.phone, jidClean) || phonesMatch(m.phone, canonicalSender) || phonesMatch(m.phone, normalizedSender)
+      ) : null;
+
+      const matchingClient = (!matchingContact && !matchingMember) ? clients.find(
+        (c) => phonesMatch(c.phone, jidClean) || phonesMatch(c.phone, canonicalSender) || phonesMatch(c.phone, normalizedSender)
+      ) : null;
+
+      const isPartner = Boolean(matchingContact || matchingMember);
+      const partnerName = matchingContact?.name || matchingMember?.name || null;
 
       let transactionId: string | null = null;
       if (matchingClient) {
@@ -269,6 +322,16 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           .orderBy(desc(financialTransactionsTable.dueDate))
           .limit(1);
         transactionId = latestTx?.id ?? null;
+      } else if (matchingContact?.userId || matchingMember?.id) {
+        const partnerUserId = matchingContact?.userId || matchingMember?.id;
+        if (partnerUserId) {
+          const [latestTx] = await db.select({ id: financialTransactionsTable.id })
+            .from(financialTransactionsTable)
+            .where(and(eq(financialTransactionsTable.workspaceId, workspaceId), eq(financialTransactionsTable.partnerId, partnerUserId)))
+            .orderBy(desc(financialTransactionsTable.dueDate))
+            .limit(1);
+          transactionId = latestTx?.id ?? null;
+        }
       }
 
       const dedupeKey = `${isFromMe ? "outbound" : "inbound"}:${workspaceId}:${item.key?.id || `${jidClean}_${Date.now()}`}`;
@@ -295,16 +358,17 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           waMessageId: item.key?.id ?? null,
         }).onConflictDoNothing();
       } else {
-        // Record inbound messages from client
+        // Record inbound messages from client or partner
+        const resolvedSenderName = partnerName ?? matchingClient?.name ?? item.pushName ?? (isPartner ? "Sócio" : "Cliente");
         await db.insert(whatsappMessagesTable).values({
           workspaceId,
           clientId: matchingClient?.id ?? null,
           transactionId,
           dedupeKey,
-          kind: "client_reply",
+          kind: isPartner ? "partner_reply" : "client_reply",
           recipient: session.phone ?? "Nexus",
           senderPhone: canonicalSender || normalizedSender || jidClean,
-          senderName: matchingClient?.name ?? item.pushName ?? "Cliente",
+          senderName: resolvedSenderName,
           direction: "inbound",
           body: text,
           status: "received",
@@ -313,7 +377,7 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           waMessageId: item.key?.id ?? null,
         }).onConflictDoNothing();
 
-        logger.info({ workspaceId, sender: canonicalSender || jidClean, clientName: matchingClient?.name, body: text.slice(0, 50) }, "WhatsApp incoming message recorded from client");
+        logger.info({ workspaceId, sender: canonicalSender || jidClean, contactName: resolvedSenderName, isPartner, body: text.slice(0, 50) }, "WhatsApp incoming message recorded");
       }
     } catch (err) {
       logger.error({ err, workspaceId, jidClean }, "Failed to persist WhatsApp message from messages.upsert");
@@ -711,14 +775,16 @@ export async function sendManualTextMessage(
   const target = await resolveDestinationJid(session, phone);
 
   const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
-  const waMessageId = sent?.key?.id ?? null;
+  const waMessageId = sent?.key?.id ?? id;
+
+  const dedupeKey = `outbound:${workspaceId}:${waMessageId}`;
 
   const [created] = await db.insert(whatsappMessagesTable).values({
     id: messageId,
     workspaceId,
     clientId: options?.clientId ?? null,
     transactionId: options?.transactionId ?? null,
-    dedupeKey: `manual:${workspaceId}:${messageId}`,
+    dedupeKey,
     kind: "manual_chat",
     recipient: phone,
     senderPhone: session.phone ?? null,
@@ -729,7 +795,14 @@ export async function sendManualTextMessage(
     isRead: true,
     sentAt: new Date(),
     waMessageId,
-  }).returning();
+  }).onConflictDoNothing().returning();
+
+  if (!created) {
+    const [existing] = await db.select().from(whatsappMessagesTable)
+      .where(and(eq(whatsappMessagesTable.workspaceId, workspaceId), eq(whatsappMessagesTable.waMessageId, waMessageId)))
+      .limit(1);
+    if (existing) return existing;
+  }
 
   return created;
 }

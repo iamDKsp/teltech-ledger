@@ -125,37 +125,54 @@ idempotência não devem ser apagados enquanto o emissor puder reenviar eventos.
 
 ## Foto do cliente: cópia armazenada no Leadger
 
-Foi definido que o Leadger deve manter uma cópia própria da foto do cliente.
-O endereço do outro sistema será usado para transferir o arquivo, e a interface
-exibirá a imagem armazenada pelo Leadger. O carregamento da tela não deve
-depender de consultar o sistema de origem. Só a troca da foto exige nova cópia.
+**Implementado nesta versão do código; requer deploy e migração para ativar.**
+O campo opcional `photo: { sourceUrl, version }` é aceito no cliente de
+`client.upsert` e de `base.upsert`, mantendo `schemaVersion: 1`. Receptores
+anteriores à implementação não aceitam o campo. `photo` omitido preserva a
+foto; `photo: null` remove explicitamente, com versão maior do cliente.
 
-**Status: requisito documentado; suporte ainda não implementado no receptor.**
-O contrato v1 atual rejeita `photo`, `photoUrl` e outros campos adicionais com
-422. Esta alteração de documentação não cria campo no banco, endpoint de foto,
-rotina de download ou armazenamento de imagem. A equipe do Leadger deve
-implementar/publicar esses componentes antes de o emissor enviar fotos.
+O backend baixa uma imagem JPEG/PNG/WebP de até 5 MiB e 16 milhões de pixels,
+valida o conteúdo, remove metadados e salva uma cópia WebP de até 1024x1024.
+Animações e outros formatos são rejeitados. O download tem limite de 8 segundos
+mais até 2 segundos para DNS. Não segue redirecionamentos, bloqueia endereços
+privados e fixa no socket TLS um IP público previamente verificado.
 
-A proposta para a extensão futura é associar ao cliente metadados como
-`photo: { sourceUrl, version }`. O backend baixa a imagem por HTTPS, valida o
-arquivo e salva uma cópia em armazenamento persistente; a URL de origem não
-fica como endereço definitivo de exibição. Para fotos privadas, o emissor pode
-disponibilizar um link assinado válido durante a transferência e os retries.
-Se precisar enviar bytes diretamente, será necessário um endpoint específico
-de upload autenticado. Não incluir Base64 no JSON do webhook atual.
+Configure na integração os hosts HTTPS exatos de origem das fotos:
 
-O contrato final deve distinguir foto omitida (conservar), null (remover) e
-objeto (substituir), exigir versões crescentes e reconhecer reenvios. A foto
-deve ser associada ao cliente já vinculado, inclusive cadastros manuais.
-Falhas precisam permitir retry e conservar a imagem anterior até a nova cópia
-ser salva. Definir a confirmação de armazenamento antes de ativar o envio:
-o HTTP 200 financeiro atual não confirma recebimento de imagem.
+```json
+{"photoAllowedHosts":["cdn.sistema-amigo.com.br"]}
+```
 
-Na implementação, limitar tamanho/formato, validar o conteúdo real e restringir
-os downloads a origens HTTPS aprovadas, bloqueando destinos internos. A imagem
-precisa persistir após reinícios/deploys. Testar criação, substituição, remoção,
-reenvios, versões antigas, link expirado e origem offline depois da cópia.
-As orientações para a IA do emissor estão na seção 11 do TXT.
+Adicione esse campo ao objeto já existente em `INBOUND_WEBHOOK_INTEGRATIONS`.
+O domínio é exemplo e precisa ser substituído pelo host real informado pelo
+outro desenvolvedor. Não inclua protocolo, caminho ou wildcard. Sem hosts
+configurados, eventos que tentam gravar uma foto recebem 422
+`photo_host_not_allowed`; eventos sem foto continuam funcionando.
+
+A migração aditiva é `lib/db/migrations/2026-10-10_client_photos.sql`.
+As imagens ficam em `public/uploads/client-photos` e usam o volume
+`teltech_uploads` já previsto no Docker/Portainer. Inclua esse volume nos backups.
+A URL no cliente é local (`/uploads/client-photos/...`); o cadastro, o modal e
+a barra lateral exibem somente a cópia do Leadger, sem consultar a origem.
+
+`photo.version` é crescente; também incremente `client.version` nas mudanças.
+Mesma versão de foto evita novo download; versão anterior é ignorada. A remoção
+mantém a última versão de foto para impedir restauração por evento antigo.
+A imagem só pode ser gerenciada pela integração que a gravou inicialmente.
+
+HTTP 200 com `photo.status: stored` confirma a cópia antes do commit do evento.
+Também há estados `removed`, `unchanged` e `stale`. Falhas preservam a imagem
+anterior e não confirmam o evento. Prefira enviar a foto em `client.upsert`
+separado, após a base/faturas, para que problemas de imagem não atrasem o financeiro.
+
+Após commit, arquivos antigos substituídos/removidos são excluídos. Uma falha de
+banco com resultado incerto pode deixar arquivo não referenciado: a implementação
+o conserva para não apagar uma cópia cujo commit pode ter ocorrido. Esses arquivos
+podem ser reconciliados com o banco na manutenção do armazenamento.
+
+O envio por link assinado funciona sem login interativo; renove links expirados
+com novo evento e nova versão de cliente. Não há upload direto/Base64 nesse
+contrato. Limites, erros e exemplos completos estão na seção 11 do TXT.
 
 
 

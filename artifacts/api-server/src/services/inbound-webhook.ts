@@ -5,6 +5,7 @@ import {
 import { and, eq, gte, sql } from "drizzle-orm";
 import { enqueuePaymentReceipt } from "./whatsapp-automation";
 import { parseDay } from "./sales-schedule";
+import { ClientPhotoFiles, validatePhotoUrl, type PhotoStorageOptions } from "./client-photo";
 import {
   WebhookError, compareEntityVersion, hashPayload, paidBalanceDelta, findExistingWebhookClient,
   type InboundWebhook, type WebhookClient, type WebhookBase, type WebhookInvoice, type WebhookIntegration,
@@ -19,8 +20,11 @@ export interface WebhookResult extends Record<string, unknown> {
 }
 
 /** Event, identifiers, financial balances and audit entries commit together. */
-export async function processInboundWebhook(config: WebhookIntegration, event: InboundWebhook, bodyHash: string): Promise<WebhookResult> {
-  return db.transaction(async (tx) => {
+export async function processInboundWebhook(config: WebhookIntegration, event: InboundWebhook, bodyHash: string, photoOptions?: PhotoStorageOptions): Promise<WebhookResult> {
+  const files = new ClientPhotoFiles(photoOptions);
+  let committed = false;
+  try {
+  const result = await db.transaction(async (tx) => {
     await tx.execute(sql`set local lock_timeout = '5s'`);
     await tx.execute(sql`set local statement_timeout = '15s'`);
     // Workspace-wide lock also prevents two sources creating the same manual client.
@@ -42,11 +46,11 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
       if (!account) throw new WebhookError(503, "account_not_configured", "Conta de recebimento da integração inválida ou inativa.");
     }
 
-    const sync = new WebhookSync(tx, config, event.eventId);
+    const sync = new WebhookSync(tx, config, event.eventId, files);
     let result: WebhookResult;
     if (event.eventType === "client.upsert") {
       const client = await sync.client(event.data);
-      result = { eventId: event.eventId, outcome: client.outcome, clientId: client.id };
+      result = { eventId: event.eventId, outcome: client.outcome, clientId: client.id, ...(client.photo ? { photo: client.photo } : {}) };
     } else if (event.eventType === "base.upsert") {
       const client = await sync.client(event.data.client);
       const base = await sync.base(event.data.base, event.data.client.externalId, client.id, event.data.invoices.length);
@@ -56,7 +60,7 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
       const outcomes = [client.outcome, base.outcome, ...invoices.map((i) => i.outcome)];
       const outcome = outcomes.includes("applied") ? "applied"
         : outcomes.includes("stale") ? "stale" : "unchanged";
-      result = { eventId: event.eventId, outcome, clientId: client.id, saleItemId: base.id, invoices };
+      result = { eventId: event.eventId, outcome, clientId: client.id, saleItemId: base.id, invoices, ...(client.photo ? { photo: client.photo } : {}) };
     } else {
       const invoice = await sync.invoice(event.data.baseExternalId, event.data.invoice);
       result = { eventId: event.eventId, outcome: invoice.outcome, transactionId: invoice.id };
@@ -67,10 +71,13 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
     });
     return result;
   });
+  committed = true;
+  return result;
+  } finally { await files.finish(committed); }
 }
 
 class WebhookSync {
-  constructor(private tx: Executor, private config: WebhookIntegration, private eventId: string) {}
+  constructor(private tx: Executor, private config: WebhookIntegration, private eventId: string, private files: ClientPhotoFiles) {}
 
   private async entity(kind: string, externalId: string): Promise<Entity | undefined> {
     const [row] = await this.tx.select().from(inboundWebhookEntitiesTable).where(and(
@@ -108,7 +115,8 @@ class WebhookSync {
     let [existing] = link ? await this.tx.select().from(clientsTable)
       .where(and(eq(clientsTable.id, link.internalId), eq(clientsTable.workspaceId, this.config.workspaceId))).limit(1).for("update") : [];
     if (link && !existing) this.missingInternal();
-    if (outcome !== "apply") return { id: link!.internalId, outcome };
+    if (outcome !== "apply") return { id: link!.internalId, outcome,
+      ...(data.photo !== undefined ? { photo: { status: outcome, version: existing!.photoVersion, url: existing!.photoUrl } } : {}) };
     if (!link) {
       const candidates = await this.tx.select({ id: clientsTable.id, name: clientsTable.name, document: clientsTable.document,
         email: clientsTable.email, phone: clientsTable.phone }).from(clientsTable)
@@ -123,7 +131,7 @@ class WebhookSync {
         [existing] = await this.tx.select().from(clientsTable).where(eq(clientsTable.id, matchedId)).limit(1).for("update");
       }
     }
-    const { externalId, version, ...fields } = data;
+    const { externalId, version, photo: incomingPhoto, ...fields } = data;
     // First linking must not erase manual contact details absent in the source.
     if (existing && (!link || link.version === 0)) {
       fields.document ??= existing.document;
@@ -138,7 +146,30 @@ class WebhookSync {
       : await this.tx.insert(clientsTable).values({ ...fields, workspaceId: this.config.workspaceId, projectId: this.config.projectId }).returning();
     await this.saveEntity("client", externalId, client.id, version, hash);
     await this.audit("webhook_client_upsert", externalId, null, { clientId: client.id, version, linkedExisting: Boolean(existing && !link) });
-    return { id: client.id, outcome: "applied" as const };
+    const photo = incomingPhoto === undefined ? undefined : await this.photo(client, incomingPhoto);
+    return { id: client.id, outcome: "applied" as const, ...(photo ? { photo } : {}) };
+  }
+
+  private async photo(client: typeof clientsTable.$inferSelect, data: WebhookClient["photo"]) {
+    if (client.photoSource && client.photoSource !== this.config.source) {
+      throw new WebhookError(409, "photo_source_conflict", "Foto gerenciada por outra integração. Reconcile o responsável pela imagem.");
+    }
+    if (data === null) {
+      await this.tx.update(clientsTable).set({ photoUrl: null, updatedAt: new Date() }).where(eq(clientsTable.id, client.id));
+      this.files.retire(client.photoUrl);
+      await this.audit("webhook_photo_removed", client.id, null, { photoVersion: client.photoVersion });
+      return { status: "removed", version: client.photoVersion, url: null };
+    }
+    if (!data) return undefined;
+    if (data.version <= client.photoVersion) return { status: data.version < client.photoVersion ? "stale" : "unchanged",
+      version: client.photoVersion, url: client.photoUrl };
+    const url = validatePhotoUrl(data.sourceUrl, this.config.photoAllowedHosts);
+    const localUrl = await this.files.copy(url, this.config.workspaceId, client.id);
+    await this.tx.update(clientsTable).set({ photoUrl: localUrl, photoVersion: data.version,
+      photoSource: this.config.source, updatedAt: new Date() }).where(eq(clientsTable.id, client.id));
+    if (client.photoUrl !== localUrl) this.files.retire(client.photoUrl);
+    await this.audit("webhook_photo_stored", client.id, null, { photoVersion: data.version });
+    return { status: "stored", version: data.version, url: localUrl };
   }
 
   async base(data: WebhookBase, clientExternalId: string, clientId: string, invoiceCount: number) {

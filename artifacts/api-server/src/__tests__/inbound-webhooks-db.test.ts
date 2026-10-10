@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import express from "express";
+import sharp from "sharp";
+import { mkdtemp, readFile, access, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { inboundWebhookSchema, hashPayload } from "../services/inbound-webhook-contract";
 
 const testUrl = process.env.INBOUND_WEBHOOK_TEST_DATABASE_URL;
@@ -33,6 +37,7 @@ test("PostgreSQL: recebimento atômico, retries concorrentes, versões, reajuste
     return processInboundWebhook(config, event, hash);
   };
   const balance = async () => (await db.select().from(financialAccountsTable).where(eq(financialAccountsTable.id, accountId)))[0].currentBalance;
+  const photoRoot = await mkdtemp(path.join(tmpdir(), "leadger-photo-db-test-"));
   try {
     await db.insert(usersTable).values({ id: userId, name: "Test", email: `${userId}@example.test`, passwordHash: "not-a-login" });
     await db.insert(workspacesTable).values({ id: workspaceId, name: "Test", slug: `test-${workspaceId}`, ownerId: userId });
@@ -144,9 +149,63 @@ test("PostgreSQL: recebimento atômico, retries concorrentes, versões, reajuste
       process.env.INBOUND_WEBHOOK_INTEGRATIONS = savedConfig;
       await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve()));
     }
+
+    const blue = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#2266cc" } }).png().toBuffer();
+    const green = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#22aa66" } }).png().toBuffer();
+    let downloads = 0;
+    const photoConfig = { ...config, photoAllowedHosts: ["cdn.example.test"] };
+    const photoIo = { uploadRoot: photoRoot, download: async (url: URL) => {
+      downloads++;
+      return url.pathname === "/bad.png" ? Buffer.from("invalid image") : url.pathname === "/green.png" ? green : blue;
+    } };
+    const sendPhoto = (id: string, version: number, photo?: object | null) => send(id, "client.upsert", { ...client, version,
+      ...(photo !== undefined ? { photo } : {}) });
+    const firstPhoto = sendPhoto("first-photo", 3, { sourceUrl: "https://cdn.example.test/blue.png", version: 1 });
+    const stored = await processInboundWebhook(photoConfig, firstPhoto.event, firstPhoto.hash, photoIo);
+    const storedPhoto = stored.photo as { status: string; version: number; url: string };
+    assert.equal(storedPhoto.status, "stored"); assert.equal(downloads, 1);
+    assert.ok(storedPhoto.url.startsWith("/uploads/client-photos/"));
+    assert.equal((await sharp(await readFile(path.join(photoRoot, storedPhoto.url.slice("/uploads/".length)))).metadata()).format, "webp");
+    assert.equal((await processInboundWebhook(photoConfig, firstPhoto.event, firstPhoto.hash, photoIo)).duplicate, true);
+    assert.equal(downloads, 1);
+    const clientRow = async () => (await db.select().from(clientsTable).where(eq(clientsTable.id, created.clientId as string)))[0];
+    const preserve = sendPhoto("preserve-photo", 4);
+    await processInboundWebhook(photoConfig, preserve.event, preserve.hash, photoIo);
+    assert.equal((await clientRow()).photoUrl, storedPhoto.url);
+
+    const secondPhoto = sendPhoto("replace-photo", 5, { sourceUrl: "https://cdn.example.test/green.png", version: 2 });
+    const replaced = await processInboundWebhook(photoConfig, secondPhoto.event, secondPhoto.hash, photoIo);
+    const replacedPhoto = replaced.photo as { url: string };
+    assert.notEqual(replacedPhoto.url, storedPhoto.url); assert.equal(downloads, 2);
+    await assert.rejects(access(path.join(photoRoot, storedPhoto.url.slice("/uploads/".length))));
+    const oldPhoto = sendPhoto("old-photo", 6, { sourceUrl: "https://cdn.example.test/blue.png", version: 1 });
+    const old = await processInboundWebhook(photoConfig, oldPhoto.event, oldPhoto.hash, photoIo);
+    assert.equal((old.photo as { status: string }).status, "stale"); assert.equal(downloads, 2);
+    assert.equal((await clientRow()).photoUrl, replacedPhoto.url);
+
+    const badPhoto = sendPhoto("invalid-image", 7, { sourceUrl: "https://cdn.example.test/bad.png", version: 3 });
+    await assert.rejects(processInboundWebhook(photoConfig, badPhoto.event, badPhoto.hash, photoIo), (e: any) => e.code === "photo_format_invalid");
+    assert.equal((await clientRow()).photoUrl, replacedPhoto.url);
+    assert.equal((await db.select().from(inboundWebhookEventsTable).where(and(eq(inboundWebhookEventsTable.workspaceId, workspaceId), eq(inboundWebhookEventsTable.eventId, "invalid-image")))).length, 0);
+    const transient = sendPhoto("transient-photo", 7, { sourceUrl: "https://cdn.example.test/blue.png", version: 3 });
+    await assert.rejects(processInboundWebhook(photoConfig, transient.event, transient.hash, { uploadRoot: photoRoot, download: async () => { throw new Error("origin offline"); } }));
+    assert.equal((await clientRow()).photoUrl, replacedPhoto.url);
+    const retry = await processInboundWebhook(photoConfig, transient.event, transient.hash, photoIo);
+    assert.equal((retry.photo as { status: string }).status, "stored");
+
+    const remove = sendPhoto("remove-photo", 8, null);
+    const removed = await processInboundWebhook(photoConfig, remove.event, remove.hash, photoIo);
+    assert.equal((removed.photo as { status: string }).status, "removed"); assert.equal((await clientRow()).photoUrl, null);
+    const staleRestore = sendPhoto("no-resurrect-photo", 9, { sourceUrl: "https://cdn.example.test/blue.png", version: 3 });
+    await processInboundWebhook(photoConfig, staleRestore.event, staleRestore.hash, photoIo);
+    assert.equal((await clientRow()).photoUrl, null);
+    const restored = sendPhoto("new-photo-after-removal", 10, { sourceUrl: "https://cdn.example.test/green.png", version: 4 });
+    await processInboundWebhook(photoConfig, restored.event, restored.hash, photoIo);
+    assert.ok((await clientRow()).photoUrl);
   } finally {
     await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
     await db.delete(usersTable).where(eq(usersTable.id, userId));
     await pool.end();
+    await rm(photoRoot, { recursive: true, force: true });
   }
 });

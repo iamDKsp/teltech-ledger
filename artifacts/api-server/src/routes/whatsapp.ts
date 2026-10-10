@@ -9,7 +9,7 @@ import {
   whatsappMessagesTable,
   whatsappSettingsTable,
 } from "@workspace/db";
-import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest } from "../middlewares/auth";
 import { enqueueManualBilling, requeueMessage, triggerImmediateWorker } from "../services/whatsapp-automation";
@@ -762,30 +762,117 @@ function formatPhoneDisplayServer(raw: string): string {
 router.get("/monitoring/conversations", async (req, res) => {
   const wsId = workspaceId(req);
   const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
-  const filter = typeof req.query.filter === "string" ? req.query.filter : "all"; // 'all' | 'replied' | 'waiting' | 'overdue'
+  const filter = typeof req.query.filter === "string" ? req.query.filter : "all"; // 'all' | 'partners' | 'clients' | 'replied' | 'waiting' | 'overdue'
 
   try {
-    const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
-    const clientMap = new Map(allClients.map(c => [c.id, c]));
-    const phoneToClientMap = new Map<string, typeof allClients[0]>();
-    for (const c of allClients) {
-      if (!c.phone) continue;
-      const norm = normalizeWhatsAppPhone(c.phone);
-      const canon = canonicalBrazilianPhone(c.phone);
-      if (norm) phoneToClientMap.set(norm, c);
-      if (canon) phoneToClientMap.set(canon, c);
-      if (canon && canon.startsWith("55") && canon.length === 13) {
-        const without9 = `55${canon.slice(2, 4)}${canon.slice(5)}`;
-        phoneToClientMap.set(without9, c);
-      }
+    // Clean up any historical duplicate messages in the DB that share waMessageId
+    try {
+      await db.execute(sql`
+        DELETE FROM whatsapp_messages a USING whatsapp_messages b
+        WHERE a.id > b.id
+          AND a.workspace_id = ${wsId}
+          AND b.workspace_id = ${wsId}
+          AND a.wa_message_id IS NOT NULL
+          AND a.wa_message_id = b.wa_message_id;
+      `);
+    } catch {
+      // best-effort cleanup
     }
+
+    // 1. Fetch Clients, Internal Partners/Contacts, and Workspace Members (Founders/Team)
+    const [allClients, allContacts, allMembers] = await Promise.all([
+      db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId)),
+      db.select().from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId)),
+      db.select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        phone: usersTable.phone,
+        avatarUrl: usersTable.avatarUrl,
+        role: workspaceMembersTable.role,
+      })
+      .from(usersTable)
+      .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
+      .where(eq(workspaceMembersTable.workspaceId, wsId)),
+    ]);
+
+    const clientMap = new Map(allClients.map(c => [c.id, c]));
+    const contactMap = new Map(allContacts.map(c => [c.id, c]));
+    const memberMap = new Map(allMembers.map(m => [m.id, m]));
+
+    // Phone matcher helper across partners, team members, and clients
+    const resolveContactByPhone = (rawPhone: string | null | undefined) => {
+      if (!rawPhone) return null;
+      // 1. Partner contacts (WhatsApp settings "Sócios & avisos")
+      const matchedContact = allContacts.find(c => phonesMatch(c.phone, rawPhone));
+      if (matchedContact) {
+        return {
+          type: "partner" as const,
+          id: matchedContact.id,
+          name: matchedContact.name,
+          nickname: matchedContact.nickname,
+          roleLabel: matchedContact.roleLabel || "Sócio",
+          phone: matchedContact.phone,
+          isPartner: true,
+          userId: matchedContact.userId,
+          partnerId: matchedContact.id,
+        };
+      }
+      // 2. Workspace members (Sócios / fundadores cadastrados no sistema)
+      const matchedMember = allMembers.find(m => phonesMatch(m.phone, rawPhone));
+      if (matchedMember) {
+        const isFounder = matchedMember.role === "owner" || matchedMember.email === "tarcisio@teltech.com.br" || matchedMember.email === "lucas@teltech.com.br";
+        return {
+          type: "partner" as const,
+          id: matchedMember.id,
+          name: matchedMember.name,
+          nickname: matchedMember.name.split(" ")[0],
+          roleLabel: isFounder ? "Sócio Co-Founder" : "Membro / Equipe",
+          phone: matchedMember.phone || rawPhone,
+          isPartner: true,
+          userId: matchedMember.id,
+          partnerId: matchedMember.id,
+        };
+      }
+      // 3. Clients
+      const matchedClient = allClients.find(c => phonesMatch(c.phone, rawPhone));
+      if (matchedClient) {
+        return {
+          type: "client" as const,
+          id: matchedClient.id,
+          name: matchedClient.name,
+          nickname: null,
+          roleLabel: "Cliente",
+          phone: matchedClient.phone,
+          isPartner: false,
+          client: matchedClient,
+        };
+      }
+      return null;
+    };
 
     const sessionStatus = await getWhatsAppStatus(wsId);
     const selfPhoneCanon = sessionStatus.phone ? (canonicalBrazilianPhone(sessionStatus.phone) || normalizeWhatsAppPhone(sessionStatus.phone)) : null;
 
-    const allMessages = await db.select().from(whatsappMessagesTable)
+    // Deduplicate messages in memory before grouping
+    const rawMessages = await db.select().from(whatsappMessagesTable)
       .where(eq(whatsappMessagesTable.workspaceId, wsId))
       .orderBy(desc(whatsappMessagesTable.createdAt));
+
+    const seenMsgKeys = new Set<string>();
+    const allMessages: typeof rawMessages = [];
+    for (const msg of rawMessages) {
+      const waKey = msg.waMessageId ? `wa:${msg.waMessageId}` : null;
+      const dedupePrefix = msg.dedupeKey.startsWith("manual:") ? msg.dedupeKey.replace("manual:", "outbound:") : msg.dedupeKey;
+      const bodySecKey = `${msg.direction}:${msg.recipient}:${msg.senderPhone}:${msg.body}:${Math.floor(new Date(msg.sentAt || msg.createdAt).getTime() / 1000)}`;
+      if (waKey && seenMsgKeys.has(waKey)) continue;
+      if (seenMsgKeys.has(dedupePrefix)) continue;
+      if (seenMsgKeys.has(bodySecKey)) continue;
+      if (waKey) seenMsgKeys.add(waKey);
+      seenMsgKeys.add(dedupePrefix);
+      seenMsgKeys.add(bodySecKey);
+      allMessages.push(msg);
+    }
 
     const allTransactions = await db.select().from(financialTransactionsTable)
       .where(and(
@@ -801,7 +888,7 @@ router.get("/monitoring/conversations", async (req, res) => {
       const targetPhoneNorm = normalizeWhatsAppPhone(rawTargetPhone);
       const targetPhoneCanon = canonicalBrazilianPhone(rawTargetPhone) || targetPhoneNorm;
 
-      // Exclude internal test messages to self if there is no client associated
+      // Exclude internal test messages to self if there is no client or partner associated
       if (selfPhoneCanon && targetPhoneCanon === selfPhoneCanon && !msg.clientId) {
         continue;
       }
@@ -810,10 +897,9 @@ router.get("/monitoring/conversations", async (req, res) => {
       if (msg.clientId && clientMap.has(msg.clientId)) {
         key = `client:${msg.clientId}`;
       } else {
-        const matchedClient = (targetPhoneNorm ? phoneToClientMap.get(targetPhoneNorm) : null) ||
-                              (targetPhoneCanon ? phoneToClientMap.get(targetPhoneCanon) : null);
-        if (matchedClient) {
-          key = `client:${matchedClient.id}`;
+        const contactInfo = resolveContactByPhone(rawTargetPhone);
+        if (contactInfo) {
+          key = `${contactInfo.type}:${contactInfo.id}`;
         } else if (targetPhoneCanon) {
           key = `phone:${targetPhoneCanon}`;
         } else {
@@ -837,20 +923,81 @@ router.get("/monitoring/conversations", async (req, res) => {
       }
     }
 
+    // Include registered partners in the list so they are always visible/accessible
+    for (const contact of allContacts) {
+      const key = `partner:${contact.id}`;
+      if (!conversationGroups.has(key)) {
+        conversationGroups.set(key, []);
+      }
+    }
+
     const now = new Date();
     const resultList: any[] = [];
 
     for (const [key, msgs] of conversationGroups.entries()) {
       let client: typeof allClients[0] | null = null;
+      let partnerContact: typeof allContacts[0] | null = null;
+      let memberUser: typeof allMembers[0] | null = null;
       let targetPhone: string = "";
+      let isPartner = false;
 
       if (key.startsWith("client:")) {
         const cId = key.replace("client:", "");
         client = clientMap.get(cId) ?? null;
         targetPhone = client?.phone ? (canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone) || client.phone) : "";
+      } else if (key.startsWith("partner:")) {
+        const pId = key.replace("partner:", "");
+        partnerContact = contactMap.get(pId) ?? null;
+        if (!partnerContact) {
+          memberUser = memberMap.get(pId) ?? null;
+        }
+        isPartner = true;
+        const pPhone = partnerContact?.phone || memberUser?.phone || "";
+        targetPhone = pPhone ? (canonicalBrazilianPhone(pPhone) || normalizeWhatsAppPhone(pPhone) || pPhone) : "";
       } else if (key.startsWith("phone:")) {
         targetPhone = key.replace("phone:", "");
-        client = phoneToClientMap.get(targetPhone) ?? null;
+        const resolved = resolveContactByPhone(targetPhone);
+        if (resolved?.type === "partner") {
+          isPartner = true;
+          partnerContact = contactMap.get(resolved.id) ?? null;
+          if (!partnerContact) memberUser = memberMap.get(resolved.id) ?? null;
+        } else if (resolved?.type === "client") {
+          client = clientMap.get(resolved.id) ?? null;
+        }
+      }
+
+      const lastMessage = msgs[0] ?? null;
+      const inboundCount = msgs.filter(m => m.direction === "inbound").length;
+      const outboundCount = msgs.filter(m => m.direction === "outbound").length;
+      const unreadCount = msgs.filter(m => m.direction === "inbound" && !m.isRead).length;
+      const hasReplied = inboundCount > 0;
+
+      // Determine display name without ever falsely using "Operador (Celular)" as the client/contact name
+      let displayName: string;
+      let roleLabel: string;
+
+      if (isPartner) {
+        displayName = partnerContact?.name || memberUser?.name || "Sócio";
+        roleLabel = partnerContact?.roleLabel || (memberUser?.role === "owner" ? "Sócio Fundador" : "Sócio Co-Founder");
+      } else if (client) {
+        displayName = client.name;
+        roleLabel = "Cliente";
+      } else {
+        // Unknown contact: only use lastMessage.senderName if INBOUND (sent by client) and NOT Operator or Nexus
+        if (
+          lastMessage?.direction === "inbound" &&
+          lastMessage?.senderName &&
+          lastMessage.senderName !== "Nexus" &&
+          lastMessage.senderName !== "Cliente" &&
+          !lastMessage.senderName.toLowerCase().includes("operador")
+        ) {
+          displayName = lastMessage.senderName;
+        } else if (targetPhone) {
+          displayName = formatPhoneDisplayServer(targetPhone);
+        } else {
+          displayName = "Contato";
+        }
+        roleLabel = "Contato";
       }
 
       const clientTransactions = client
@@ -863,30 +1010,18 @@ router.get("/monitoring/conversations", async (req, res) => {
       const sortedTxs = [...clientTransactions].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       const nextDueDate = sortedTxs[0]?.dueDate ? sortedTxs[0].dueDate.toISOString() : null;
 
-      const lastMessage = msgs[0] ?? null;
-      const inboundCount = msgs.filter(m => m.direction === "inbound").length;
-      const outboundCount = msgs.filter(m => m.direction === "outbound").length;
-      const unreadCount = msgs.filter(m => m.direction === "inbound" && !m.isRead).length;
-      const hasReplied = inboundCount > 0;
-
-      let displayName = client?.name;
-      if (!displayName) {
-        if (lastMessage?.senderName && lastMessage.senderName !== "Nexus" && lastMessage.senderName !== "Cliente") {
-          displayName = lastMessage.senderName;
-        } else if (targetPhone) {
-          displayName = formatPhoneDisplayServer(targetPhone);
-        } else {
-          displayName = "Contato";
-        }
-      }
-
       const conversationItem = {
-        id: client?.id ?? targetPhone,
+        id: client?.id ?? partnerContact?.id ?? memberUser?.id ?? targetPhone,
         clientId: client?.id ?? null,
+        partnerId: partnerContact?.id ?? memberUser?.id ?? null,
+        contactType: isPartner ? ("partner" as const) : (client ? ("client" as const) : ("unknown" as const)),
         clientName: displayName,
-        phone: targetPhone || client?.phone || lastMessage?.recipient || lastMessage?.senderPhone || "",
+        nickname: partnerContact?.nickname ?? (isPartner && displayName ? displayName.split(" ")[0] : null),
+        roleLabel,
+        isPartner,
+        phone: targetPhone || client?.phone || partnerContact?.phone || memberUser?.phone || lastMessage?.recipient || lastMessage?.senderPhone || "",
         document: client?.document ?? null,
-        optIn: client?.whatsappOptIn ?? false,
+        optIn: isPartner ? true : (client?.whatsappOptIn ?? false),
         lastMessage: lastMessage ? {
           id: lastMessage.id,
           body: lastMessage.body,
@@ -902,12 +1037,12 @@ router.get("/monitoring/conversations", async (req, res) => {
         unreadCount,
         hasReplied,
         financialInfo: {
-          pendingCount: clientTransactions.length,
-          overdueCount: overdueTransactions.length,
-          totalPendingCents,
-          totalOverdueCents,
-          nextDueDate,
-          status: overdueTransactions.length > 0 ? "overdue" : clientTransactions.length > 0 ? "pending" : "paid_up",
+          pendingCount: isPartner ? 0 : clientTransactions.length,
+          overdueCount: isPartner ? 0 : overdueTransactions.length,
+          totalPendingCents: isPartner ? 0 : totalPendingCents,
+          totalOverdueCents: isPartner ? 0 : totalOverdueCents,
+          nextDueDate: isPartner ? null : nextDueDate,
+          status: isPartner ? ("partner" as const) : (overdueTransactions.length > 0 ? ("overdue" as const) : (clientTransactions.length > 0 ? ("pending" as const) : ("paid_up" as const))),
         },
       };
 
@@ -921,6 +1056,8 @@ router.get("/monitoring/conversations", async (req, res) => {
         }
       }
 
+      if (filter === "partners" && !isPartner) continue;
+      if (filter === "clients" && isPartner) continue;
       if (filter === "replied" && !hasReplied) continue;
       if (filter === "waiting" && (hasReplied || msgs.length === 0)) continue;
       if (filter === "overdue" && overdueTransactions.length === 0) continue;
@@ -950,27 +1087,107 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
   const target = req.params.target;
 
   try {
-    const isUuid = z.string().uuid().safeParse(target).success;
+    const cleanTarget = target.startsWith("client:") ? target.replace("client:", "")
+      : target.startsWith("partner:") ? target.replace("partner:", "")
+      : target.startsWith("phone:") ? target.replace("phone:", "")
+      : target;
+
+    const isUuid = z.string().uuid().safeParse(cleanTarget).success;
     let client: any = null;
-    let phone = normalizeWhatsAppPhone(target);
-    const targetCanon = canonicalBrazilianPhone(target);
+    let partner: any = null;
+    let phone = normalizeWhatsAppPhone(cleanTarget);
+    const targetCanon = canonicalBrazilianPhone(cleanTarget);
+
+    const [allClients, allContacts, allMembers] = await Promise.all([
+      db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId)),
+      db.select().from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId)),
+      db.select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        phone: usersTable.phone,
+        role: workspaceMembersTable.role,
+      })
+      .from(usersTable)
+      .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
+      .where(eq(workspaceMembersTable.workspaceId, wsId)),
+    ]);
 
     if (isUuid) {
-      const [foundClient] = await db.select().from(clientsTable)
-        .where(and(eq(clientsTable.id, target), eq(clientsTable.workspaceId, wsId))).limit(1);
-      client = foundClient ?? null;
-      if (client?.phone) phone = normalizeWhatsAppPhone(client.phone);
-    } else if (phone || targetCanon) {
-      const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
-      client = allClients.find(c => phonesMatch(c.phone, target)) ?? null;
+      client = allClients.find(c => c.id === cleanTarget) ?? null;
+      if (!client) {
+        const foundContact = allContacts.find(c => c.id === cleanTarget);
+        if (foundContact) {
+          partner = {
+            id: foundContact.id,
+            name: foundContact.name,
+            nickname: foundContact.nickname,
+            roleLabel: foundContact.roleLabel || "Sócio",
+            phone: foundContact.phone,
+            userId: foundContact.userId,
+            isPartner: true,
+          };
+        } else {
+          const foundMember = allMembers.find(m => m.id === cleanTarget);
+          if (foundMember) {
+            partner = {
+              id: foundMember.id,
+              name: foundMember.name,
+              nickname: foundMember.name.split(" ")[0],
+              roleLabel: foundMember.role === "owner" ? "Sócio Fundador" : "Sócio Co-Founder",
+              phone: foundMember.phone,
+              userId: foundMember.id,
+              email: foundMember.email,
+              isPartner: true,
+            };
+          }
+        }
+      }
+    }
+
+    if (!client && !partner) {
+      // Try matching by phone
+      const foundContact = allContacts.find(c => phonesMatch(c.phone, cleanTarget));
+      if (foundContact) {
+        partner = {
+          id: foundContact.id,
+          name: foundContact.name,
+          nickname: foundContact.nickname,
+          roleLabel: foundContact.roleLabel || "Sócio",
+          phone: foundContact.phone,
+          userId: foundContact.userId,
+          isPartner: true,
+        };
+      } else {
+        const foundMember = allMembers.find(m => phonesMatch(m.phone, cleanTarget));
+        if (foundMember) {
+          partner = {
+            id: foundMember.id,
+            name: foundMember.name,
+            nickname: foundMember.name.split(" ")[0],
+            roleLabel: foundMember.role === "owner" ? "Sócio Fundador" : "Sócio Co-Founder",
+            phone: foundMember.phone,
+            userId: foundMember.id,
+            email: foundMember.email,
+            isPartner: true,
+          };
+        } else {
+          client = allClients.find(c => phonesMatch(c.phone, cleanTarget)) ?? null;
+        }
+      }
+    }
+
+    const contactPhone = partner?.phone || client?.phone || cleanTarget;
+    if (contactPhone) {
+      phone = normalizeWhatsAppPhone(contactPhone);
     }
 
     const phoneSet = new Set<string>();
     if (phone) phoneSet.add(phone);
     if (targetCanon) phoneSet.add(targetCanon);
-    if (client?.phone) {
-      const cNorm = normalizeWhatsAppPhone(client.phone);
-      const cCanon = canonicalBrazilianPhone(client.phone);
+    if (contactPhone) {
+      const cNorm = normalizeWhatsAppPhone(contactPhone);
+      const cCanon = canonicalBrazilianPhone(contactPhone);
       if (cNorm) phoneSet.add(cNorm);
       if (cCanon) phoneSet.add(cCanon);
       if (cCanon && cCanon.startsWith("55") && cCanon.length === 13) {
@@ -988,7 +1205,7 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
     }
 
     if (conditions.length === 0) {
-      res.json({ messages: [], client: null, openTransactions: [], allTransactions: [] });
+      res.json({ messages: [], client: null, partner: null, openTransactions: [], allTransactions: [] });
       return;
     }
 
@@ -1017,23 +1234,40 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
         .catch(err => logger.warn({ err }, "Failed to mark messages as read"));
     }
 
-    let allClientTransactions: any[] = [];
+    let allTransactions: any[] = [];
     if (client) {
-      allClientTransactions = await db.select().from(financialTransactionsTable)
+      allTransactions = await db.select().from(financialTransactionsTable)
         .where(and(
           eq(financialTransactionsTable.workspaceId, wsId),
           eq(financialTransactionsTable.clientId, client.id),
           eq(financialTransactionsTable.type, "inflow")
         ))
         .orderBy(asc(financialTransactionsTable.dueDate));
+    } else if (partner) {
+      const pUserId = partner.userId || partner.id;
+      allTransactions = await db.select().from(financialTransactionsTable)
+        .where(and(
+          eq(financialTransactionsTable.workspaceId, wsId),
+          or(
+            eq(financialTransactionsTable.partnerId, pUserId),
+            ilike(financialTransactionsTable.description, `%${partner.name}%`)
+          )
+        ))
+        .orderBy(desc(financialTransactionsTable.dueDate));
     }
 
-    const openTransactions = allClientTransactions.filter(t => t.status === "pending");
+    const openTransactions = allTransactions.filter(t => t.status === "pending");
 
-    res.json({
-      client,
-      phone: targetCanon || phone || client?.phone || "",
-      messages: messages.map(({ message, txAmount, txDueDate, txDescription, txStatus }) => ({
+    // Deduplicate messages by waMessageId / timestamp to avoid duplicate bubbles
+    const seenMsg = new Set<string>();
+    const deduplicatedMessages = messages
+      .filter(({ message }) => {
+        const k = message.waMessageId ? `wa:${message.waMessageId}` : (message.id ? `id:${message.id}` : `${message.direction}:${message.body}:${message.sentAt}`);
+        if (seenMsg.has(k)) return false;
+        seenMsg.add(k);
+        return true;
+      })
+      .map(({ message, txAmount, txDueDate, txDescription, txStatus }) => ({
         ...message,
         transaction: message.transactionId ? {
           id: message.transactionId,
@@ -1042,9 +1276,17 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
           description: txDescription,
           status: txStatus,
         } : null,
-      })),
+      }));
+
+    res.json({
+      client,
+      partner,
+      isPartner: Boolean(partner),
+      contactType: partner ? "partner" : (client ? "client" : "unknown"),
+      phone: targetCanon || phone || contactPhone || "",
+      messages: deduplicatedMessages,
       openTransactions,
-      allTransactions: allClientTransactions,
+      allTransactions,
     });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId, target }, "WhatsApp monitoring messages failed");
@@ -1066,19 +1308,36 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
   }
 
   try {
-    const isUuid = z.string().uuid().safeParse(target).success;
+    const cleanTarget = target.startsWith("client:") ? target.replace("client:", "")
+      : target.startsWith("partner:") ? target.replace("partner:", "")
+      : target.startsWith("phone:") ? target.replace("phone:", "")
+      : target;
+
+    const isUuid = z.string().uuid().safeParse(cleanTarget).success;
     let clientId: string | null = null;
     let destinationPhone: string | null = null;
 
     if (isUuid) {
       const [client] = await db.select().from(clientsTable)
-        .where(and(eq(clientsTable.id, target), eq(clientsTable.workspaceId, wsId))).limit(1);
+        .where(and(eq(clientsTable.id, cleanTarget), eq(clientsTable.workspaceId, wsId))).limit(1);
       if (client) {
         clientId = client.id;
         destinationPhone = canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone);
+      } else {
+        const [contact] = await db.select().from(whatsappContactsTable)
+          .where(and(eq(whatsappContactsTable.id, cleanTarget), eq(whatsappContactsTable.workspaceId, wsId))).limit(1);
+        if (contact) {
+          destinationPhone = canonicalBrazilianPhone(contact.phone) || normalizeWhatsAppPhone(contact.phone);
+        } else {
+          const [member] = await db.select().from(usersTable)
+            .where(eq(usersTable.id, cleanTarget)).limit(1);
+          if (member?.phone) {
+            destinationPhone = canonicalBrazilianPhone(member.phone) || normalizeWhatsAppPhone(member.phone);
+          }
+        }
       }
     } else {
-      destinationPhone = canonicalBrazilianPhone(target) || normalizeWhatsAppPhone(target);
+      destinationPhone = canonicalBrazilianPhone(cleanTarget) || normalizeWhatsAppPhone(cleanTarget);
       if (destinationPhone) {
         const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
         const matched = allClients.find(c => phonesMatch(c.phone, destinationPhone));
@@ -1089,7 +1348,7 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
     }
 
     if (!destinationPhone) {
-      res.status(400).json({ error: "Número de telefone de destino inválido ou cliente sem telefone cadastrado" });
+      res.status(400).json({ error: "Número de telefone de destino inválido ou contato sem telefone cadastrado" });
       return;
     }
 

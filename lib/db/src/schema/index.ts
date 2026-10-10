@@ -408,6 +408,9 @@ export const clientsTable = pgTable("clients", {
   document: text("document"),       // CNPJ ou CPF
   email: text("email"),
   phone: text("phone"),
+  photoUrl: text("photo_url"), // cópia local, nunca URL do sistema de origem
+  photoVersion: integer("photo_version").notNull().default(0),
+  photoSource: text("photo_source"),
   whatsappOptIn: boolean("whatsapp_opt_in").notNull().default(false),
   whatsappOptInAt: timestamp("whatsapp_opt_in_at"),
   status: text("status").notNull().default("active"), // 'active' | 'inactive'

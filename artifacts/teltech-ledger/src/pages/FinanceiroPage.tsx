@@ -2,6 +2,7 @@ import { useState, useEffect, useContext, useCallback, useRef } from "react";
 import { useAuth } from "../lib/auth-context";
 import { useIsMobile } from "../hooks/use-mobile";
 import { API } from "../lib/api";
+import { ClientAvatar } from "../components/ClientAvatar";
 import { AppContext } from "../TeltechLedger";
 import {
   TrendingUp,
@@ -130,6 +131,7 @@ interface Client {
   document?: string;
   email?: string;
   phone?: string;
+  photoUrl?: string | null;
   whatsappOptIn: boolean;
   status: string;
   notes?: string;
@@ -6066,7 +6068,10 @@ function ClientsView({
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>{client.name}</h4>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                      <ClientAvatar name={client.name} photoUrl={client.photoUrl} />
+                      <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>{client.name}</h4>
+                    </div>
                     <span style={{ fontSize: 11, color: "#888" }}>{client.document || "Sem CNPJ/CPF"}</span>
                     {client.projectId && client.projectName && (
                       <div style={{ marginTop: 5 }}>
@@ -7894,6 +7899,7 @@ function ClientModal({
       title={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {client ? "Editar Cliente" : "Novo Cliente Corporativo"}
+          {client?.photoUrl && <ClientAvatar name={client.name} photoUrl={client.photoUrl} size={32} />}
           {client && (
             <span style={{
               fontSize: 11,

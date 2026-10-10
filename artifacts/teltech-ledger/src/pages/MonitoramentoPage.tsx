@@ -31,6 +31,8 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   ChevronDown,
+  Smartphone,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../lib/api";
@@ -39,7 +41,12 @@ import { motion, AnimatePresence } from "framer-motion";
 interface ConversationItem {
   id: string;
   clientId: string | null;
+  partnerId?: string | null;
+  contactType?: "client" | "partner" | "unknown";
   clientName: string;
+  nickname?: string | null;
+  roleLabel?: string | null;
+  isPartner?: boolean;
   phone: string;
   document: string | null;
   optIn: boolean;
@@ -63,7 +70,7 @@ interface ConversationItem {
     totalPendingCents: number;
     totalOverdueCents: number;
     nextDueDate: string | null;
-    status: "overdue" | "pending" | "paid_up";
+    status: "overdue" | "pending" | "paid_up" | "partner";
   };
 }
 
@@ -156,6 +163,16 @@ function formatPhoneDisplay(raw: string): string {
   return raw;
 }
 
+function getContactInitials(name: string): string {
+  if (!name) return "?";
+  const clean = name.replace(/\+55\s*/, "").replace(/[()\-]/g, "").trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
+}
+
 function kindBadge(kind: string): { label: string; color: string } {
   switch (kind) {
     case "before_due":
@@ -167,6 +184,8 @@ function kindBadge(kind: string): { label: string; color: string } {
     case "payment_receipt":
     case "receipt":
       return { label: "Comprovante / Quitação", color: "#10B981" };
+    case "partner_reply":
+      return { label: "Resposta do Sócio", color: "#A78BFA" };
     case "client_reply":
       return { label: "Resposta do Cliente", color: "#10B981" };
     case "manual_chat":
@@ -417,9 +436,10 @@ export function MonitoramentoPage() {
   const [openTransactions, setOpenTransactions] = useState<FinancialTransactionItem[]>([]);
   const [allTransactions, setAllTransactions] = useState<FinancialTransactionItem[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [selectedPartner, setSelectedPartner] = useState<any>(null);
 
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "replied" | "waiting" | "overdue">("all");
+  const [filter, setFilter] = useState<"all" | "partners" | "clients" | "replied" | "waiting" | "overdue">("all");
   const [messageInput, setMessageInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -453,7 +473,6 @@ export function MonitoramentoPage() {
     try {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
-      if (filter !== "all") params.set("filter", filter);
 
       const res = await API.get<{ conversations: ConversationItem[] }>(
         `/whatsapp/monitoring/conversations?${params.toString()}`
@@ -464,7 +483,7 @@ export function MonitoramentoPage() {
     } finally {
       if (isInitial) setIsLoadingConversations(false);
     }
-  }, [search, filter]);
+  }, [search]);
 
   // Carregar mensagens da conversa ativa
   const fetchMessages = useCallback(async (target: string, isSilent = false) => {
@@ -473,12 +492,24 @@ export function MonitoramentoPage() {
       const res = await API.get<{
         messages: ChatMessage[];
         client: any;
+        partner?: any;
+        isPartner?: boolean;
         openTransactions: FinancialTransactionItem[];
         allTransactions?: FinancialTransactionItem[];
       }>(`/whatsapp/monitoring/conversations/${target}/messages`);
 
-      setMessages(res?.messages ?? []);
+      const rawMsgs = res?.messages ?? [];
+      const seenMsgKeys = new Set<string>();
+      const cleanMsgs = rawMsgs.filter((m) => {
+        const k = m.waMessageId ? `wa:${m.waMessageId}` : (m.id ? `id:${m.id}` : `${m.direction}:${m.body}:${m.sentAt}`);
+        if (seenMsgKeys.has(k)) return false;
+        seenMsgKeys.add(k);
+        return true;
+      });
+
+      setMessages(cleanMsgs);
       setSelectedClient(res?.client ?? null);
+      setSelectedPartner(res?.partner ?? null);
       setOpenTransactions(res?.openTransactions ?? []);
       setAllTransactions(res?.allTransactions ?? res?.openTransactions ?? []);
     } catch (err) {
@@ -649,15 +680,33 @@ export function MonitoramentoPage() {
     }
   };
 
-  // Dynamic filter counts
+  // Dynamic filter counts and filtering
   const filterCounts = useMemo(() => {
     return {
       all: conversations.length,
+      partners: conversations.filter((c) => c.isPartner).length,
+      clients: conversations.filter((c) => !c.isPartner).length,
       replied: conversations.filter((c) => c.hasReplied).length,
       waiting: conversations.filter((c) => !c.hasReplied && c.totalMessages > 0).length,
       overdue: conversations.filter((c) => c.financialInfo.overdueCount > 0).length,
     };
   }, [conversations]);
+
+  const filteredConversations = useMemo(() => {
+    let list = conversations;
+    if (filter === "partners") {
+      list = list.filter((c) => c.isPartner);
+    } else if (filter === "clients") {
+      list = list.filter((c) => !c.isPartner);
+    } else if (filter === "replied") {
+      list = list.filter((c) => c.hasReplied);
+    } else if (filter === "waiting") {
+      list = list.filter((c) => !c.hasReplied && c.totalMessages > 0);
+    } else if (filter === "overdue") {
+      list = list.filter((c) => c.financialInfo.overdueCount > 0);
+    }
+    return list;
+  }, [conversations, filter]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "#111113", color: "#fafafa" }}>
@@ -890,6 +939,8 @@ export function MonitoramentoPage() {
             >
               {[
                 { id: "all", label: `Todos (${filterCounts.all})` },
+                { id: "partners", label: `👤 Sócios (${filterCounts.partners})` },
+                { id: "clients", label: `👥 Clientes (${filterCounts.clients})` },
                 { id: "replied", label: `💬 Respostas (${filterCounts.replied})` },
                 { id: "waiting", label: `⏳ Aguardando (${filterCounts.waiting})` },
                 { id: "overdue", label: `⚠️ Em Atraso (${filterCounts.overdue})` },
@@ -927,16 +978,22 @@ export function MonitoramentoPage() {
                 <RefreshCw size={20} className="animate-spin" style={{ margin: "0 auto 8px" }} />
                 Carregando conversas...
               </div>
-            ) : conversations.length === 0 ? (
+            ) : filteredConversations.length === 0 ? (
               <div style={{ padding: 40, textAlign: "center", color: "#777" }}>
                 <MessageSquare size={36} style={{ margin: "0 auto 12px", opacity: 0.3 }} />
-                <p style={{ fontSize: 14, fontWeight: 600, color: "#aaa", margin: "0 0 4px" }}>Nenhuma conversa encontrada</p>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "#aaa", margin: "0 0 4px" }}>
+                  {filter === "partners"
+                    ? "Nenhum sócio encontrado"
+                    : filter === "clients"
+                    ? "Nenhum cliente encontrado"
+                    : "Nenhuma conversa encontrada"}
+                </p>
                 <p style={{ fontSize: 12, margin: 0, color: "#666" }}>
-                  {search ? "Tente outro termo de busca." : "Nenhum cliente conversou com Nexus ainda."}
+                  {search ? "Tente outro termo de busca." : "Nenhuma conversa disponível nesta categoria."}
                 </p>
               </div>
             ) : (
-              conversations.map((item) => {
+              filteredConversations.map((item) => {
                 const isSelected = selectedTarget === item.id;
                 const hasOverdue = item.financialInfo.overdueCount > 0;
 
@@ -966,22 +1023,26 @@ export function MonitoramentoPage() {
                           width: 40,
                           height: 40,
                           borderRadius: "50%",
-                          background: isSelected ? "hsl(265 85% 62% / 0.3)" : "#252530",
-                          border: isSelected ? "1px solid hsl(265 85% 62% / 0.6)" : "1px solid #333342",
+                          background: isSelected
+                            ? (item.isPartner ? "hsl(265 85% 62% / 0.35)" : "hsl(265 85% 62% / 0.3)")
+                            : (item.isPartner ? "hsl(265 85% 62% / 0.15)" : "#252530"),
+                          border: isSelected
+                            ? (item.isPartner ? "1px solid hsl(265 85% 62% / 0.8)" : "1px solid hsl(265 85% 62% / 0.6)")
+                            : (item.isPartner ? "1px solid hsl(265 85% 62% / 0.35)" : "1px solid #333342"),
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: isSelected ? "#d4b8ff" : "#aaa",
+                          color: item.isPartner ? "#c4a3ff" : (isSelected ? "#d4b8ff" : "#aaa"),
                           fontWeight: 700,
-                          fontSize: 14,
+                          fontSize: 13,
                           flexShrink: 0,
                           position: "relative",
                         }}
                       >
-                        {item.clientName.slice(0, 2).toUpperCase()}
+                        {getContactInitials(item.clientName)}
                         {item.hasReplied && (
                           <span
-                            title="Cliente respondeu"
+                            title="Contato respondeu"
                             style={{
                               position: "absolute",
                               bottom: -1,
@@ -999,19 +1060,41 @@ export function MonitoramentoPage() {
                       {/* Info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
-                          <span
-                            style={{
-                              fontSize: 13,
-                              fontWeight: isSelected ? 700 : 600,
-                              color: isSelected ? "#fff" : "#eee",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxWidth: 180,
-                            }}
-                          >
-                            {item.clientName}
-                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1, marginRight: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: isSelected ? 700 : 600,
+                                color: isSelected ? "#fff" : "#eee",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {item.clientName}
+                            </span>
+                            {item.isPartner && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  background: "hsl(265 85% 62% / 0.2)",
+                                  border: "1px solid hsl(265 85% 62% / 0.4)",
+                                  color: "#c4a3ff",
+                                  fontWeight: 700,
+                                  whiteSpace: "nowrap",
+                                  flexShrink: 0,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 3,
+                                }}
+                              >
+                                <UserCheck size={9} />
+                                {item.roleLabel || "Sócio"}
+                              </span>
+                            )}
+                          </div>
                           <span style={{ fontSize: 10, color: "#777", flexShrink: 0 }}>
                             {formatTime(item.lastMessage?.sentAt)}
                           </span>
@@ -1071,14 +1154,22 @@ export function MonitoramentoPage() {
                           {item.lastMessage ? (
                             <>
                               {item.lastMessage.direction === "outbound" ? (
-                                <span style={{ color: "#a78bfa", flexShrink: 0 }}>🤖 Nexus:</span>
+                                item.lastMessage.senderName?.toLowerCase().includes("operador") || item.lastMessage.kind === "manual_chat" ? (
+                                  <span style={{ color: "#38bdf8", flexShrink: 0 }}>📱 Você:</span>
+                                ) : (
+                                  <span style={{ color: "#a78bfa", flexShrink: 0 }}>🤖 Nexus:</span>
+                                )
+                              ) : item.isPartner ? (
+                                <span style={{ color: "#c4a3ff", flexShrink: 0 }}>👤 Sócio:</span>
                               ) : (
                                 <span style={{ color: "hsl(152 65% 55%)", flexShrink: 0 }}>💬 Cliente:</span>
                               )}
-                              <span>{item.lastMessage.body}</span>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.lastMessage.body}</span>
                             </>
                           ) : (
-                            <span style={{ color: "#555", fontStyle: "italic" }}>Nenhuma mensagem trocada ainda</span>
+                            <span style={{ color: "#555", fontStyle: "italic" }}>
+                              {item.isPartner ? "Canal direto com sócio" : "Nenhuma mensagem trocada ainda"}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1136,8 +1227,12 @@ export function MonitoramentoPage() {
                       width: 42,
                       height: 42,
                       borderRadius: "50%",
-                      background: "linear-gradient(135deg, hsl(265 85% 62% / 0.3), #202028)",
-                      border: "1px solid hsl(265 85% 62% / 0.4)",
+                      background: activeConversation?.isPartner
+                        ? "linear-gradient(135deg, hsl(265 85% 62% / 0.4), #202028)"
+                        : "linear-gradient(135deg, hsl(265 85% 62% / 0.3), #202028)",
+                      border: activeConversation?.isPartner
+                        ? "1px solid hsl(265 85% 62% / 0.7)"
+                        : "1px solid hsl(265 85% 62% / 0.4)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -1146,42 +1241,62 @@ export function MonitoramentoPage() {
                       fontSize: 15,
                     }}
                   >
-                    {(activeConversation?.clientName || "C").slice(0, 2).toUpperCase()}
+                    {getContactInitials(activeConversation?.clientName || "C")}
                   </div>
 
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
                         {activeConversation?.clientName || "Contato"}
                       </span>
 
-                      {/* Interactive Opt-in Toggle */}
-                      <button
-                        onClick={handleToggleOptIn}
-                        disabled={isTogglingOptIn}
-                        title="Clique para alternar o consentimento de WhatsApp"
-                        style={{
-                          fontSize: 10,
-                          padding: "2px 8px",
-                          borderRadius: 12,
-                          background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.15)" : "#25252b",
-                          border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #33333d",
-                          color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
-                          fontWeight: 600,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                          cursor: "pointer",
-                          transition: "all 0.15s ease",
-                        }}
-                      >
-                        <Shield size={11} /> {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
-                      </button>
+                      {activeConversation?.isPartner ? (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 12,
+                            background: "hsl(265 85% 62% / 0.2)",
+                            border: "1px solid hsl(265 85% 62% / 0.4)",
+                            color: "#c4a3ff",
+                            fontWeight: 700,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          <UserCheck size={11} /> {activeConversation?.roleLabel || "Sócio da Teltech"}
+                        </span>
+                      ) : (
+                        /* Interactive Opt-in Toggle for clients */
+                        <button
+                          onClick={handleToggleOptIn}
+                          disabled={isTogglingOptIn}
+                          title="Clique para alternar o consentimento de WhatsApp"
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 12,
+                            background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.15)" : "#25252b",
+                            border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #33333d",
+                            color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
+                            fontWeight: 600,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <Shield size={11} /> {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
+                        </button>
+                      )}
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 12, color: "#888" }}>
                       <span>{formatPhoneDisplay(activeConversation?.phone || "")}</span>
                       {activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
+                      {activeConversation?.isPartner && <span>• Canal Direto Teltech</span>}
                     </div>
                   </div>
                 </div>
@@ -1426,10 +1541,26 @@ export function MonitoramentoPage() {
                           >
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               {isOutbound ? (
+                                msg.senderName?.toLowerCase().includes("operador") || msg.kind === "manual_chat" ? (
+                                  <>
+                                    <Smartphone size={14} color="#38bdf8" />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#7dd3fc" }}>
+                                      {msg.senderName || "Operador (Celular)"}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Bot size={14} color="#c4a3ff" />
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#d6beff" }}>
+                                      {msg.senderName || "Nexus (Teltech)"}
+                                    </span>
+                                  </>
+                                )
+                              ) : (activeConversation?.isPartner || msg.kind === "partner_reply") ? (
                                 <>
-                                  <Bot size={14} color="#c4a3ff" />
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#d6beff" }}>
-                                    {msg.senderName || "Nexus (Teltech)"}
+                                  <UserCheck size={14} color="#a78bfa" />
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#c4a3ff" }}>
+                                    {msg.senderName || activeConversation?.clientName || "Sócio"}
                                   </span>
                                 </>
                               ) : (
@@ -1691,8 +1822,17 @@ export function MonitoramentoPage() {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <SlidersHorizontal size={16} color="#c4a3ff" />
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Cliente</span>
+                  {activeConversation?.isPartner ? (
+                    <>
+                      <UserCheck size={16} color="#c4a3ff" />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Sócio</span>
+                    </>
+                  ) : (
+                    <>
+                      <SlidersHorizontal size={16} color="#c4a3ff" />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Cliente</span>
+                    </>
+                  )}
                 </div>
                 <button
                   onClick={() => setShowClientDrawer(false)}
@@ -1704,169 +1844,294 @@ export function MonitoramentoPage() {
 
               {/* Drawer Content */}
               <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Client Profile Card */}
-                <div
-                  style={{
-                    padding: 14,
-                    background: "#1c1c24",
-                    borderRadius: 10,
-                    border: "1px solid #2b2b38",
-                  }}
-                >
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
-                    {activeConversation?.clientName}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                    {formatPhoneDisplay(activeConversation?.phone || "")}
-                  </div>
-                  {activeConversation?.document && (
-                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
-                      Doc: {activeConversation.document}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: "#888" }}>WhatsApp Opt-in</span>
-                    <button
-                      onClick={handleToggleOptIn}
+                {activeConversation?.isPartner ? (
+                  <>
+                    {/* Partner Profile Card */}
+                    <div
                       style={{
-                        padding: "3px 8px",
-                        borderRadius: 6,
-                        background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.2)" : "#2a2a36",
-                        border: "none",
-                        color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        cursor: "pointer",
+                        padding: 14,
+                        background: "#1c1c24",
+                        borderRadius: 10,
+                        border: "1px solid #2b2b38",
                       }}
                     >
-                      {activeConversation?.optIn ? "Ativo" : "Inativo"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Financial Summary */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
-                    <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Total Aberto</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
-                      {formatCents(allTransactions.filter((t) => t.status === "pending").reduce((a, b) => a + b.amount, 0))}
-                    </div>
-                  </div>
-                  <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
-                    <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Em Atraso</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
-                      {formatCents(allTransactions.filter((t) => t.status === "pending" && new Date(t.dueDate) < new Date()).reduce((a, b) => a + b.amount, 0))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Invoices List */}
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
-                    <span>Faturas ({allTransactions.length})</span>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {allTransactions.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "#777", textAlign: "center", padding: 16 }}>
-                        Nenhuma fatura registrada para este cliente.
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                          {activeConversation.clientName}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 9,
+                            padding: "2px 7px",
+                            borderRadius: 10,
+                            background: "hsl(265 85% 62% / 0.2)",
+                            color: "#c4a3ff",
+                            fontWeight: 700,
+                            border: "1px solid hsl(265 85% 62% / 0.4)",
+                          }}
+                        >
+                          {activeConversation.roleLabel || "Sócio"}
+                        </span>
                       </div>
-                    ) : (
-                      allTransactions.map((tx) => {
-                        const isOverdue = tx.status === "pending" && new Date(tx.dueDate) < new Date();
-                        const isPaid = tx.status === "paid";
+                      <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                        {formatPhoneDisplay(activeConversation.phone || "")}
+                      </div>
+                      {activeConversation.nickname && (
+                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                          Apelido: {activeConversation.nickname}
+                        </div>
+                      )}
 
-                        return (
-                          <div
-                            key={tx.id}
-                            style={{
-                              padding: "10px 12px",
-                              borderRadius: 8,
-                              background: isPaid ? "#171f1a" : "#1c1c24",
-                              border: isPaid
-                                ? "1px solid hsl(152 65% 45% / 0.3)"
-                                : isOverdue
-                                ? "1px solid hsl(0 70% 58% / 0.35)"
-                                : "1px solid #2b2b38",
-                            }}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                              <div>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: "#eee" }}>
-                                  {tx.description || "Fatura"}
-                                </div>
-                                <div style={{ fontSize: 10, color: isOverdue ? "#ff7b7b" : "#888", marginTop: 2 }}>
-                                  Vencimento: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
-                                </div>
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: isPaid ? "hsl(152 65% 55%)" : "#c4a3ff" }}>
-                                  {formatCents(tx.amount)}
-                                </div>
-                                <span
-                                  style={{
-                                    fontSize: 9,
-                                    padding: "1px 5px",
-                                    borderRadius: 4,
-                                    background: isPaid ? "hsl(152 65% 45% / 0.2)" : isOverdue ? "hsl(0 70% 58% / 0.2)" : "#282835",
-                                    color: isPaid ? "hsl(152 65% 60%)" : isOverdue ? "hsl(0 70% 65%)" : "#aaa",
-                                    fontWeight: 700,
-                                    textTransform: "uppercase",
-                                  }}
-                                >
-                                  {isPaid ? "Pago" : isOverdue ? "Atrasado" : "Pendente"}
-                                </span>
-                              </div>
-                            </div>
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#888" }}>Status no Grupo</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "hsl(152 65% 55%)" }}>
+                          ✓ Ativo no Teltech Group
+                        </span>
+                      </div>
+                    </div>
 
-                            {/* Actions for Pending Invoices */}
-                            {!isPaid && (
-                              <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 8, borderTop: "1px solid #282836" }}>
-                                <button
-                                  onClick={() => handleTriggerBilling(tx.id)}
-                                  disabled={isTriggeringBilling}
-                                  title="Dispara cobrança com código Pix no WhatsApp"
-                                  style={{
-                                    flex: 1,
-                                    padding: "5px 8px",
-                                    borderRadius: 6,
-                                    background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
-                                    border: "none",
-                                    color: "#fff",
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  ⚡ Cobrar Pix
-                                </button>
-                                <button
-                                  onClick={() => handleMarkPaid(tx.id)}
-                                  disabled={Boolean(isMarkingPaid)}
-                                  title="Registra quitação e envia recibo automático"
-                                  style={{
-                                    flex: 1,
-                                    padding: "5px 8px",
-                                    borderRadius: 6,
-                                    background: "hsl(152 65% 45% / 0.2)",
-                                    border: "1px solid hsl(152 65% 45% / 0.4)",
-                                    color: "hsl(152 65% 60%)",
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  {isMarkingPaid === tx.id ? "Baixando..." : "✅ Dar Baixa"}
-                                </button>
-                              </div>
-                            )}
+                    {/* Partner Financial Summary */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Retiradas / Saídas</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
+                          {formatCents(allTransactions.filter((t) => t.type === "outflow").reduce((a, b) => a + b.amount, 0))}
+                        </div>
+                      </div>
+                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Movimentações</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
+                          {allTransactions.length} registro(s)
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Partner Transactions List */}
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+                        <span>Lançamentos Vinculados ({allTransactions.length})</span>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {allTransactions.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#777", textAlign: "center", padding: 16 }}>
+                            Nenhum lançamento financeiro vinculado a este sócio ainda.
                           </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
+                        ) : (
+                          allTransactions.map((tx) => {
+                            const isOutflow = tx.type === "outflow";
+                            return (
+                              <div
+                                key={tx.id}
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  background: "#1c1c24",
+                                  border: "1px solid #2b2b38",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: "#eee" }}>
+                                      {tx.description || "Movimentação"}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
+                                      {new Date(tx.dueDate || (tx as any).createdAt).toLocaleDateString("pt-BR")}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: isOutflow ? "hsl(0 70% 65%)" : "hsl(152 65% 55%)" }}>
+                                      {isOutflow ? "- " : "+ "}{formatCents(tx.amount)}
+                                    </div>
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        padding: "1px 5px",
+                                        borderRadius: 4,
+                                        background: tx.status === "paid" ? "hsl(152 65% 45% / 0.2)" : "#282835",
+                                        color: tx.status === "paid" ? "hsl(152 65% 60%)" : "#aaa",
+                                        fontWeight: 700,
+                                        textTransform: "uppercase",
+                                      }}
+                                    >
+                                      {tx.status === "paid" ? "Liquidado" : tx.status}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Client Profile Card */}
+                    <div
+                      style={{
+                        padding: 14,
+                        background: "#1c1c24",
+                        borderRadius: 10,
+                        border: "1px solid #2b2b38",
+                      }}
+                    >
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                        {activeConversation?.clientName}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                        {formatPhoneDisplay(activeConversation?.phone || "")}
+                      </div>
+                      {activeConversation?.document && (
+                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                          Doc: {activeConversation.document}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: "#888" }}>WhatsApp Opt-in</span>
+                        <button
+                          onClick={handleToggleOptIn}
+                          style={{
+                            padding: "3px 8px",
+                            borderRadius: 6,
+                            background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.2)" : "#2a2a36",
+                            border: "none",
+                            color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {activeConversation?.optIn ? "Ativo" : "Inativo"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Financial Summary */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Total Aberto</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
+                          {formatCents(allTransactions.filter((t) => t.status === "pending").reduce((a, b) => a + b.amount, 0))}
+                        </div>
+                      </div>
+                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                        <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Em Atraso</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
+                          {formatCents(allTransactions.filter((t) => t.status === "pending" && new Date(t.dueDate) < new Date()).reduce((a, b) => a + b.amount, 0))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Invoices List */}
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+                        <span>Faturas ({allTransactions.length})</span>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {allTransactions.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#777", textAlign: "center", padding: 16 }}>
+                            Nenhuma fatura registrada para este cliente.
+                          </div>
+                        ) : (
+                          allTransactions.map((tx) => {
+                            const isOverdue = tx.status === "pending" && new Date(tx.dueDate) < new Date();
+                            const isPaid = tx.status === "paid";
+
+                            return (
+                              <div
+                                key={tx.id}
+                                style={{
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  background: isPaid ? "#171f1a" : "#1c1c24",
+                                  border: isPaid
+                                    ? "1px solid hsl(152 65% 45% / 0.3)"
+                                    : isOverdue
+                                    ? "1px solid hsl(0 70% 58% / 0.35)"
+                                    : "1px solid #2b2b38",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: "#eee" }}>
+                                      {tx.description || "Fatura"}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: isOverdue ? "#ff7b7b" : "#888", marginTop: 2 }}>
+                                      Vencimento: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: isPaid ? "hsl(152 65% 55%)" : "#c4a3ff" }}>
+                                      {formatCents(tx.amount)}
+                                    </div>
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        padding: "1px 5px",
+                                        borderRadius: 4,
+                                        background: isPaid ? "hsl(152 65% 45% / 0.2)" : isOverdue ? "hsl(0 70% 58% / 0.2)" : "#282835",
+                                        color: isPaid ? "hsl(152 65% 60%)" : isOverdue ? "hsl(0 70% 65%)" : "#aaa",
+                                        fontWeight: 700,
+                                        textTransform: "uppercase",
+                                      }}
+                                    >
+                                      {isPaid ? "Pago" : isOverdue ? "Atrasado" : "Pendente"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Actions for Pending Invoices */}
+                                {!isPaid && (
+                                  <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 8, borderTop: "1px solid #282836" }}>
+                                    <button
+                                      onClick={() => handleTriggerBilling(tx.id)}
+                                      disabled={isTriggeringBilling}
+                                      title="Dispara cobrança com código Pix no WhatsApp"
+                                      style={{
+                                        flex: 1,
+                                        padding: "5px 8px",
+                                        borderRadius: 6,
+                                        background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
+                                        border: "none",
+                                        color: "#fff",
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      ⚡ Cobrar Pix
+                                    </button>
+                                    <button
+                                      onClick={() => handleMarkPaid(tx.id)}
+                                      disabled={Boolean(isMarkingPaid)}
+                                      title="Registra quitação e envia recibo automático"
+                                      style={{
+                                        flex: 1,
+                                        padding: "5px 8px",
+                                        borderRadius: 6,
+                                        background: "hsl(152 65% 45% / 0.2)",
+                                        border: "1px solid hsl(152 65% 45% / 0.4)",
+                                        color: "hsl(152 65% 60%)",
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      {isMarkingPaid === tx.id ? "Baixando..." : "✅ Dar Baixa"}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.div>
           )}

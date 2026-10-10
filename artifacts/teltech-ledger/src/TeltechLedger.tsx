@@ -12,6 +12,7 @@ import { PainelPage } from "./pages/PainelPage";
 import { ProjectModal } from "./pages/ProjectModal";
 import { ProfileModal } from "./pages/ProfileModal";
 import { Loader } from "./components/Loader";
+import { ClientAvatar } from "./components/ClientAvatar";
 import { TaskModal } from "./components/TaskModal";
 import { ProjectList } from "./components/ProjectList";
 import { ProjectCalendar } from "./components/ProjectCalendar";
@@ -1706,7 +1707,7 @@ function Sidebar() {
                     onMouseEnter={e => { e.currentTarget.style.background = "#1a1a1e"; e.currentTarget.style.color = "#ddd"; }}
                     onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#999"; }}
                   >
-                    <UserCircle size={12} style={{ flexShrink: 0, color: "#666" }} />
+                    <ClientAvatar name={client.name} photoUrl={client.photoUrl} size={20} />
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {client.name}
                     </span>

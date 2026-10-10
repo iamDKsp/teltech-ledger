@@ -22,6 +22,10 @@ export const webhookClientSchema = z.object({
   phone: nullableText(40),
   status: z.enum(["active", "inactive"]).default("active"),
   notes: nullableText(2000),
+  photo: z.object({
+    sourceUrl: z.string().url().max(4096),
+    version,
+  }).strict().nullable().optional(),
 }).strict();
 
 export const webhookBaseSchema = z.object({
@@ -80,6 +84,8 @@ const integrationSchema = z.object({
   workspaceId: z.string().uuid(),
   projectId: z.string().uuid(),
   accountId: z.string().uuid().nullable().default(null),
+  photoAllowedHosts: z.array(z.string().max(253).regex(/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/))
+    .max(20).optional(),
 }).strict();
 export type WebhookIntegration = z.infer<typeof integrationSchema>;
 

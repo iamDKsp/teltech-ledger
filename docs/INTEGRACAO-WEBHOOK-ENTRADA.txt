@@ -1,9 +1,9 @@
 PROMPT PARA A IA DESENVOLVEDORA DO SISTEMA DE ORIGEM
 Integração com Teltech Leadger — contrato v1
 
-O contrato v1 descrito nas seções 1 a 10 cobre cadastros e financeiro.
-A seção 11 registra o requisito de foto com cópia no Leadger; essa extensão
-AINDA NÃO está implementada e não deve ser enviada ao receptor atual.
+O contrato v1 cobre cadastros, financeiro e o campo opcional photo (seção 11),
+implementado nesta versão para armazenar uma cópia da imagem no Leadger.
+Antes de enviar fotos, confirme o deploy e a configuração dos hosts de origem.
 
 Você é a IA responsável por desenvolver nosso outro sistema. Implemente nele o
 ENVIO de eventos para o webhook de entrada que já foi implementado no Leadger.
@@ -340,65 +340,111 @@ carga inicial paginada, respeitando limites, e ative os eventos de novas mudanç
 Ao concluir, explique os arquivos alterados, onde configurar URL/source/secret,
 como iniciar/verificar o worker, como recuperar pendências e quais testes passaram.
 
-11. FOTO DO CLIENTE — REQUISITO ACORDADO, EXTENSÃO AINDA NÃO IMPLEMENTADA
+11. FOTO DO CLIENTE — CÓPIA PERSISTENTE IMPLEMENTADA NO LEADGER
 
-A decisão é que o Leadger armazene uma CÓPIA da foto do cliente. A imagem exibida
-no cadastro deve ser servida pelo próprio Leadger, sem consultar o outro sistema
-a cada visualização. A cópia deve continuar disponível se a origem ficar offline
-ou o link de origem expirar depois de concluída a transferência.
+Esta versão do receptor aceita o campo opcional photo nos dados do cliente,
+tanto em client.upsert como em data.client de base.upsert. schemaVersion continua
+1. Antes de habilitar o envio, confirme o deploy desta versão e a migração de
+fotos no servidor. Versões anteriores do receptor rejeitam photo com 422.
 
-ATENÇÃO: o receptor atual v1 ainda NÃO aceita foto/photo/photoUrl no JSON.
-Ele valida os campos estritamente e devolverá 422 para esses campos extras.
-Esta seção documenta a extensão a implementar e homologar no Leadger e no
-emissor; não é uma funcionalidade já ativada. Mantenha os eventos financeiros
-atuais funcionando e só habilite o envio da foto após a equipe do Leadger
-confirmar o novo contrato e a publicação do receptor com esse suporte.
+O Leadger baixa a imagem uma vez, valida os pixels, gera uma cópia WebP de até
+1024x1024 e salva no armazenamento persistente. O cadastro, o modal do cliente
+e a barra lateral exibem a cópia local; a interface não consulta sourceUrl.
+A URL de origem, inclusive tokens do link assinado, não é gravada como endereço
+de exibição. A imagem local continua disponível se o sistema de origem sair do
+ar ou seu link expirar depois do recebimento.
 
-Fluxo previsto:
-1. No cadastro inicial ou na troca da foto, o emissor disponibiliza a imagem
-   para transferência e informa qual cliente externo e qual versão da foto
-   devem recebê-la. A foto pertence ao cliente, não ao contrato ou à fatura.
-2. O Leadger obtém os bytes da imagem uma vez, valida o arquivo, grava uma cópia
-   em seu próprio armazenamento e associa o endereço local ao cliente interno
-   já identificado pelo vínculo externo. Não cria outro cliente por causa da foto.
-3. Depois de gravar a cópia com sucesso, o Leadger exibe a sua própria imagem.
-   O endereço de origem serve somente para a transferência; não vira o src
-   definitivo da imagem na interface.
-4. Novas transferências ocorrem somente quando a imagem muda. Reenvio do mesmo
-   evento/versão não pode criar cópias duplicadas nem substituir uma foto mais nova.
+Campo aceito:
+  "photo": {
+    "sourceUrl": "https://cdn.sistema-amigo.com.br/clientes/cli-123.png",
+    "version": 1
+  }
 
-Proposta de metadados para a extensão futura, AINDA NÃO ACEITA PELO RECEPTOR:
-  photo: { sourceUrl: "URL_HTTPS_PARA_TRANSFERENCIA", version: 1 }
-O formato final, a versão do contrato e a confirmação de armazenamento devem
-ser publicados pela equipe do Leadger antes de habilitar esse payload.
-sourceUrl deve permitir que o backend do Leadger baixe a imagem sem login
-interativo. Para foto privada, forneça um link assinado para download; nunca
-mande senha ou token de sessão do usuário. Mantenha o link válido durante a
-transferência e seus retries, e preveja renovação caso expire.
+Exemplo completo para enviar a foto sem alterar o contrato:
+{
+  "schemaVersion": 1,
+  "eventId": "evt-cli-123-photo-v1",
+  "eventType": "client.upsert",
+  "occurredAt": "2026-10-10T15:00:00Z",
+  "data": {
+    "externalId": "cli-123",
+    "version": 3,
+    "name": "Empresa Exemplo",
+    "document": "12.345.678/0001-99",
+    "email": "financeiro@empresa-exemplo.com.br",
+    "phone": "+5514999999999",
+    "status": "active",
+    "notes": null,
+    "photo": {
+      "sourceUrl": "https://cdn.sistema-amigo.com.br/clientes/cli-123.png",
+      "version": 1
+    }
+  }
+}
 
-Semântica prevista: campo photo omitido conserva a foto atual; photo=null pede
-remoção explícita; objeto photo pede armazenar/substituir a cópia. Uma troca ou
-remoção exige versão crescente do cliente, além da versão de foto quando houver.
-Snapshots antigos não podem restaurar fotos anteriores nem desfazer remoções.
+O domínio acima é exemplo: informe à equipe do Leadger os hosts HTTPS reais
+que servem as fotos. Ela deve adicioná-los à lista photoAllowedHosts da
+integração. A URL do webhook continua sendo a definida na seção 2.
+Não mande photoUrl/foto/avatarUrl, Base64, senha ou token de login no JSON.
 
-Não envie Base64 no webhook atual: a imagem pode ultrapassar o limite do JSON.
-Se for necessário upload direto em vez de link de transferência, ele deverá
-usar um endpoint próprio, autenticado, a ser fornecido pela equipe do Leadger.
-Não use uma rota de upload existente por suposição.
+Semântica:
+- photo omitido: conserva a imagem atual.
+- photo=null: remove explicitamente a foto; exige uma versão maior do cliente.
+- photo com objeto: baixa e armazena uma foto com versão maior.
+- photo.version é inteiro crescente, independente da versão de cadastro, e
+  representa mudanças da imagem. Incremente também client.version ao trocar foto.
+- Mesma versão de foto não é baixada novamente; versão menor é ignorada.
+- Depois da remoção, uma imagem com versão igual ou menor à última armazenada
+  não restaura a foto. Para adicionar outra imagem, incremente photo.version.
+- A primeira integração que grava a foto fica responsável por ela. Outra origem
+  tentando substituir/remover a mesma foto recebe photo_source_conflict.
+- A foto usa o vínculo do cliente existente, inclusive cadastros manuais.
+  Não se cria outro cliente para receber a imagem.
 
-A implementação do receptor deve validar tamanho, formato e conteúdo real do
-arquivo; permitir download apenas de origens HTTPS aprovadas, bloquear destinos
-internos e aplicar timeout/limites também a redirecionamentos. A cópia deve usar
-armazenamento persistente, sem ser perdida ao reiniciar ou atualizar o container.
-O Leadger não deve apagar a foto anterior antes de salvar a nova com sucesso.
+Requisitos para sourceUrl:
+HTTPS, host exato aprovado, porta padrão 443, sem credenciais nem fragmento.
+Não são aceitos wildcards, URLs com IP ou destinos internos/privados.
+A origem precisa responder diretamente HTTP 200; redirects não são seguidos.
+Content-Type deve ser image/jpeg, image/png ou image/webp, sem gzip.
+Arquivo até 5 MiB e até 16 milhões de pixels, sem animação. O conteúdo real é
+decodificado e validado; SVG, GIF, PDF e arquivos disfarçados são rejeitados.
+O download tem limite de 8 segundos, além de até 2 segundos para DNS.
+Para fotos privadas, use link assinado que permita download pelo backend sem
+login interativo e permaneça válido durante a transferência e seus retries.
 
-Falha na transferência deve ficar registrada para retry, preservando a foto
-atual e os dados do cliente. HTTP 200 do webhook financeiro atual não significa
-que uma foto foi recebida: o mecanismo de confirmação da cópia faz parte da
-extensão pendente. O emissor precisa distinguir entrega do cadastro de conclusão
-da transferência para não descartar a imagem antes de ela ser armazenada.
+HTTP 200 com ok=true e photo.status="stored" confirma que a cópia foi gravada
+antes da confirmação do evento. A resposta contém photo.version e photo.url
+(local do Leadger). Outros estados: removed, unchanged e stale.
+Um evento duplicado retorna o resultado original sem baixar a imagem outra vez.
+Não trate unchanged/stale como armazenamento de uma foto nova; consulte os
+valores retornados. Após substituir/remover, a URL de uma foto antiga pode não
+estar mais disponível; o resultado de retry antigo representa a entrega original.
 
-Quando o suporte for implementado, teste: cliente novo com foto; cliente manual
-reutilizado com foto; mudança de imagem; reenvio sem duplicação; evento antigo;
-origem indisponível; link expirado; arquivo inválido/grande; remoção explícita;
-e foto ainda acessível após reinício do Leadger ou indisponibilidade da origem.
+Falha no download ou na validação não confirma o evento e conserva a imagem
+anterior. Como cadastro/base/faturas são transacionais, incluir photo em
+base.upsert também faz uma falha de foto impedir a confirmação desse evento.
+Para não atrasar o financeiro por problemas de imagem, prefira enviar a base e
+as faturas primeiro e depois um client.upsert separado com a foto.
+
+Erros adicionais:
+422 photo_host_not_allowed: cadastrar o host na integração do Leadger.
+422 photo_url_invalid/photo_destination_blocked: corrigir a URL/origem permitida.
+422 photo_format_invalid/photo_too_large: corrigir formato/conteúdo/tamanho.
+422 photo_download_failed: origem retornou resposta inadequada (ex. link
+  expirado, autenticação ou redirect); corrija o link antes de repetir.
+503 photo_download_failed: falha temporária de DNS/rede/servidor; aplicar backoff.
+409 photo_source_conflict: conciliar qual integração gerencia a foto.
+
+Se o link assinado precisar ser renovado, crie novo evento com novo eventId e
+versão maior do cliente, mantendo a versão de foto se os bytes não mudaram.
+Não altere o corpo de um evento já confirmado. A tentativa antiga que se tornar
+stale será ignorada, sem restaurar imagens anteriores.
+
+Não existe upload direto de bytes por esta integração. O envio implementado
+usa sourceUrl para obter uma cópia; não reutilize a rota de upload do app com o
+segredo do webhook.
+
+Valide no emissor: cliente novo e cliente manual com foto, mudança de imagem,
+reenvios sem duplicação, versões antigas, origem offline, link expirado,
+arquivo inválido/grande, remoção e nova foto após remoção. A foto armazenada
+deve permanecer acessível mesmo que a origem deixe de servir o arquivo.
