@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./lib/auth-context";
 import { LoginPage } from "./pages/login";
@@ -9,6 +9,8 @@ import { Toaster } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { WebhookSync } from "./components/WebhookSync";
 import { FinanceUiRoot } from "./components/finance-ui";
+import { isBiometricsEnabled } from "./lib/biometrics";
+import { BiometricLockScreen } from "./components/BiometricLockScreen";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,8 +19,19 @@ const queryClient = new QueryClient({
 });
 
 function AppInner() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, user, logout } = useAuth();
   const [loaderFinished, setLoaderFinished] = useState(false);
+  const [isBiometricLocked, setIsBiometricLocked] = useState(() => isBiometricsEnabled());
+
+  useEffect(() => {
+    const handleStorage = () => {
+      if (!isBiometricsEnabled()) {
+        setIsBiometricLocked(false);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   return (
     <AnimatePresence mode="wait">
@@ -41,13 +54,34 @@ function AppInner() {
           transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
           style={{ width: "100vw", height: "100vh" }}
         >
-          <LoginPage />
+          <LoginPage onFaceIdSuccess={() => setIsBiometricLocked(false)} />
+        </motion.div>
+      ) : isBiometricLocked ? (
+        <motion.div
+          key="biometric-lock-view"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", zIndex: 99999 }}
+        >
+          <BiometricLockScreen
+            userName={user?.name}
+            userEmail={user?.email}
+            avatarUrl={user?.avatarUrl}
+            onUnlock={() => setIsBiometricLocked(false)}
+            onFallbackPassword={() => {
+              setIsBiometricLocked(false);
+              logout();
+            }}
+          />
         </motion.div>
       ) : (
         <motion.div
           key="ledger-view"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
           style={{ width: "100%", height: "100%" }}
         >

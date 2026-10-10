@@ -1095,6 +1095,7 @@ router.get("/monitoring/conversations", async (req, res) => {
         nickname: partnerContact?.nickname ?? (isPartner && displayName ? displayName.split(" ")[0] : null),
         roleLabel,
         isPartner,
+        photoUrl: client?.photoUrl ?? memberUser?.avatarUrl ?? null,
         phone: targetPhone || client?.phone || partnerContact?.phone || memberUser?.phone || lastMessage?.recipient || lastMessage?.senderPhone || "",
         document: client?.document ?? null,
         optIn: isPartner ? true : (client?.whatsappOptIn ?? false),

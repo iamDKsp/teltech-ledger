@@ -1,16 +1,50 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle, Webhook } from "lucide-react";
+import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle, Webhook, ScanFace } from "lucide-react";
 import { API } from "../lib/api";
 import { confirmDialog } from "../components/finance-ui";
 import { WhatsAppSettingsPanel } from "../components/WhatsAppSettingsPanel";
 import { WebhookSettingsPanel } from "../components/WebhookSettingsPanel";
+import { useAuth } from "../lib/auth-context";
+import { isBiometricsEnabled, registerBiometrics, disableBiometrics } from "../lib/biometrics";
+import { toast } from "sonner";
 
 export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"geral" | "reunioes" | "whatsapp" | "integracoes">("geral");
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Biometrics Face ID state
+  const [biometricsActive, setBiometricsActive] = useState(() => isBiometricsEnabled());
+  const [biometricsLoading, setBiometricsLoading] = useState(false);
+
+  const handleEnableBiometrics = async () => {
+    setBiometricsLoading(true);
+    try {
+      const email = user?.email || "socio@teltech.com.br";
+      const name = user?.name || "Sócio Teltech";
+      await registerBiometrics(email, name);
+      setBiometricsActive(true);
+      toast.success("Face ID ativado com sucesso! Será solicitado ao abrir o app.");
+    } catch (err: any) {
+      console.warn("Enable biometrics error:", err);
+      if (err.name === "NotAllowedError") {
+        toast.error("Permissão de Face ID / Biometria cancelada.");
+      } else {
+        toast.error(err.message || "Erro ao configurar Face ID neste aparelho.");
+      }
+    } finally {
+      setBiometricsLoading(false);
+    }
+  };
+
+  const handleDisableBiometrics = () => {
+    disableBiometrics();
+    setBiometricsActive(false);
+    toast.info("Face ID desativado neste aparelho.");
+  };
 
   // Form states
   const [isCreating, setIsCreating] = useState(false);
@@ -177,6 +211,112 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
                     padding: "10px 12px", color: "#a1a1aa", fontSize: 14, outline: "none"
                   }}
                 />
+              </div>
+            </div>
+
+            {/* Segurança & Desbloqueio com Face ID */}
+            <div style={{ background: "#1a1a1a", border: "1px solid #242424", borderRadius: 12, padding: 24, marginTop: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      background: "hsl(265 85% 62% / 0.15)",
+                      border: "1px solid hsl(265 85% 62% / 0.4)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#c4a3ff",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ScanFace size={24} />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0, color: "#fff" }}>
+                        Bloqueio com Face ID / Biometria
+                      </h3>
+                      {biometricsActive ? (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            background: "hsl(152 65% 45% / 0.2)",
+                            border: "1px solid hsl(152 65% 45% / 0.4)",
+                            color: "hsl(152 65% 55%)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          Ativo neste Aparelho
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            background: "#25252b",
+                            border: "1px solid #33333d",
+                            color: "#888",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Inativo
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, color: "#a1a1aa", margin: "4px 0 0 0", maxWidth: 460, lineHeight: 1.4 }}>
+                      Exige Face ID no iPhone ou biometria no celular sempre que você abrir o Teltech Ledger, garantindo que apenas você acesse as contas e clientes.
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  {biometricsActive ? (
+                    <button
+                      onClick={handleDisableBiometrics}
+                      style={{
+                        padding: "8px 16px",
+                        borderRadius: 8,
+                        background: "hsl(0 70% 58% / 0.15)",
+                        border: "1px solid hsl(0 70% 58% / 0.4)",
+                        color: "hsl(0 70% 68%)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      Desativar Face ID
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleEnableBiometrics}
+                      disabled={biometricsLoading}
+                      style={{
+                        padding: "9px 18px",
+                        borderRadius: 8,
+                        background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 50%))",
+                        border: "none",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: biometricsLoading ? "not-allowed" : "pointer",
+                        boxShadow: "0 0 16px hsl(265 85% 62% / 0.35)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <ScanFace size={16} />
+                      {biometricsLoading ? "Lendo Face ID..." : "Ativar Face ID"}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

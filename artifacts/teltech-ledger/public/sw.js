@@ -114,10 +114,19 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'Teltech Ledger';
+  let iconUrl = payload.icon || '/apple-touch-icon.png';
+  if (typeof iconUrl === 'string' && iconUrl.startsWith('/')) {
+    iconUrl = self.location.origin + iconUrl;
+  }
+  let badgeUrl = payload.badge || '/favicon-32x32.png';
+  if (typeof badgeUrl === 'string' && badgeUrl.startsWith('/')) {
+    badgeUrl = self.location.origin + badgeUrl;
+  }
+
   const options = {
     body: payload.body || 'Nova notificação no sistema',
-    icon: payload.icon || '/apple-touch-icon.png',
-    badge: payload.badge || '/favicon-32x32.png',
+    icon: iconUrl,
+    badge: badgeUrl,
     tag: payload.tag || 'teltech-notification',
     data: payload.data || { url: '/monitoramento' },
     renotify: true,

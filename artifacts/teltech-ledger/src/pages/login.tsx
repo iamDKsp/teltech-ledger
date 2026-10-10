@@ -29,7 +29,7 @@ const BASE_PROFILES: Profile[] = [
 
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
-export function LoginPage() {
+export function LoginPage({ onFaceIdSuccess }: { onFaceIdSuccess?: () => void } = {}) {
   const { login } = useAuth();
 
   const [profiles, setProfiles] = useState<Profile[]>(BASE_PROFILES);

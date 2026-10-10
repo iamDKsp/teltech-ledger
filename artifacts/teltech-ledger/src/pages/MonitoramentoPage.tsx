@@ -53,6 +53,7 @@ import {
 import { toast } from "sonner";
 import { API } from "../lib/api";
 import { motion, AnimatePresence } from "framer-motion";
+import { useIsMobile } from "../hooks/use-mobile";
 import {
   checkPushSupport,
   getCurrentPushSubscription,
@@ -71,6 +72,7 @@ interface ConversationItem {
   nickname?: string | null;
   roleLabel?: string | null;
   isPartner?: boolean;
+  photoUrl?: string | null;
   phone: string;
   document: string | null;
   optIn: boolean;
@@ -543,8 +545,8 @@ function WhatsAppAudioPlayer({
         background: isOutbound ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.35)",
         borderRadius: 12,
         border: isOutbound ? "1px solid hsl(265 85% 62% / 0.3)" : "1px solid rgba(255,255,255,0.1)",
-        minWidth: 260,
-        maxWidth: 340,
+        minWidth: "min(100%, 230px)",
+        maxWidth: "100%",
       }}
     >
       {mediaSrc && (
@@ -704,7 +706,8 @@ function WhatsAppVideoPlayer({
         display: "flex",
         flexDirection: "column",
         gap: 6,
-        maxWidth: 320,
+        maxWidth: "100%",
+        width: "100%",
         borderRadius: 12,
         overflow: "hidden",
         background: "#0f0f12",
@@ -781,7 +784,8 @@ function WhatsAppImageViewer({
         display: "flex",
         flexDirection: "column",
         gap: 6,
-        maxWidth: 300,
+        maxWidth: "100%",
+        width: "100%",
       }}
     >
       {mediaSrc ? (
@@ -868,8 +872,9 @@ function WhatsAppDocumentCard({
         display: "flex",
         flexDirection: "column",
         gap: 6,
-        minWidth: 240,
-        maxWidth: 320,
+        minWidth: "min(100%, 220px)",
+        maxWidth: "100%",
+        width: "100%",
       }}
     >
       <div
@@ -985,7 +990,78 @@ function WhatsAppDocumentCard({
   );
 }
 
+function ContactAvatar({
+  name,
+  photoUrl,
+  isPartner,
+  isSelected,
+  size = 40,
+  hasReplied,
+}: {
+  name: string;
+  photoUrl?: string | null;
+  isPartner?: boolean;
+  isSelected?: boolean;
+  size?: number;
+  hasReplied?: boolean;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const src = photoUrl && !imgError ? resolveMediaSrc(photoUrl) : null;
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: isSelected
+          ? (isPartner ? "hsl(265 85% 62% / 0.35)" : "hsl(265 85% 62% / 0.3)")
+          : (isPartner ? "hsl(265 85% 62% / 0.15)" : "#252530"),
+        border: isSelected
+          ? (isPartner ? "1px solid hsl(265 85% 62% / 0.8)" : "1px solid hsl(265 85% 62% / 0.6)")
+          : (isPartner ? "1px solid hsl(265 85% 62% / 0.35)" : "1px solid #333342"),
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: isPartner ? "#c4a3ff" : (isSelected ? "#d4b8ff" : "#aaa"),
+        fontWeight: 700,
+        fontSize: Math.max(11, Math.round(size * 0.36)),
+        flexShrink: 0,
+        position: "relative",
+      }}
+    >
+      {src ? (
+        <img
+          src={src}
+          alt={name}
+          onError={() => setImgError(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
+        />
+      ) : (
+        <span>{getContactInitials(name)}</span>
+      )}
+      {hasReplied && (
+        <span
+          title="Contato respondeu"
+          style={{
+            position: "absolute",
+            bottom: -1,
+            right: -1,
+            width: Math.max(9, Math.round(size * 0.25)),
+            height: Math.max(9, Math.round(size * 0.25)),
+            borderRadius: "50%",
+            background: "hsl(152 65% 50%)",
+            border: "2px solid #151518",
+            zIndex: 2,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function MonitoramentoPage() {
+  const isMobile = useIsMobile();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
@@ -1388,238 +1464,258 @@ export function MonitoramentoPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "#111113", color: "#fafafa" }}>
       {/* ─── Top Stats & Status Bar ─── */}
-      <div
-        style={{
-          padding: "16px 24px",
-          background: "linear-gradient(180deg, #18181c 0%, #121215 100%)",
-          borderBottom: "1px solid #27272e",
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: "linear-gradient(135deg, hsl(265 85% 62% / 0.3), hsl(152 65% 45% / 0.2))",
-              border: "1px solid hsl(265 85% 62% / 0.4)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#c4a3ff",
-              boxShadow: "0 0 20px hsl(265 85% 62% / 0.25)",
-            }}
-          >
-            <Bot size={24} />
-          </div>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", color: "#fff" }}>
-                Monitoramento Nexus • Chat de Cobranças
-              </h1>
+      {(!isMobile || !selectedTarget) && (
+        <div
+          style={{
+            padding: isMobile ? "12px 16px" : "16px 24px",
+            background: "linear-gradient(180deg, #18181c 0%, #121215 100%)",
+            borderBottom: "1px solid #27272e",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: isMobile ? 12 : 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 14 }}>
+            <div
+              style={{
+                width: isMobile ? 38 : 44,
+                height: isMobile ? 38 : 44,
+                borderRadius: 12,
+                background: "linear-gradient(135deg, hsl(265 85% 62% / 0.3), hsl(152 65% 45% / 0.2))",
+                border: "1px solid hsl(265 85% 62% / 0.4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#c4a3ff",
+                boxShadow: "0 0 20px hsl(265 85% 62% / 0.25)",
+                flexShrink: 0,
+              }}
+            >
+              <Bot size={isMobile ? 20 : 24} />
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <h1 style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", color: "#fff" }}>
+                  Monitoramento Nexus
+                </h1>
 
-              {/* Status Badge with Reconnection Button */}
-              {stats?.status.connected ? (
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "3px 10px",
-                    borderRadius: 20,
-                    background: "hsl(152 65% 45% / 0.15)",
-                    border: "1px solid hsl(152 65% 45% / 0.4)",
-                    color: "hsl(152 65% 55%)",
-                    fontSize: 11,
-                    fontWeight: 600,
-                  }}
-                >
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(152 65% 50%)", boxShadow: "0 0 8px hsl(152 65% 50%)" }} />
-                  Online {stats.status.phone ? `(${formatPhoneDisplay(stats.status.phone)})` : ""}
-                </div>
-              ) : (
+                {/* Status Badge with Reconnection Button */}
+                {stats?.status.connected ? (
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      background: "hsl(152 65% 45% / 0.15)",
+                      border: "1px solid hsl(152 65% 45% / 0.4)",
+                      color: "hsl(152 65% 55%)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(152 65% 50%)", boxShadow: "0 0 8px hsl(152 65% 50%)" }} />
+                    Online {stats.status.phone ? `(${formatPhoneDisplay(stats.status.phone)})` : ""}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowReconnectModal(true)}
+                    title="Clique para conectar ou escanear QR Code"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      background: "hsl(0 70% 58% / 0.15)",
+                      border: "1px solid hsl(0 70% 58% / 0.4)",
+                      color: "hsl(0 70% 68%)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.25)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.15)")}
+                  >
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(0 70% 58%)" }} />
+                    WhatsApp Desconectado • Conectar
+                  </button>
+                )}
+
+                {/* Push Notifications Toggle */}
                 <button
-                  onClick={() => setShowReconnectModal(true)}
-                  title="Clique para conectar ou escanear QR Code"
+                  onClick={handleTogglePush}
+                  disabled={pushLoading}
+                  title={
+                    isPushSubscribed
+                      ? "Notificações push ativas neste aparelho. Clique para desativar."
+                      : "Clique para ativar notificações push no celular"
+                  }
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
                     padding: "3px 10px",
                     borderRadius: 20,
-                    background: "hsl(0 70% 58% / 0.15)",
-                    border: "1px solid hsl(0 70% 58% / 0.4)",
-                    color: "hsl(0 70% 68%)",
+                    background: isPushSubscribed
+                      ? "hsl(265 85% 62% / 0.18)"
+                      : "rgba(255, 255, 255, 0.06)",
+                    border: isPushSubscribed
+                      ? "1px solid hsl(265 85% 62% / 0.5)"
+                      : "1px solid rgba(255, 255, 255, 0.15)",
+                    color: isPushSubscribed ? "#c4a3ff" : "#aaa",
                     fontSize: 11,
                     fontWeight: 600,
                     cursor: "pointer",
                     transition: "all 0.15s ease",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.25)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.15)")}
                 >
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(0 70% 58%)" }} />
-                  WhatsApp Desconectado • Conectar
+                  {isPushSubscribed ? <BellRing size={12} color="#c4a3ff" /> : <Bell size={12} />}
+                  {pushLoading
+                    ? "Configurando..."
+                    : isPushSubscribed
+                    ? "Push Celular Ativo"
+                    : "Ativar Push Celular"}
                 </button>
-              )}
 
-              {/* Push Notifications Toggle */}
-              <button
-                onClick={handleTogglePush}
-                disabled={pushLoading}
-                title={
-                  isPushSubscribed
-                    ? "Notificações push ativas neste aparelho. Clique para desativar."
-                    : "Clique para ativar notificações push no celular"
-                }
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "3px 10px",
-                  borderRadius: 20,
-                  background: isPushSubscribed
-                    ? "hsl(265 85% 62% / 0.18)"
-                    : "rgba(255, 255, 255, 0.06)",
-                  border: isPushSubscribed
-                    ? "1px solid hsl(265 85% 62% / 0.5)"
-                    : "1px solid rgba(255, 255, 255, 0.15)",
-                  color: isPushSubscribed ? "#c4a3ff" : "#aaa",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                {isPushSubscribed ? <BellRing size={12} color="#c4a3ff" /> : <Bell size={12} />}
-                {pushLoading
-                  ? "Configurando..."
-                  : isPushSubscribed
-                  ? "Push Celular Ativo"
-                  : "Ativar Push Celular"}
-              </button>
-
-              {isPushSubscribed && (
-                <button
-                  onClick={handleTestPush}
-                  title="Enviar notificação de teste push agora"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "3px 8px",
-                    borderRadius: 16,
-                    background: "rgba(255, 255, 255, 0.05)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    color: "#bbb",
-                    fontSize: 10,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                  }}
-                >
-                  Testar
-                </button>
+                {isPushSubscribed && (
+                  <button
+                    onClick={handleTestPush}
+                    title="Enviar notificação de teste push agora"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "3px 8px",
+                      borderRadius: 16,
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      color: "#bbb",
+                      fontSize: 10,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Testar
+                  </button>
+                )}
+              </div>
+              {!isMobile && (
+                <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
+                  Visualização unificada de todas as cobranças disparadas por Nexus e respostas em tempo real dos clientes.
+                </p>
               )}
             </div>
-            <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
-              Visualização unificada de todas as cobranças disparadas por Nexus e respostas em tempo real dos clientes.
-            </p>
-          </div>
-        </div>
-
-        {/* Mini KPI Cards - Interactive */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div
-            style={{
-              padding: "8px 14px",
-              background: "#1c1c22",
-              border: "1px solid #2b2b36",
-              borderRadius: 10,
-              minWidth: 120,
-            }}
-          >
-            <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
-              Clientes Contatados
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f4", marginTop: 2 }}>
-              {stats?.totalConversations ?? 0}
-            </div>
           </div>
 
+          {/* Mini KPI Cards - Interactive */}
           <div
             style={{
-              padding: "8px 14px",
-              background: "#1c1c22",
-              border: "1px solid #2b2b36",
-              borderRadius: 10,
-              minWidth: 120,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: isMobile ? "nowrap" : "wrap",
+              overflowX: isMobile ? "auto" : undefined,
+              width: isMobile ? "100%" : undefined,
+              paddingBottom: isMobile ? 4 : 0,
+              scrollbarWidth: "none",
             }}
           >
-            <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
-              Nexus Disparou
+            <div
+              style={{
+                padding: "8px 14px",
+                background: "#1c1c22",
+                border: "1px solid #2b2b36",
+                borderRadius: 10,
+                minWidth: 120,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                Clientes Contatados
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#f0f0f4", marginTop: 2 }}>
+                {stats?.totalConversations ?? 0}
+              </div>
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
-              {stats?.totalSent ?? 0} msgs
-            </div>
-          </div>
 
-          <div
-            onClick={() => setFilter("replied")}
-            style={{
-              padding: "8px 14px",
-              background: filter === "replied" ? "hsl(152 65% 45% / 0.15)" : "#1c1c22",
-              border: filter === "replied" ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #2b2b36",
-              borderRadius: 10,
-              minWidth: 130,
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
-              Clientes Responderam
+            <div
+              style={{
+                padding: "8px 14px",
+                background: "#1c1c22",
+                border: "1px solid #2b2b36",
+                borderRadius: 10,
+                minWidth: 120,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                Nexus Disparou
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
+                {stats?.totalSent ?? 0} msgs
+              </div>
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "hsl(152 65% 55%)", marginTop: 2, display: "flex", alignItems: "baseline", gap: 6 }}>
-              <span>{stats?.totalReceived ?? 0}</span>
-              <span style={{ fontSize: 11, color: "#8a8a93", fontWeight: 500 }}>({stats?.responseRate ?? 0}%)</span>
-            </div>
-          </div>
 
-          <div
-            onClick={() => setFilter("overdue")}
-            style={{
-              padding: "8px 14px",
-              background: filter === "overdue" ? "hsl(0 70% 58% / 0.15)" : "#1c1c22",
-              border: filter === "overdue" ? "1px solid hsl(0 70% 58% / 0.5)" : "1px solid #2b2b36",
-              borderRadius: 10,
-              minWidth: 140,
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
-              Inadimplência Monitorada
+            <div
+              onClick={() => setFilter("replied")}
+              style={{
+                padding: "8px 14px",
+                background: filter === "replied" ? "hsl(152 65% 45% / 0.15)" : "#1c1c22",
+                border: filter === "replied" ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #2b2b36",
+                borderRadius: 10,
+                minWidth: 130,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                Clientes Responderam
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "hsl(152 65% 55%)", marginTop: 2, display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span>{stats?.totalReceived ?? 0}</span>
+                <span style={{ fontSize: 11, color: "#8a8a93", fontWeight: 500 }}>({stats?.responseRate ?? 0}%)</span>
+              </div>
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: (stats?.totalOverdueCents ?? 0) > 0 ? "hsl(0 70% 65%)" : "hsl(152 65% 55%)", marginTop: 2 }}>
-              {formatCents(stats?.totalOverdueCents ?? 0)}
+
+            <div
+              onClick={() => setFilter("overdue")}
+              style={{
+                padding: "8px 14px",
+                background: filter === "overdue" ? "hsl(0 70% 58% / 0.15)" : "#1c1c22",
+                border: filter === "overdue" ? "1px solid hsl(0 70% 58% / 0.5)" : "1px solid #2b2b36",
+                borderRadius: 10,
+                minWidth: 140,
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
+                Inadimplência Monitorada
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: (stats?.totalOverdueCents ?? 0) > 0 ? "hsl(0 70% 65%)" : "hsl(152 65% 55%)", marginTop: 2 }}>
+                {formatCents(stats?.totalOverdueCents ?? 0)}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ─── iOS Banner (quando acessado via Safari no iPhone e não PWA) ─── */}
-      {pushStatus?.isIOS && !pushStatus?.isStandalone && (
+      {(!isMobile || !selectedTarget) && pushStatus?.isIOS && !pushStatus?.isStandalone && (
         <div
           style={{
-            padding: "9px 24px",
+            padding: isMobile ? "8px 16px" : "9px 24px",
             background: "linear-gradient(90deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.15))",
             borderBottom: "1px solid hsl(265 85% 62% / 0.35)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            fontSize: 12,
+            fontSize: isMobile ? 11 : 12,
             color: "#eaeaf0",
             gap: 12,
           }}
@@ -1627,7 +1723,7 @@ export function MonitoramentoPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <BellRing size={16} style={{ color: "hsl(265 85% 68%)", flexShrink: 0 }} />
             <span>
-              <strong>Dica para iPhone:</strong> Para receber notificações push mesmo com a tela bloqueada, adicione o Teltech à <strong>Tela de Início</strong> pelo Safari.
+              <strong>Dica para iPhone:</strong> Para receber notificações push com tela bloqueada, adicione à <strong>Tela de Início</strong> pelo Safari.
             </span>
           </div>
           <button
@@ -1642,26 +1738,28 @@ export function MonitoramentoPage() {
               fontWeight: 600,
               cursor: "pointer",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
-            Como instalar no iPhone
+            Instalar no iPhone
           </button>
         </div>
       )}
 
       {/* ─── Main Two/Three-Column Layout ─── */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
         {/* ─── Left Pane: Conversations List ─── */}
         <div
           style={{
-            width: 380,
-            minWidth: 320,
-            maxWidth: 420,
-            borderRight: "1px solid #27272e",
+            width: isMobile ? "100%" : 380,
+            minWidth: isMobile ? "100%" : 320,
+            maxWidth: isMobile ? "100%" : 420,
+            borderRight: isMobile ? "none" : "1px solid #27272e",
             background: "#151518",
-            display: "flex",
+            display: isMobile && selectedTarget ? "none" : "flex",
             flexDirection: "column",
             height: "100%",
+            flexShrink: 0,
           }}
         >
           {/* Search & Filter Bar */}
@@ -1793,44 +1891,14 @@ export function MonitoramentoPage() {
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                       {/* Avatar */}
-                      <div
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: "50%",
-                          background: isSelected
-                            ? (item.isPartner ? "hsl(265 85% 62% / 0.35)" : "hsl(265 85% 62% / 0.3)")
-                            : (item.isPartner ? "hsl(265 85% 62% / 0.15)" : "#252530"),
-                          border: isSelected
-                            ? (item.isPartner ? "1px solid hsl(265 85% 62% / 0.8)" : "1px solid hsl(265 85% 62% / 0.6)")
-                            : (item.isPartner ? "1px solid hsl(265 85% 62% / 0.35)" : "1px solid #333342"),
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: item.isPartner ? "#c4a3ff" : (isSelected ? "#d4b8ff" : "#aaa"),
-                          fontWeight: 700,
-                          fontSize: 13,
-                          flexShrink: 0,
-                          position: "relative",
-                        }}
-                      >
-                        {getContactInitials(item.clientName)}
-                        {item.hasReplied && (
-                          <span
-                            title="Contato respondeu"
-                            style={{
-                              position: "absolute",
-                              bottom: -1,
-                              right: -1,
-                              width: 10,
-                              height: 10,
-                              borderRadius: "50%",
-                              background: "hsl(152 65% 50%)",
-                              border: "2px solid #151518",
-                            }}
-                          />
-                        )}
-                      </div>
+                      <ContactAvatar
+                        name={item.clientName}
+                        photoUrl={item.photoUrl}
+                        isPartner={item.isPartner}
+                        isSelected={isSelected}
+                        size={40}
+                        hasReplied={item.hasReplied}
+                      />
 
                       {/* Info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1957,7 +2025,17 @@ export function MonitoramentoPage() {
         </div>
 
         {/* ─── Center Pane: WhatsApp Chat Window ─── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", background: "#0d0d0f", minWidth: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            display: isMobile && !selectedTarget ? "none" : "flex",
+            flexDirection: "column",
+            height: "100%",
+            background: "#0d0d0f",
+            minWidth: 0,
+            width: isMobile ? "100%" : undefined,
+          }}
+        >
           {!selectedTarget ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "#666" }}>
               <div
@@ -1986,42 +2064,59 @@ export function MonitoramentoPage() {
               {/* Chat Header */}
               <div
                 style={{
-                  padding: "12px 20px",
+                  padding: isMobile ? "10px 14px" : "12px 20px",
                   background: "#18181c",
                   borderBottom: "1px solid #27272e",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: 12,
+                  gap: 10,
+                  flexShrink: 0,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: "50%",
-                      background: activeConversation?.isPartner
-                        ? "linear-gradient(135deg, hsl(265 85% 62% / 0.4), #202028)"
-                        : "linear-gradient(135deg, hsl(265 85% 62% / 0.3), #202028)",
-                      border: activeConversation?.isPartner
-                        ? "1px solid hsl(265 85% 62% / 0.7)"
-                        : "1px solid hsl(265 85% 62% / 0.4)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#c4a3ff",
-                      fontWeight: 700,
-                      fontSize: 15,
-                    }}
-                  >
-                    {getContactInitials(activeConversation?.clientName || "C")}
-                  </div>
+                <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, minWidth: 0 }}>
+                  {isMobile && (
+                    <button
+                      onClick={() => setSelectedTarget(null)}
+                      title="Voltar para a lista de conversas"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#c4a3ff",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "6px",
+                        marginLeft: -6,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ArrowLeft size={22} />
+                    </button>
+                  )}
 
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
+                  <ContactAvatar
+                    name={activeConversation?.clientName || "Contato"}
+                    photoUrl={activeConversation?.photoUrl}
+                    isPartner={activeConversation?.isPartner}
+                    size={isMobile ? 38 : 42}
+                  />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span
+                        style={{
+                          fontSize: isMobile ? 14 : 15,
+                          fontWeight: 700,
+                          color: "#fff",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: isMobile ? 130 : 220,
+                        }}
+                      >
                         {activeConversation?.clientName || "Contato"}
                       </span>
 
@@ -2068,17 +2163,17 @@ export function MonitoramentoPage() {
                       )}
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 12, color: "#888" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 11, color: "#888" }}>
                       <span>{formatPhoneDisplay(activeConversation?.phone || "")}</span>
-                      {activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
-                      {activeConversation?.isPartner && <span>• Canal Direto Teltech</span>}
+                      {!isMobile && activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
+                      {!isMobile && activeConversation?.isPartner && <span>• Canal Direto Teltech</span>}
                     </div>
                   </div>
                 </div>
 
                 {/* Right side header actions & Financial summary */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  {openTransactions.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  {!isMobile && openTransactions.length > 0 && (
                     <div
                       style={{
                         padding: "6px 12px",
@@ -2116,21 +2211,23 @@ export function MonitoramentoPage() {
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: 6,
-                          padding: "8px 12px",
+                          gap: 4,
+                          padding: isMobile ? "6px 10px" : "8px 12px",
                           borderRadius: 8,
                           background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
                           border: "none",
                           color: "#fff",
-                          fontSize: 12,
+                          fontSize: isMobile ? 11 : 12,
                           fontWeight: 600,
                           cursor: isTriggeringBilling ? "not-allowed" : "pointer",
                           boxShadow: "0 0 16px hsl(265 85% 62% / 0.35)",
                         }}
                       >
                         <Zap size={14} />
-                        {isTriggeringBilling ? "Disparando..." : `Cobrar via Nexus (${openTransactions.length})`}
-                        <ChevronDown size={14} />
+                        {isMobile
+                          ? (isTriggeringBilling ? "..." : "Cobrar")
+                          : (isTriggeringBilling ? "Disparando..." : `Cobrar via Nexus (${openTransactions.length})`)}
+                        <ChevronDown size={13} />
                       </button>
 
                       {/* Dropdown to pick which invoice to charge */}
@@ -2145,7 +2242,7 @@ export function MonitoramentoPage() {
                               right: 0,
                               top: "100%",
                               marginTop: 6,
-                              width: 290,
+                              width: isMobile ? 260 : 290,
                               background: "#1c1c24",
                               border: "1px solid #323242",
                               borderRadius: 10,
@@ -2208,20 +2305,20 @@ export function MonitoramentoPage() {
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 6,
+                      gap: 4,
                       background: showClientDrawer ? "hsl(265 85% 62% / 0.2)" : "#22222a",
                       border: showClientDrawer ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid #333342",
                       color: showClientDrawer ? "#c4a3ff" : "#ccc",
-                      padding: "8px 12px",
+                      padding: isMobile ? "6px 10px" : "8px 12px",
                       borderRadius: 8,
-                      fontSize: 12,
+                      fontSize: isMobile ? 11 : 12,
                       fontWeight: 600,
                       cursor: "pointer",
                       transition: "all 0.15s ease",
                     }}
                   >
                     <SlidersHorizontal size={14} />
-                    Painel 360°
+                    {isMobile ? "360°" : "Painel 360°"}
                   </button>
 
                   <button
@@ -2231,12 +2328,12 @@ export function MonitoramentoPage() {
                       background: "#22222a",
                       border: "1px solid #333342",
                       color: "#aaa",
-                      padding: 8,
+                      padding: isMobile ? 6 : 8,
                       borderRadius: 8,
                       cursor: "pointer",
                     }}
                   >
-                    <RefreshCw size={15} />
+                    <RefreshCw size={14} />
                   </button>
                 </div>
               </div>
@@ -2246,10 +2343,10 @@ export function MonitoramentoPage() {
                 style={{
                   flex: 1,
                   overflowY: "auto",
-                  padding: "20px 24px",
+                  padding: isMobile ? "12px 10px" : "20px 24px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: 14,
+                  gap: isMobile ? 10 : 14,
                   backgroundImage: `radial-gradient(#1c1c24 1px, transparent 1px)`,
                   backgroundSize: "20px 20px",
                 }}
@@ -2287,10 +2384,10 @@ export function MonitoramentoPage() {
                       >
                         <div
                           style={{
-                            maxWidth: "75%",
-                            minWidth: 260,
+                            maxWidth: isMobile ? "88%" : "75%",
+                            minWidth: isMobile ? 180 : 260,
                             borderRadius: 14,
-                            padding: "12px 16px",
+                            padding: isMobile ? "10px 12px" : "12px 16px",
                             background: isOutbound
                               ? "linear-gradient(135deg, #241b36 0%, #1e172e 100%)"
                               : "#1d1d24",
@@ -2511,7 +2608,7 @@ export function MonitoramentoPage() {
               {/* Chat Input Bar & Dynamic Quick Replies */}
               <div
                 style={{
-                  padding: "12px 20px 16px",
+                  padding: isMobile ? "8px 10px max(10px, env(safe-area-inset-bottom))" : "12px 20px 16px",
                   background: "#16161a",
                   borderTop: "1px solid #27272e",
                   display: "flex",
@@ -2626,7 +2723,7 @@ export function MonitoramentoPage() {
                   style={{
                     display: "flex",
                     alignItems: "flex-end",
-                    gap: 10,
+                    gap: isMobile ? 6 : 10,
                     background: "#1d1d24",
                     border: "1px solid #31313e",
                     borderRadius: 12,
@@ -2672,7 +2769,7 @@ export function MonitoramentoPage() {
 
                   <textarea
                     rows={2}
-                    placeholder={selectedAttachment ? "Adicione uma legenda opcional para a mídia..." : "Digite uma mensagem para o cliente (Nexus enviará via WhatsApp)..."}
+                    placeholder={selectedAttachment ? "Adicione uma legenda..." : "Digite uma mensagem (Nexus enviará via WhatsApp)..."}
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -2687,7 +2784,7 @@ export function MonitoramentoPage() {
                       border: "none",
                       outline: "none",
                       color: "#fafafa",
-                      fontSize: 13,
+                      fontSize: isMobile ? 16 : 13,
                       resize: "none",
                       lineHeight: 1.4,
                     }}
@@ -2726,18 +2823,33 @@ export function MonitoramentoPage() {
         <AnimatePresence>
           {showClientDrawer && selectedTarget && (
             <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 340, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
+              initial={isMobile ? { x: "100%", opacity: 0 } : { width: 0, opacity: 0 }}
+              animate={isMobile ? { x: 0, opacity: 1 } : { width: 340, opacity: 1 }}
+              exit={isMobile ? { x: "100%", opacity: 0 } : { width: 0, opacity: 0 }}
               transition={{ duration: 0.25 }}
-              style={{
-                borderLeft: "1px solid #27272e",
-                background: "#16161b",
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-                overflow: "hidden",
-              }}
+              style={
+                isMobile
+                  ? {
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 9999,
+                      background: "#16161b",
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
+                      width: "100%",
+                      overflow: "hidden",
+                    }
+                  : {
+                      width: 340,
+                      borderLeft: "1px solid #27272e",
+                      background: "#16161b",
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
+                      overflow: "hidden",
+                    }
+              }
             >
               {/* Drawer Header */}
               <div
@@ -2783,32 +2895,43 @@ export function MonitoramentoPage() {
                         border: "1px solid #2b2b38",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
-                          {activeConversation.clientName}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <ContactAvatar
+                          name={activeConversation.clientName}
+                          photoUrl={activeConversation.photoUrl}
+                          isPartner={true}
+                          size={46}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {activeConversation.clientName}
+                            </div>
+                            <span
+                              style={{
+                                fontSize: 9,
+                                padding: "2px 7px",
+                                borderRadius: 10,
+                                background: "hsl(265 85% 62% / 0.2)",
+                                color: "#c4a3ff",
+                                fontWeight: 700,
+                                border: "1px solid hsl(265 85% 62% / 0.4)",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {activeConversation.roleLabel || "Sócio"}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                            {formatPhoneDisplay(activeConversation.phone || "")}
+                          </div>
+                          {activeConversation.nickname && (
+                            <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                              Apelido: {activeConversation.nickname}
+                            </div>
+                          )}
                         </div>
-                        <span
-                          style={{
-                            fontSize: 9,
-                            padding: "2px 7px",
-                            borderRadius: 10,
-                            background: "hsl(265 85% 62% / 0.2)",
-                            color: "#c4a3ff",
-                            fontWeight: 700,
-                            border: "1px solid hsl(265 85% 62% / 0.4)",
-                          }}
-                        >
-                          {activeConversation.roleLabel || "Sócio"}
-                        </span>
                       </div>
-                      <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                        {formatPhoneDisplay(activeConversation.phone || "")}
-                      </div>
-                      {activeConversation.nickname && (
-                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
-                          Apelido: {activeConversation.nickname}
-                        </div>
-                      )}
 
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span style={{ fontSize: 11, color: "#888" }}>Status no Grupo</span>
@@ -2904,17 +3027,27 @@ export function MonitoramentoPage() {
                         border: "1px solid #2b2b38",
                       }}
                     >
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
-                        {activeConversation?.clientName}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                        {formatPhoneDisplay(activeConversation?.phone || "")}
-                      </div>
-                      {activeConversation?.document && (
-                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
-                          Doc: {activeConversation.document}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <ContactAvatar
+                          name={activeConversation?.clientName || "Cliente"}
+                          photoUrl={activeConversation?.photoUrl}
+                          isPartner={false}
+                          size={46}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {activeConversation?.clientName}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                            {formatPhoneDisplay(activeConversation?.phone || "")}
+                          </div>
+                          {activeConversation?.document && (
+                            <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                              Doc: {activeConversation.document}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
 
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span style={{ fontSize: 11, color: "#888" }}>WhatsApp Opt-in</span>

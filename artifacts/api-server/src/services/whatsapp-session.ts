@@ -447,6 +447,7 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           id: clientsTable.id,
           name: clientsTable.name,
           phone: clientsTable.phone,
+          photoUrl: clientsTable.photoUrl,
         }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId)),
         db.select({
           id: whatsappContactsTable.id,
@@ -460,6 +461,7 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           id: usersTable.id,
           name: usersTable.name,
           phone: usersTable.phone,
+          avatarUrl: usersTable.avatarUrl,
           role: workspaceMembersTable.role,
         }).from(usersTable)
           .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
@@ -583,11 +585,14 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           previewText = previewText.slice(0, 117) + "...";
         }
 
+        // Selecionar foto do contato/cliente caso cadastrado, ou fallback para ícone do sistema
+        const contactPhoto = matchingClient?.photoUrl || matchingMember?.avatarUrl || "/apple-touch-icon.png";
+
         // Enviar notificação push imediata para os celulares (iPhone/Android) e navegadores inscritos
         void sendPushNotificationToWorkspace(workspaceId, {
-          title: `WhatsApp · ${resolvedSenderName}`,
+          title: resolvedSenderName,
           body: previewText,
-          icon: "/apple-touch-icon.png",
+          icon: contactPhoto,
           badge: "/favicon-32x32.png",
           tag: `wa-${cleanSender}`,
           data: {
