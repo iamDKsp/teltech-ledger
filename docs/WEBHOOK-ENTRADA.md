@@ -123,6 +123,42 @@ atual: 120 eventos por minuto por source/instância, 256 KiB por corpo, 60 fatur
 por base.upsert. Uma carga inicial grande deve ser paginada. IDs e histórico de
 idempotência não devem ser apagados enquanto o emissor puder reenviar eventos.
 
+## Foto do cliente: cópia armazenada no Leadger
+
+Foi definido que o Leadger deve manter uma cópia própria da foto do cliente.
+O endereço do outro sistema será usado para transferir o arquivo, e a interface
+exibirá a imagem armazenada pelo Leadger. O carregamento da tela não deve
+depender de consultar o sistema de origem. Só a troca da foto exige nova cópia.
+
+**Status: requisito documentado; suporte ainda não implementado no receptor.**
+O contrato v1 atual rejeita `photo`, `photoUrl` e outros campos adicionais com
+422. Esta alteração de documentação não cria campo no banco, endpoint de foto,
+rotina de download ou armazenamento de imagem. A equipe do Leadger deve
+implementar/publicar esses componentes antes de o emissor enviar fotos.
+
+A proposta para a extensão futura é associar ao cliente metadados como
+`photo: { sourceUrl, version }`. O backend baixa a imagem por HTTPS, valida o
+arquivo e salva uma cópia em armazenamento persistente; a URL de origem não
+fica como endereço definitivo de exibição. Para fotos privadas, o emissor pode
+disponibilizar um link assinado válido durante a transferência e os retries.
+Se precisar enviar bytes diretamente, será necessário um endpoint específico
+de upload autenticado. Não incluir Base64 no JSON do webhook atual.
+
+O contrato final deve distinguir foto omitida (conservar), null (remover) e
+objeto (substituir), exigir versões crescentes e reconhecer reenvios. A foto
+deve ser associada ao cliente já vinculado, inclusive cadastros manuais.
+Falhas precisam permitir retry e conservar a imagem anterior até a nova cópia
+ser salva. Definir a confirmação de armazenamento antes de ativar o envio:
+o HTTP 200 financeiro atual não confirma recebimento de imagem.
+
+Na implementação, limitar tamanho/formato, validar o conteúdo real e restringir
+os downloads a origens HTTPS aprovadas, bloqueando destinos internos. A imagem
+precisa persistir após reinícios/deploys. Testar criação, substituição, remoção,
+reenvios, versões antigas, link expirado e origem offline depois da cópia.
+As orientações para a IA do emissor estão na seção 11 do TXT.
+
+
+
 ## Verificação
 
 ```sh
