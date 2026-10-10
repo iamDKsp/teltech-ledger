@@ -208,6 +208,10 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     const burnRate = Math.round(pastTotalOutflow / 3) || monthOutflow || 0;
     const runwayMonths = burnRate > 0 ? Number((totalCash / burnRate).toFixed(1)) : null;
 
+    // ── Time markers for daily & overdue boundaries
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
     // ── Pending Approvals Count & List
     const pendingApprovals = transactions.filter(t => t.approvalStatus === "pending_approval");
     const pendingApprovalsCount = pendingApprovals.length;
@@ -221,11 +225,39 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
         partnerId: t.partnerId,
         partnerName: users.find(u => u.id === t.partnerId)?.name ?? null,
       }))
-      .slice(0, 5);
+      .slice(0, 20);
 
     // ── Overdue Inflows (customers to charge)
     const overdueInflowsList = transactions
-      .filter(t => t.type === "inflow" && t.status === "pending" && new Date(t.dueDate) < now)
+      .filter(t => t.type === "inflow" && t.status === "pending" && new Date(t.dueDate) < todayStart)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .map(t => {
+        const client = clients.find(c => c.id === t.clientId);
+        const dueTime = new Date(t.dueDate).getTime();
+        const daysOverdue = Math.max(1, Math.floor((todayStart.getTime() - dueTime) / (1000 * 60 * 60 * 24)));
+        return {
+          id: t.id,
+          description: t.description,
+          amount: t.amount,
+          dueDate: t.dueDate,
+          daysOverdue,
+          clientId: t.clientId,
+          clientName: client?.name ?? "Cliente Teltech",
+          clientPhone: client?.phone ?? null,
+          whatsappOptIn: client?.whatsappOptIn ?? false,
+          clientStatus: client?.status ?? "active",
+          isRecurring: t.isRecurring,
+          installmentNumber: t.installmentNumber,
+          installmentsTotal: t.installmentsTotal,
+          pauseBilling: t.pauseBilling,
+        };
+      })
+      .slice(0, 50);
+
+    // ── Today Due Inflows
+    const todayDueInflowsList = transactions
+      .filter(t => t.type === "inflow" && t.status === "pending" && new Date(t.dueDate) >= todayStart && new Date(t.dueDate) <= todayEnd)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .map(t => {
         const client = clients.find(c => c.id === t.clientId);
         return {
@@ -233,16 +265,52 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
           description: t.description,
           amount: t.amount,
           dueDate: t.dueDate,
+          isToday: true,
           clientId: t.clientId,
           clientName: client?.name ?? "Cliente Teltech",
           clientPhone: client?.phone ?? null,
+          whatsappOptIn: client?.whatsappOptIn ?? false,
+          clientStatus: client?.status ?? "active",
+          isRecurring: t.isRecurring,
+          installmentNumber: t.installmentNumber,
+          installmentsTotal: t.installmentsTotal,
+          pauseBilling: t.pauseBilling,
+        };
+      });
+
+    // ── Upcoming Inflows (today and future pending receivables)
+    const upcomingInflowsList = transactions
+      .filter(t => t.type === "inflow" && t.status === "pending" && new Date(t.dueDate) >= todayStart)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .map(t => {
+        const client = clients.find(c => c.id === t.clientId);
+        const dueTime = new Date(t.dueDate).getTime();
+        const isToday = dueTime >= todayStart.getTime() && dueTime <= todayEnd.getTime();
+        const diffDays = Math.ceil((dueTime - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          id: t.id,
+          description: t.description,
+          amount: t.amount,
+          dueDate: t.dueDate,
+          isToday,
+          diffDays,
+          clientId: t.clientId,
+          clientName: client?.name ?? "Cliente Teltech",
+          clientPhone: client?.phone ?? null,
+          whatsappOptIn: client?.whatsappOptIn ?? false,
+          clientStatus: client?.status ?? "active",
+          isRecurring: t.isRecurring,
+          installmentNumber: t.installmentNumber,
+          installmentsTotal: t.installmentsTotal,
+          pauseBilling: t.pauseBilling,
         };
       })
-      .slice(0, 5);
+      .slice(0, 50);
 
     // ── Overdue Outflows (bills overdue)
     const overdueOutflowsList = transactions
-      .filter(t => t.type === "outflow" && t.status === "pending" && new Date(t.dueDate) < now)
+      .filter(t => t.type === "outflow" && t.status === "pending" && new Date(t.dueDate) < todayStart)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .map(t => ({
         id: t.id,
         description: t.description,
@@ -250,20 +318,33 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
         dueDate: t.dueDate,
         costType: t.costType,
       }))
-      .slice(0, 5);
+      .slice(0, 30);
 
     // ── Today Due Outflows
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
     const todayDueOutflowsList = transactions
       .filter(t => t.type === "outflow" && t.status === "pending" && new Date(t.dueDate) >= todayStart && new Date(t.dueDate) <= todayEnd)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .map(t => ({
         id: t.id,
         description: t.description,
         amount: t.amount,
         dueDate: t.dueDate,
+        costType: t.costType,
       }))
-      .slice(0, 5);
+      .slice(0, 30);
+
+    // ── Upcoming Outflows (future bills)
+    const upcomingOutflowsList = transactions
+      .filter(t => t.type === "outflow" && t.status === "pending" && new Date(t.dueDate) > todayEnd)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .map(t => ({
+        id: t.id,
+        description: t.description,
+        amount: t.amount,
+        dueDate: t.dueDate,
+        costType: t.costType,
+      }))
+      .slice(0, 30);
 
     // ── Category Distribution (Outflow for the selected month)
     const categoryMap = new Map(categories.map(c => [c.id, { name: c.name, color: c.color, total: 0 }]));
@@ -554,8 +635,11 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
         pendingApprovalsCount,
         pendingApprovalsList,
         overdueInflowsList,
+        todayDueInflowsList,
+        upcomingInflowsList,
         overdueOutflowsList,
         todayDueOutflowsList,
+        upcomingOutflowsList,
         categoryDistribution,
         budgetProgress,
         chartData,

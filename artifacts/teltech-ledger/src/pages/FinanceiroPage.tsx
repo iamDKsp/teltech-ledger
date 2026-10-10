@@ -50,6 +50,9 @@ import {
   Repeat2,
   Coins,
   Trophy,
+  Maximize2,
+  CalendarDays,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Drawer, Select, Checkbox, DateInput, Tip, FinanceUiRoot, drawerBtn, confirmDialog } from "../components/finance-ui";
@@ -286,9 +289,49 @@ interface DashboardData {
     description: string;
     amount: number;
     dueDate: string;
+    daysOverdue?: number;
     clientId?: string;
     clientName: string;
     clientPhone?: string | null;
+    whatsappOptIn?: boolean;
+    clientStatus?: string;
+    isRecurring?: boolean;
+    installmentNumber?: number | null;
+    installmentsTotal?: number | null;
+    pauseBilling?: boolean;
+  }>;
+  todayDueInflowsList?: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    dueDate: string;
+    isToday?: boolean;
+    clientId?: string;
+    clientName: string;
+    clientPhone?: string | null;
+    whatsappOptIn?: boolean;
+    clientStatus?: string;
+    isRecurring?: boolean;
+    installmentNumber?: number | null;
+    installmentsTotal?: number | null;
+    pauseBilling?: boolean;
+  }>;
+  upcomingInflowsList?: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    dueDate: string;
+    isToday?: boolean;
+    diffDays?: number;
+    clientId?: string;
+    clientName: string;
+    clientPhone?: string | null;
+    whatsappOptIn?: boolean;
+    clientStatus?: string;
+    isRecurring?: boolean;
+    installmentNumber?: number | null;
+    installmentsTotal?: number | null;
+    pauseBilling?: boolean;
   }>;
   overdueOutflowsList?: Array<{
     id: string;
@@ -302,6 +345,14 @@ interface DashboardData {
     description: string;
     amount: number;
     dueDate: string;
+    costType?: string;
+  }>;
+  upcomingOutflowsList?: Array<{
+    id: string;
+    description: string;
+    amount: number;
+    dueDate: string;
+    costType?: string;
   }>;
   categoryDistribution: Array<{ name: string; color: string; amount: number; percentage: number }>;
   budgetProgress: BudgetData[];
@@ -913,20 +964,32 @@ function CockpitProductMacroReport({
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
+          alignItems: isMobile ? "stretch" : "center",
+          flexDirection: isMobile ? "column" : "row",
           gap: 12,
           marginBottom: 18,
           background: "rgba(0,0,0,0.2)",
-          padding: "10px 12px",
+          padding: isMobile ? "10px" : "10px 12px",
           borderRadius: 10,
           border: "1px solid rgba(255,255,255,0.05)",
         }}
       >
-        {/* Left Filters: Período & Status & Natureza */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {/* Left Filters: Período & Status & Natureza (Horizontal scroller on mobile) */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            overflowX: isMobile ? "auto" : "visible",
+            flexWrap: isMobile ? "nowrap" : "wrap",
+            paddingBottom: isMobile ? 4 : 0,
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "none",
+            width: isMobile ? "100%" : "auto",
+          }}
+        >
           {/* Período Selector */}
-          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2, flexShrink: 0 }}>
             {[
               { id: "6m", label: "Semestre (6M)" },
               { id: "12m", label: "Ano (12M)" },
@@ -945,6 +1008,7 @@ function CockpitProductMacroReport({
                   background: periodFilter === tab.id ? "#8B5CF6" : "transparent",
                   color: periodFilter === tab.id ? "#fff" : "#a1a1aa",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                   transition: "all 0.2s ease",
                 }}
               >
@@ -954,7 +1018,7 @@ function CockpitProductMacroReport({
           </div>
 
           {/* Metric Status Selector */}
-          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2, flexShrink: 0 }}>
             {[
               { id: "total", label: "Total Contratado" },
               { id: "paid", label: "Realizado (Pago)" },
@@ -972,6 +1036,7 @@ function CockpitProductMacroReport({
                   background: metricMode === btn.id ? "rgba(16,185,129,0.25)" : "transparent",
                   color: metricMode === btn.id ? "#10B981" : "#a1a1aa",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                   transition: "all 0.2s ease",
                 }}
               >
@@ -981,7 +1046,7 @@ function CockpitProductMacroReport({
           </div>
 
           {/* Natureza Filter */}
-          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+          <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2, flexShrink: 0 }}>
             {[
               { id: "all", label: "Todas" },
               { id: "recurring", label: "MRR / Mensalidade" },
@@ -999,6 +1064,7 @@ function CockpitProductMacroReport({
                   background: natureFilter === btn.id ? "rgba(245,158,11,0.25)" : "transparent",
                   color: natureFilter === btn.id ? "#F59E0B" : "#a1a1aa",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                   transition: "all 0.2s ease",
                 }}
               >
@@ -1008,7 +1074,7 @@ function CockpitProductMacroReport({
           </div>
 
           {/* Product Filter Dropdown */}
-          <div ref={productsDropdownRef} style={{ position: "relative" }}>
+          <div ref={productsDropdownRef} style={{ position: "relative", flexShrink: 0 }}>
             <button
               onClick={() => setProductsDropdownOpen(!productsDropdownOpen)}
               style={{
@@ -1023,6 +1089,7 @@ function CockpitProductMacroReport({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
+                whiteSpace: "nowrap",
                 transition: "all 0.2s ease",
               }}
             >
@@ -1052,10 +1119,11 @@ function CockpitProductMacroReport({
                 style={{
                   position: "absolute",
                   top: "calc(100% + 6px)",
-                  left: 0,
+                  left: isMobile ? "auto" : 0,
+                  right: isMobile ? 0 : "auto",
                   zIndex: 60,
-                  minWidth: 290,
-                  maxWidth: 340,
+                  minWidth: isMobile ? 260 : 290,
+                  maxWidth: isMobile ? "min(320px, 90vw)" : 340,
                   background: "#18181b",
                   border: "1px solid rgba(255,255,255,0.14)",
                   borderRadius: 10,
@@ -1169,11 +1237,21 @@ function CockpitProductMacroReport({
         </div>
 
         {/* View Mode Toggle: Matriz vs Cards */}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: 2 }}>
+        <div
+          style={{
+            display: "flex",
+            background: "rgba(255,255,255,0.06)",
+            borderRadius: 7,
+            padding: 2,
+            width: isMobile ? "100%" : "auto",
+          }}
+        >
           <button
             onClick={() => setViewMode("matrix")}
             style={{
-              padding: "4px 10px",
+              flex: isMobile ? 1 : "initial",
+              justifyContent: "center",
+              padding: isMobile ? "6px 10px" : "4px 10px",
               borderRadius: 6,
               border: "none",
               fontSize: 11,
@@ -1191,7 +1269,9 @@ function CockpitProductMacroReport({
           <button
             onClick={() => setViewMode("cards")}
             style={{
-              padding: "4px 10px",
+              flex: isMobile ? 1 : "initial",
+              justifyContent: "center",
+              padding: isMobile ? "6px 10px" : "4px 10px",
               borderRadius: 6,
               border: "none",
               fontSize: 11,
@@ -1257,13 +1337,32 @@ function CockpitProductMacroReport({
         <div
           style={{
             overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
             borderRadius: 10,
             border: "1px solid rgba(255,255,255,0.08)",
             background: "rgba(18,18,22,0.9)",
             marginBottom: 16,
           }}
         >
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+          {isMobile && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "7px 12px",
+                background: "rgba(139,92,246,0.1)",
+                borderBottom: "1px solid rgba(139,92,246,0.18)",
+                fontSize: 11,
+                color: "#C4B5FD",
+                fontWeight: 600,
+              }}
+            >
+              <span>← Deslize horizontalmente para navegar nos meses →</span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>↔ Scroll</span>
+            </div>
+          )}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: isMobile ? 11 : 12, textAlign: "left" }}>
             <thead>
               <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 {/* Sticky Product Header */}
@@ -1273,17 +1372,18 @@ function CockpitProductMacroReport({
                     left: 0,
                     zIndex: 2,
                     background: "rgba(24,24,28,0.98)",
-                    padding: "12px 14px",
+                    padding: isMobile ? "8px 10px" : "12px 14px",
                     fontWeight: 700,
                     color: "#a1a1aa",
-                    minWidth: 220,
+                    minWidth: isMobile ? 120 : 220,
+                    maxWidth: isMobile ? 140 : "none",
                     borderRight: "1px solid rgba(255,255,255,0.06)",
                     textTransform: "uppercase",
                     letterSpacing: "0.03em",
-                    fontSize: 11,
+                    fontSize: isMobile ? 10 : 11,
                   }}
                 >
-                  Produto / Sistema
+                  Produto
                 </th>
 
                 {/* Visible Month Headers */}
@@ -1293,15 +1393,15 @@ function CockpitProductMacroReport({
                     <th
                       key={m.key}
                       style={{
-                        padding: "10px 14px",
+                        padding: isMobile ? "8px 6px" : "10px 14px",
                         fontWeight: 700,
                         color: isCurrent ? "#C4B5FD" : "#a1a1aa",
                         background: isCurrent ? "rgba(139,92,246,0.12)" : "transparent",
                         borderRight: "1px solid rgba(255,255,255,0.04)",
-                        minWidth: 110,
+                        minWidth: isMobile ? 76 : 110,
                         textAlign: "right",
                         textTransform: "capitalize",
-                        fontSize: 11,
+                        fontSize: isMobile ? 10 : 11,
                       }}
                     >
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
@@ -1309,12 +1409,12 @@ function CockpitProductMacroReport({
                         {isCurrent && (
                           <span
                             style={{
-                              fontSize: 9,
+                              fontSize: 8,
                               fontWeight: 800,
                               color: "#8B5CF6",
                               background: "rgba(139,92,246,0.2)",
-                              padding: "1px 5px",
-                              borderRadius: 4,
+                              padding: "1px 4px",
+                              borderRadius: 3,
                               textTransform: "uppercase",
                             }}
                           >
@@ -1329,44 +1429,44 @@ function CockpitProductMacroReport({
                 {/* Total Period Column */}
                 <th
                   style={{
-                    padding: "12px 16px",
+                    padding: isMobile ? "8px 8px" : "12px 16px",
                     fontWeight: 800,
                     color: "#fafafa",
                     background: "rgba(255,255,255,0.04)",
-                    minWidth: 120,
+                    minWidth: isMobile ? 85 : 120,
                     textAlign: "right",
-                    fontSize: 11,
+                    fontSize: isMobile ? 10 : 11,
                     textTransform: "uppercase",
                     letterSpacing: "0.03em",
                   }}
                 >
-                  Total Período
+                  Total
                 </th>
 
                 {/* Average Column */}
                 <th
                   style={{
-                    padding: "12px 14px",
+                    padding: isMobile ? "8px 6px" : "12px 14px",
                     fontWeight: 700,
                     color: "#a1a1aa",
-                    minWidth: 110,
+                    minWidth: isMobile ? 75 : 110,
                     textAlign: "right",
-                    fontSize: 11,
+                    fontSize: isMobile ? 10 : 11,
                     textTransform: "uppercase",
                   }}
                 >
-                  Média / Mês
+                  Média
                 </th>
 
                 {/* Share % Column */}
                 <th
                   style={{
-                    padding: "12px 14px",
+                    padding: isMobile ? "8px 6px" : "12px 14px",
                     fontWeight: 700,
                     color: "#a1a1aa",
-                    minWidth: 90,
+                    minWidth: isMobile ? 60 : 90,
                     textAlign: "right",
-                    fontSize: 11,
+                    fontSize: isMobile ? 10 : 11,
                     textTransform: "uppercase",
                   }}
                 >
@@ -1431,57 +1531,63 @@ function CockpitProductMacroReport({
                           left: 0,
                           zIndex: 1,
                           background: "rgba(22,22,26,0.98)",
-                          padding: "12px 14px",
+                          padding: isMobile ? "8px 6px" : "12px 14px",
                           borderRight: "1px solid rgba(255,255,255,0.06)",
+                          minWidth: isMobile ? 120 : 220,
+                          maxWidth: isMobile ? 140 : "none",
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10 }}>
                           <ProductAvatar
                             productId={prod.productId}
                             productName={prod.productName}
                             productColor={prod.productColor}
                             productIcon={prod.productIcon}
-                            size={26}
-                            borderRadius={7}
+                            size={isMobile ? 20 : 26}
+                            borderRadius={isMobile ? 5 : 7}
                           />
                           <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-                            <span style={{ fontWeight: 700, color: "#fff", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ fontWeight: 700, color: "#fff", fontSize: isMobile ? 11 : 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {prod.productName}
                             </span>
-                            <span style={{ fontSize: 10, color: "#71717a" }}>
-                              {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente ativo" : "clientes ativos"}
-                            </span>
+                            {!isMobile && (
+                              <span style={{ fontSize: 10, color: "#71717a" }}>
+                                {prod.activeClientsCount} {prod.activeClientsCount === 1 ? "cliente ativo" : "clientes ativos"}
+                              </span>
+                            )}
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleProductVisibility(prod.productId);
-                            }}
-                            title={`Ocultar ${prod.productName} e recalcular totais`}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#71717a",
-                              padding: "4px 6px",
-                              cursor: "pointer",
-                              borderRadius: 4,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              transition: "all 0.15s ease",
-                              marginLeft: "auto",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.color = "#EF4444";
-                              e.currentTarget.style.background = "rgba(239,68,68,0.15)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.color = "#71717a";
-                              e.currentTarget.style.background = "transparent";
-                            }}
-                          >
-                            <EyeOff style={{ width: 14, height: 14 }} />
-                          </button>
+                          {!isMobile && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleProductVisibility(prod.productId);
+                              }}
+                              title={`Ocultar ${prod.productName} e recalcular totais`}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#71717a",
+                                padding: "4px 6px",
+                                cursor: "pointer",
+                                borderRadius: 4,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                transition: "all 0.15s ease",
+                                marginLeft: "auto",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.color = "#EF4444";
+                                e.currentTarget.style.background = "rgba(239,68,68,0.15)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.color = "#71717a";
+                                e.currentTarget.style.background = "transparent";
+                              }}
+                            >
+                              <EyeOff style={{ width: 14, height: 14 }} />
+                            </button>
+                          )}
                         </div>
                       </td>
 
@@ -1499,7 +1605,7 @@ function CockpitProductMacroReport({
                           onClick={() => setSelectedCell({ product: prod, month: m })}
                           title={`Clique para ver detalhes de ${prod.productName} em ${m.label}`}
                           style={{
-                            padding: "10px 14px",
+                            padding: isMobile ? "8px 5px" : "10px 14px",
                             textAlign: "right",
                             background: isCurrent ? "rgba(139,92,246,0.05)" : "transparent",
                             borderRight: "1px solid rgba(255,255,255,0.04)",
@@ -1512,7 +1618,7 @@ function CockpitProductMacroReport({
                               style={{
                                 fontWeight: val > 0 ? 700 : 400,
                                 color: val > 0 ? (metricMode === "paid" ? "#10B981" : metricMode === "pending" ? "#F59E0B" : "#fafafa") : "#52525b",
-                                fontSize: 12,
+                                fontSize: isMobile ? 11 : 12,
                               }}
                             >
                               {val > 0 ? formatBRL(val) : "—"}
@@ -1524,13 +1630,13 @@ function CockpitProductMacroReport({
                                 {hasPaid && (
                                   <span
                                     title={`Realizado: ${formatBRL(mData?.paid)}`}
-                                    style={{ width: 5, height: 5, borderRadius: "50%", background: "#10B981" }}
+                                    style={{ width: 4, height: 4, borderRadius: "50%", background: "#10B981" }}
                                   />
                                 )}
                                 {hasPending && (
                                   <span
                                     title={`A Receber: ${formatBRL(mData?.pending)}`}
-                                    style={{ width: 5, height: 5, borderRadius: "50%", background: "#F59E0B" }}
+                                    style={{ width: 4, height: 4, borderRadius: "50%", background: "#F59E0B" }}
                                   />
                                 )}
                               </div>
@@ -1543,12 +1649,12 @@ function CockpitProductMacroReport({
                     {/* Total Period for Row */}
                     <td
                       style={{
-                        padding: "12px 16px",
+                        padding: isMobile ? "8px 8px" : "12px 16px",
                         textAlign: "right",
                         background: "rgba(255,255,255,0.02)",
                         fontWeight: 800,
                         color: prod.visibleTotal > 0 ? "#10B981" : "#52525b",
-                        fontSize: 13,
+                        fontSize: isMobile ? 11 : 13,
                       }}
                     >
                       {formatBRL(prod.visibleTotal)}
@@ -1557,11 +1663,11 @@ function CockpitProductMacroReport({
                     {/* Average Monthly */}
                     <td
                       style={{
-                        padding: "12px 14px",
+                        padding: isMobile ? "8px 6px" : "12px 14px",
                         textAlign: "right",
                         fontWeight: 600,
                         color: "#a1a1aa",
-                        fontSize: 12,
+                        fontSize: isMobile ? 10 : 12,
                       }}
                     >
                       {formatBRL(prod.averageMonthly)}
@@ -1570,29 +1676,31 @@ function CockpitProductMacroReport({
                     {/* Share Percentage */}
                     <td
                       style={{
-                        padding: "12px 14px",
+                        padding: isMobile ? "8px 6px" : "12px 14px",
                         textAlign: "right",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                        <div
-                          style={{
-                            width: 32,
-                            height: 4,
-                            background: "rgba(255,255,255,0.08)",
-                            borderRadius: 2,
-                            overflow: "hidden",
-                          }}
-                        >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: isMobile ? 4 : 6 }}>
+                        {!isMobile && (
                           <div
                             style={{
-                              width: `${Math.min(sharePercent, 100)}%`,
-                              height: "100%",
-                              background: prod.productColor,
+                              width: 32,
+                              height: 4,
+                              background: "rgba(255,255,255,0.08)",
+                              borderRadius: 2,
+                              overflow: "hidden",
                             }}
-                          />
-                        </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: prod.visibleTotal > 0 ? "#fff" : "#52525b" }}>
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(sharePercent, 100)}%`,
+                                height: "100%",
+                                background: prod.productColor,
+                              }}
+                            />
+                          </div>
+                        )}
+                        <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 700, color: prod.visibleTotal > 0 ? "#fff" : "#52525b" }}>
                           {sharePercent}%
                         </span>
                       </div>
@@ -1617,18 +1725,18 @@ function CockpitProductMacroReport({
                     left: 0,
                     zIndex: 1,
                     background: "rgba(26,22,34,0.98)",
-                    padding: "14px",
+                    padding: isMobile ? "10px 8px" : "14px",
                     fontWeight: 800,
                     color: "#fafafa",
                     borderRight: "1px solid rgba(255,255,255,0.06)",
-                    fontSize: 12,
+                    fontSize: isMobile ? 10 : 12,
                     textTransform: "uppercase",
                     letterSpacing: "0.04em",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <Coins style={{ width: 14, height: 14, color: "#A78BFA" }} />
-                    TOTAL GERAL TELTECH
+                    {isMobile ? "TOTAL" : "TOTAL GERAL TELTECH"}
                   </div>
                 </td>
 
@@ -1639,13 +1747,13 @@ function CockpitProductMacroReport({
                     <td
                       key={m.key}
                       style={{
-                        padding: "14px",
+                        padding: isMobile ? "10px 5px" : "14px",
                         textAlign: "right",
                         fontWeight: 800,
                         color: mTotal > 0 ? (isCurrent ? "#C4B5FD" : "#fafafa") : "#52525b",
                         background: isCurrent ? "rgba(139,92,246,0.12)" : "transparent",
                         borderRight: "1px solid rgba(255,255,255,0.04)",
-                        fontSize: 12,
+                        fontSize: isMobile ? 11 : 12,
                       }}
                     >
                       {formatBRL(mTotal)}
@@ -1656,11 +1764,11 @@ function CockpitProductMacroReport({
                 {/* Grand Total */}
                 <td
                   style={{
-                    padding: "14px 16px",
+                    padding: isMobile ? "10px 8px" : "14px 16px",
                     textAlign: "right",
                     fontWeight: 900,
                     color: "#10B981",
-                    fontSize: 14,
+                    fontSize: isMobile ? 12 : 14,
                     background: "rgba(16,185,129,0.1)",
                   }}
                 >
@@ -1670,11 +1778,11 @@ function CockpitProductMacroReport({
                 {/* Grand Average */}
                 <td
                   style={{
-                    padding: "14px",
+                    padding: isMobile ? "10px 6px" : "14px",
                     textAlign: "right",
                     fontWeight: 700,
                     color: "#a1a1aa",
-                    fontSize: 12,
+                    fontSize: isMobile ? 10 : 12,
                   }}
                 >
                   {formatBRL(visibleMonths.length > 0 ? Math.round(grandVisibleTotal / visibleMonths.length) : 0)}
@@ -1683,11 +1791,11 @@ function CockpitProductMacroReport({
                 {/* 100% */}
                 <td
                   style={{
-                    padding: "14px",
+                    padding: isMobile ? "10px 6px" : "14px",
                     textAlign: "right",
                     fontWeight: 800,
                     color: "#fafafa",
-                    fontSize: 12,
+                    fontSize: isMobile ? 10 : 12,
                   }}
                 >
                   100%
@@ -3300,12 +3408,131 @@ function CockpitView({
   const netResult = dashboard.monthBalance || 0;
   const netMarginPercent = totalRevenue > 0 ? Math.round((netResult / totalRevenue) * 100) : 0;
 
-  // Pending items count
+  // Pending items count & lists
   const pendingApprovalsCount = dashboard.pendingApprovalsCount || 0;
   const overdueInflows = dashboard.overdueInflowsList || [];
+  const todayDueInflows = dashboard.todayDueInflowsList || [];
+  const upcomingInflows = dashboard.upcomingInflowsList || [];
   const overdueOutflows = dashboard.overdueOutflowsList || [];
   const todayDueOutflows = dashboard.todayDueOutflowsList || [];
+  const upcomingOutflows = dashboard.upcomingOutflowsList || [];
   const totalUrgentIssues = pendingApprovalsCount + overdueInflows.length + overdueOutflows.length;
+
+  // Collection Center interactive state
+  const [collectionTab, setCollectionTab] = useState<"overdue" | "upcoming" | "payables" | "approvals">(
+    overdueInflows.length > 0 ? "overdue" : upcomingInflows.length > 0 ? "upcoming" : "payables"
+  );
+  const [upcomingRange, setUpcomingRange] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [showFullCollectionModal, setShowFullCollectionModal] = useState(false);
+  const [collectionSearch, setCollectionSearch] = useState("");
+  const [modalFilterTab, setModalFilterTab] = useState<"all" | "overdue" | "today" | "7d" | "30d" | "payables">("all");
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+
+  // Time boundaries
+  const now = new Date();
+  const todayStartTs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayEndTs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  const next7DaysTs = todayStartTs + 7 * 24 * 60 * 60 * 1000;
+  const next30DaysTs = todayStartTs + 30 * 24 * 60 * 60 * 1000;
+
+  // Filtered upcoming inflows for widget
+  const filteredUpcomingInflows = upcomingInflows.filter(item => {
+    const dueTime = new Date(item.dueDate).getTime();
+    if (upcomingRange === "today") return dueTime >= todayStartTs && dueTime <= todayEndTs;
+    if (upcomingRange === "7d") return dueTime >= todayStartTs && dueTime <= next7DaysTs;
+    if (upcomingRange === "30d") return dueTime >= todayStartTs && dueTime <= next30DaysTs;
+    return true;
+  });
+
+  const todayInflowsCount = upcomingInflows.filter(item => {
+    const dueTime = new Date(item.dueDate).getTime();
+    return dueTime >= todayStartTs && dueTime <= todayEndTs;
+  }).length;
+  const next7DaysCount = upcomingInflows.filter(item => {
+    const dueTime = new Date(item.dueDate).getTime();
+    return dueTime >= todayStartTs && dueTime <= next7DaysTs;
+  }).length;
+  const next30DaysCount = upcomingInflows.filter(item => {
+    const dueTime = new Date(item.dueDate).getTime();
+    return dueTime >= todayStartTs && dueTime <= next30DaysTs;
+  }).length;
+
+  const totalOverdueSum = overdueInflows.reduce((s, i) => s + i.amount, 0);
+  const totalUpcomingFilteredSum = filteredUpcomingInflows.reduce((s, i) => s + i.amount, 0);
+  const totalUpcomingAllSum = upcomingInflows.reduce((s, i) => s + i.amount, 0);
+  const todayInflowsSum = upcomingInflows.filter(i => {
+    const d = new Date(i.dueDate).getTime();
+    return d >= todayStartTs && d <= todayEndTs;
+  }).reduce((s, i) => s + i.amount, 0);
+  const next7DaysSum = upcomingInflows.filter(i => {
+    const d = new Date(i.dueDate).getTime();
+    return d >= todayStartTs && d <= next7DaysTs;
+  }).reduce((s, i) => s + i.amount, 0);
+  const totalPayablesSum = [...overdueOutflows, ...todayDueOutflows].reduce((s, i) => s + i.amount, 0);
+
+  const handleQuickMarkPaid = async (item: { id: string; [key: string]: any }) => {
+    setMarkingPaidId(item.id);
+    try {
+      await onMarkPaid({ id: item.id } as Transaction);
+    } finally {
+      setMarkingPaidId(null);
+    }
+  };
+
+  const handleCobrarPix = (item: { id: string; clientId?: string; clientName?: string; clientPhone?: string | null; [key: string]: any }) => {
+    const foundClient = clients.find(c => c.id === item.clientId);
+    const clientToCharge: Client = foundClient || ({
+      id: item.clientId || "",
+      name: item.clientName || "Cliente",
+      phone: item.clientPhone || "",
+      whatsappOptIn: true,
+      status: "active",
+    } as Client);
+    onSendWhatsApp(clientToCharge, { id: item.id } as Transaction);
+  };
+
+  const getDueBadge = (dueDateStr: string, isOverdueItem?: boolean, daysOverdue?: number) => {
+    const due = new Date(dueDateStr);
+    const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+    const diffDays = Math.round((dueMidnight - todayStartTs) / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0 || isOverdueItem) {
+      const days = daysOverdue ?? Math.max(1, Math.abs(diffDays));
+      return {
+        label: `Venceu há ${days}d (${formatShortDate(dueDateStr)})`,
+        color: "#EF4444",
+        bg: "rgba(239,68,68,0.15)",
+        border: "rgba(239,68,68,0.35)",
+        isAlert: true,
+      };
+    }
+    if (diffDays === 0) {
+      return {
+        label: `Vence HOJE (${formatShortDate(dueDateStr)})`,
+        color: "#F59E0B",
+        bg: "rgba(245,158,11,0.2)",
+        border: "rgba(245,158,11,0.45)",
+        isAlert: true,
+        isPulse: true,
+      };
+    }
+    if (diffDays === 1) {
+      return {
+        label: `Vence amanhã (${formatShortDate(dueDateStr)})`,
+        color: "#A78BFA",
+        bg: "rgba(139,92,246,0.15)",
+        border: "rgba(139,92,246,0.35)",
+        isAlert: false,
+      };
+    }
+    return {
+      label: `Vencimento: ${formatShortDate(dueDateStr)} (em ${diffDays}d)`,
+      color: "#a1a1aa",
+      bg: "rgba(255,255,255,0.05)",
+      border: "rgba(255,255,255,0.08)",
+      isAlert: false,
+    };
+  };
 
   return (
     <div style={{ padding: isMobile ? "12px 14px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
@@ -3678,225 +3905,758 @@ function CockpitView({
               background: "linear-gradient(135deg, rgba(30,30,36,0.98), rgba(22,22,26,0.98))",
               border: totalUrgentIssues > 0 ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.08)",
               borderRadius: 14,
-              padding: isMobile ? "16px 14px" : "22px 20px",
+              padding: isMobile ? "16px 14px" : "20px",
               boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+              position: "relative",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            {/* Header: Title + Expand Button + Urgent Badge */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <ShieldCheck style={{ width: 18, height: 18, color: totalUrgentIssues > 0 ? "#F59E0B" : "#10B981" }} />
                 <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#fff" }}>
-                  Central de Pendências
+                  Central de Cobranças & Pendências
                 </h3>
               </div>
-              <span
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  onClick={() => setShowFullCollectionModal(true)}
+                  title="Abrir painel completo de recebimentos e cobranças 360"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    background: "rgba(139,92,246,0.15)",
+                    border: "1px solid rgba(139,92,246,0.35)",
+                    color: "#C4B5FD",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <Maximize2 size={12} />
+                  <span>Expandir 360°</span>
+                </button>
+                {totalUrgentIssues > 0 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 7px",
+                      borderRadius: 10,
+                      background: "rgba(245,158,11,0.15)",
+                      color: "#F59E0B",
+                      border: "1px solid rgba(245,158,11,0.3)",
+                    }}
+                  >
+                    {totalUrgentIssues} pendências
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Segmented Switcher / Tabs Bar (Horizontal swipeable on mobile) */}
+            <div
+              style={{
+                display: "flex",
+                background: "rgba(0,0,0,0.3)",
+                padding: 3,
+                borderRadius: 9,
+                marginBottom: 12,
+                gap: 4,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                scrollbarWidth: "none",
+              }}
+            >
+              {/* Tab 1: Em Atraso */}
+              <button
+                onClick={() => setCollectionTab("overdue")}
                 style={{
+                  flex: isMobile ? "0 0 auto" : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
+                  padding: "6px 10px",
+                  borderRadius: 7,
+                  border: "none",
                   fontSize: 11,
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: 12,
-                  background: totalUrgentIssues > 0 ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)",
-                  color: totalUrgentIssues > 0 ? "#F59E0B" : "#10B981",
-                  border: `1px solid ${totalUrgentIssues > 0 ? "rgba(245,158,11,0.3)" : "rgba(16,185,129,0.3)"}`,
+                  fontWeight: collectionTab === "overdue" ? 700 : 500,
+                  background: collectionTab === "overdue" ? "rgba(239,68,68,0.25)" : "transparent",
+                  color: collectionTab === "overdue" ? "#EF4444" : "#a1a1aa",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s ease",
                 }}
               >
-                {totalUrgentIssues} pendências
-              </span>
-            </div>
-
-            {/* 1. Alçadas Aguardando Aprovação */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#A78BFA", textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Scale size={13} /> Aprovações de Alçada ({dashboard.pendingApprovalsList?.length ?? 0})
-                </span>
-                {dashboard.pendingApprovalsList && dashboard.pendingApprovalsList.length > 0 && (
-                  <button
-                    onClick={() => onGoToTab("approvals")}
-                    style={{ background: "transparent", border: "none", color: "#8B5CF6", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-                  >
-                    Ver todas
-                  </button>
-                )}
-              </div>
-
-              {dashboard.pendingApprovalsList && dashboard.pendingApprovalsList.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {dashboard.pendingApprovalsList.slice(0, 3).map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        background: "rgba(139,92,246,0.08)",
-                        border: "1px solid rgba(139,92,246,0.25)",
-                        borderRadius: 10,
-                        padding: "10px 12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{item.description}</span>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
-                        <span>Por: {item.partnerName || "Membro"}</span>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            onClick={() => onApprove(item.id)}
-                            style={{
-                              padding: "3px 8px",
-                              borderRadius: 4,
-                              background: "#10B981",
-                              border: "none",
-                              color: "#fff",
-                              fontSize: 10,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Aprovar
-                          </button>
-                          <button
-                            onClick={() => onReject(item.id)}
-                            style={{
-                              padding: "3px 8px",
-                              borderRadius: 4,
-                              background: "rgba(239,68,68,0.2)",
-                              border: "1px solid rgba(239,68,68,0.4)",
-                              color: "#EF4444",
-                              fontSize: 10,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Reprovar
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 11, color: "#a1a1aa", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <CheckCircle2 size={13} style={{ color: "#10B981" }} /> Nenhuma solicitação de despesa aguardando alçada.
-                </div>
-              )}
-            </div>
-
-            {/* 2. Cobranças em Atraso (Clientes) */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#EF4444", textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <AlertOctagon size={13} /> Faturas a Receber Vencidas ({overdueInflows.length})
-                </span>
+                <AlertOctagon size={12} />
+                <span>Em Atraso</span>
                 {overdueInflows.length > 0 && (
-                  <button
-                    onClick={() => onGoToTab("clients")}
-                    style={{ background: "transparent", border: "none", color: "#8B5CF6", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
-                  >
-                    Ver carteira
-                  </button>
+                  <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 8, background: "#EF4444", color: "#fff" }}>
+                    {overdueInflows.length}
+                  </span>
                 )}
-              </div>
+              </button>
 
-              {overdueInflows.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {overdueInflows.slice(0, 3).map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        background: "rgba(239,68,68,0.08)",
-                        border: "1px solid rgba(239,68,68,0.25)",
-                        borderRadius: 10,
-                        padding: "10px 12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{item.clientName}</span>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "#10B981" }}>{formatBRL(item.amount)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
-                        <span>Vencido em {formatShortDate(item.dueDate)}</span>
-                        {item.clientPhone && clients.some(client => client.id === item.clientId && client.whatsappOptIn && client.status !== "inactive") ? (
-                          <button
-                            onClick={() => onSendWhatsApp({ id: item.clientId ?? "", name: item.clientName } as Client, item as unknown as Transaction)}
-                            style={{
-                              padding: "3px 8px",
-                              borderRadius: 4,
-                              background: "#25D366",
-                              border: "none",
-                              color: "#fff",
-                              fontSize: 10,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 3,
-                            }}
-                          >
-                            <Send style={{ width: 10, height: 10 }} /> Cobrar Pix
-                          </button>
-                        ) : (
-                          <span style={{ color: "#a1a1aa" }}>{item.clientPhone ? "Sem autorização" : "Sem WhatsApp"}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 11, color: "#a1a1aa", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <CheckCircle2 size={13} style={{ color: "#10B981" }} /> Todos os clientes estão em dia neste período.
-                </div>
+              {/* Tab 2: Próximos Recebimentos */}
+              <button
+                onClick={() => setCollectionTab("upcoming")}
+                style={{
+                  flex: isMobile ? "0 0 auto" : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
+                  padding: "6px 10px",
+                  borderRadius: 7,
+                  border: "none",
+                  fontSize: 11,
+                  fontWeight: collectionTab === "upcoming" ? 700 : 500,
+                  background: collectionTab === "upcoming" ? "rgba(16,185,129,0.2)" : "transparent",
+                  color: collectionTab === "upcoming" ? "#10B981" : "#a1a1aa",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <CalendarDays size={12} />
+                <span>A Receber</span>
+                {upcomingInflows.length > 0 && (
+                  <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 8, background: "#10B981", color: "#fff" }}>
+                    {upcomingInflows.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Tab 3: Contas a Pagar */}
+              <button
+                onClick={() => setCollectionTab("payables")}
+                style={{
+                  flex: isMobile ? "0 0 auto" : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
+                  padding: "6px 10px",
+                  borderRadius: 7,
+                  border: "none",
+                  fontSize: 11,
+                  fontWeight: collectionTab === "payables" ? 700 : 500,
+                  background: collectionTab === "payables" ? "rgba(245,158,11,0.2)" : "transparent",
+                  color: collectionTab === "payables" ? "#F59E0B" : "#a1a1aa",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <CreditCard size={12} />
+                <span>A Pagar</span>
+                {overdueOutflows.length + todayDueOutflows.length > 0 && (
+                  <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 8, background: "#F59E0B", color: "#fff" }}>
+                    {overdueOutflows.length + todayDueOutflows.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Tab 4: Alçadas (if any) */}
+              {pendingApprovalsCount > 0 && (
+                <button
+                  onClick={() => setCollectionTab("approvals")}
+                  style={{
+                    flex: isMobile ? "0 0 auto" : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 5,
+                    padding: "6px 10px",
+                    borderRadius: 7,
+                    border: "none",
+                    fontSize: 11,
+                    fontWeight: collectionTab === "approvals" ? 700 : 500,
+                    background: collectionTab === "approvals" ? "rgba(139,92,246,0.25)" : "transparent",
+                    color: collectionTab === "approvals" ? "#C4B5FD" : "#a1a1aa",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <Scale size={12} />
+                  <span>Alçadas</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 8, background: "#8B5CF6", color: "#fff" }}>
+                    {pendingApprovalsCount}
+                  </span>
+                </button>
               )}
             </div>
 
-            {/* 3. Contas a Pagar Vencendo Hoje / Atrasadas */}
-            <div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#F59E0B", textTransform: "uppercase", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <Calendar size={13} /> Contas a Pagar Críticas ({overdueOutflows.length + todayDueOutflows.length})
-              </span>
+            {/* ─── TAB 1: EM ATRASO (Faturas Vencidas) ────────────────────────── */}
+            {collectionTab === "overdue" && (
+              <div>
+                {/* Summary Strip */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 10px",
+                    background: "rgba(239,68,68,0.08)",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    borderRadius: 8,
+                    marginBottom: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "#FCA5A5", fontWeight: 600 }}>Total Vencido em Atraso</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#EF4444" }}>{formatBRL(totalOverdueSum)}</span>
+                </div>
 
-              {overdueOutflows.length > 0 || todayDueOutflows.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[...overdueOutflows, ...todayDueOutflows].slice(0, 3).map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        background: "rgba(245,158,11,0.08)",
-                        border: "1px solid rgba(245,158,11,0.25)",
-                        borderRadius: 10,
-                        padding: "10px 12px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{item.description}</span>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
-                        <span>Vencimento: {formatShortDate(item.dueDate)}</span>
-                        <button
-                          onClick={() => onMarkPaid(item as unknown as Transaction)}
+                {overdueInflows.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {overdueInflows.slice(0, 5).map((item) => {
+                      const dueStatus = getDueBadge(item.dueDate, true, item.daysOverdue);
+                      const isPaying = markingPaidId === item.id;
+                      return (
+                        <div
+                          key={item.id}
                           style={{
-                            padding: "3px 8px",
-                            borderRadius: 4,
-                            background: "rgba(16,185,129,0.2)",
-                            border: "1px solid rgba(16,185,129,0.4)",
-                            color: "#10B981",
-                            fontSize: 10,
-                            fontWeight: 700,
-                            cursor: "pointer",
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(239,68,68,0.25)",
+                            borderRadius: 10,
+                            padding: isMobile ? "12px 10px" : "12px 14px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                            transition: "all 0.2s ease",
                           }}
                         >
-                          Dar Baixa
-                        </button>
-                      </div>
-                    </div>
+                          {/* Header: Client & Amount */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 8,
+                                  background: "rgba(239,68,68,0.18)",
+                                  color: "#EF4444",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {item.clientName?.charAt(0)?.toUpperCase() || "C"}
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {item.clientName}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#a1a1aa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {item.description}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: "#EF4444", whiteSpace: "nowrap" }}>
+                              {formatBRL(item.amount)}
+                            </div>
+                          </div>
+
+                          {/* Status & Actions Row */}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: isMobile ? "stretch" : "center",
+                              flexDirection: isMobile ? "column" : "row",
+                              gap: 8,
+                              paddingTop: 4,
+                              borderTop: "1px solid rgba(255,255,255,0.04)",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: "2px 7px",
+                                borderRadius: 5,
+                                background: dueStatus.bg,
+                                color: dueStatus.color,
+                                border: `1px solid ${dueStatus.border}`,
+                                alignSelf: isMobile ? "flex-start" : "center",
+                              }}
+                            >
+                              {dueStatus.label}
+                            </span>
+
+                            {/* Buttons: Dar Baixa & Cobrar Pix */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, width: isMobile ? "100%" : "auto" }}>
+                              {/* DAR BAIXA */}
+                              <button
+                                onClick={() => handleQuickMarkPaid(item)}
+                                disabled={isPaying}
+                                title="Liquidar esta fatura como paga"
+                                style={{
+                                  flex: isMobile ? 1 : "initial",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: 5,
+                                  padding: "6px 12px",
+                                  minHeight: isMobile ? 38 : 30,
+                                  borderRadius: 6,
+                                  background: "rgba(16,185,129,0.2)",
+                                  border: "1px solid rgba(16,185,129,0.45)",
+                                  color: "#10B981",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  cursor: isPaying ? "wait" : "pointer",
+                                  transition: "all 0.15s ease",
+                                }}
+                              >
+                                {isPaying ? (
+                                  <RefreshCw className="animate-spin" style={{ width: 12, height: 12 }} />
+                                ) : (
+                                  <CheckCircle2 style={{ width: 12, height: 12 }} />
+                                )}
+                                <span>Dar Baixa</span>
+                              </button>
+
+                              {/* COBRAR PIX */}
+                              {item.clientPhone ? (
+                                <button
+                                  onClick={() => handleCobrarPix(item)}
+                                  title="Enviar cobrança via WhatsApp com chave Pix"
+                                  style={{
+                                    flex: isMobile ? 1 : "initial",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 5,
+                                    padding: "6px 12px",
+                                    minHeight: isMobile ? 38 : 30,
+                                    borderRadius: 6,
+                                    background: "#25D366",
+                                    border: "none",
+                                    color: "#fff",
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  <Send style={{ width: 11, height: 11 }} />
+                                  <span>Cobrar Pix</span>
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 10, color: "#71717a", alignSelf: "center" }}>Sem WhatsApp</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px 12px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, fontSize: 12, color: "#34D399", display: "flex", alignItems: "center", gap: 8 }}>
+                    <CheckCircle2 size={16} style={{ color: "#10B981", flexShrink: 0 }} />
+                    <span>Excelente! Nenhum cliente com faturas em atraso no momento.</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── TAB 2: PRÓXIMOS RECEBIMENTOS ──────────────────────────────── */}
+            {collectionTab === "upcoming" && (
+              <div>
+                {/* Sub-pills (Range selector) */}
+                <div
+                  style={{
+                    display: "flex",
+                    background: "rgba(255,255,255,0.04)",
+                    borderRadius: 7,
+                    padding: 2,
+                    marginBottom: 10,
+                    gap: 3,
+                    overflowX: "auto",
+                    WebkitOverflowScrolling: "touch",
+                    scrollbarWidth: "none",
+                  }}
+                >
+                  {[
+                    { id: "all", label: `Todos (${upcomingInflows.length})` },
+                    { id: "today", label: `Hoje (${todayInflowsCount})` },
+                    { id: "7d", label: `7 Dias (${next7DaysCount})` },
+                    { id: "30d", label: `30 Dias (${next30DaysCount})` },
+                  ].map((sub) => (
+                    <button
+                      key={sub.id}
+                      onClick={() => setUpcomingRange(sub.id as any)}
+                      style={{
+                        flex: isMobile ? "0 0 auto" : 1,
+                        padding: "4px 8px",
+                        borderRadius: 5,
+                        border: "none",
+                        fontSize: 10,
+                        fontWeight: upcomingRange === sub.id ? 700 : 500,
+                        background: upcomingRange === sub.id ? "#10B981" : "transparent",
+                        color: upcomingRange === sub.id ? "#fff" : "#a1a1aa",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {sub.label}
+                    </button>
                   ))}
                 </div>
-              ) : (
-                <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 11, color: "#a1a1aa", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <CheckCircle2 size={13} style={{ color: "#10B981" }} /> Nenhuma conta atrasada ou vencendo hoje.
+
+                {/* Summary Strip */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 10px",
+                    background: "rgba(16,185,129,0.08)",
+                    border: "1px solid rgba(16,185,129,0.2)",
+                    borderRadius: 8,
+                    marginBottom: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "#6EE7B7", fontWeight: 600 }}>Total Previsto no Filtro</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#10B981" }}>{formatBRL(totalUpcomingFilteredSum)}</span>
                 </div>
-              )}
-            </div>
+
+                {filteredUpcomingInflows.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {filteredUpcomingInflows.slice(0, 5).map((item) => {
+                      const dueStatus = getDueBadge(item.dueDate, false);
+                      const isPaying = markingPaidId === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            background: "rgba(255,255,255,0.03)",
+                            border: item.isToday ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                            borderRadius: 10,
+                            padding: isMobile ? "12px 10px" : "12px 14px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          {/* Header: Client & Amount */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 8,
+                                  background: item.isToday ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.18)",
+                                  color: item.isToday ? "#F59E0B" : "#10B981",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {item.clientName?.charAt(0)?.toUpperCase() || "C"}
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {item.clientName}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#a1a1aa", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {item.description}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: "#10B981", whiteSpace: "nowrap" }}>
+                              {formatBRL(item.amount)}
+                            </div>
+                          </div>
+
+                          {/* Status & Actions Row */}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: isMobile ? "stretch" : "center",
+                              flexDirection: isMobile ? "column" : "row",
+                              gap: 8,
+                              paddingTop: 4,
+                              borderTop: "1px solid rgba(255,255,255,0.04)",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: "2px 7px",
+                                borderRadius: 5,
+                                background: dueStatus.bg,
+                                color: dueStatus.color,
+                                border: `1px solid ${dueStatus.border}`,
+                                alignSelf: isMobile ? "flex-start" : "center",
+                              }}
+                            >
+                              {dueStatus.label}
+                            </span>
+
+                            {/* Buttons: Dar Baixa & Cobrar Pix */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, width: isMobile ? "100%" : "auto" }}>
+                              {/* DAR BAIXA */}
+                              <button
+                                onClick={() => handleQuickMarkPaid(item)}
+                                disabled={isPaying}
+                                title="Confirmar pagamento e liquidar esta fatura"
+                                style={{
+                                  flex: isMobile ? 1 : "initial",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: 5,
+                                  padding: "6px 12px",
+                                  minHeight: isMobile ? 38 : 30,
+                                  borderRadius: 6,
+                                  background: "rgba(16,185,129,0.2)",
+                                  border: "1px solid rgba(16,185,129,0.45)",
+                                  color: "#10B981",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  cursor: isPaying ? "wait" : "pointer",
+                                  transition: "all 0.15s ease",
+                                }}
+                              >
+                                {isPaying ? (
+                                  <RefreshCw className="animate-spin" style={{ width: 12, height: 12 }} />
+                                ) : (
+                                  <CheckCircle2 style={{ width: 12, height: 12 }} />
+                                )}
+                                <span>Dar Baixa</span>
+                              </button>
+
+                              {/* COBRAR PIX */}
+                              {item.clientPhone ? (
+                                <button
+                                  onClick={() => handleCobrarPix(item)}
+                                  title="Enviar fatura Pix com antecedência pelo WhatsApp"
+                                  style={{
+                                    flex: isMobile ? 1 : "initial",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 5,
+                                    padding: "6px 12px",
+                                    minHeight: isMobile ? 38 : 30,
+                                    borderRadius: 6,
+                                    background: "#25D366",
+                                    border: "none",
+                                    color: "#fff",
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  <Send style={{ width: 11, height: 11 }} />
+                                  <span>Cobrar Pix</span>
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 10, color: "#71717a", alignSelf: "center" }}>Sem WhatsApp</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 12, color: "#a1a1aa", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Calendar size={16} style={{ color: "#10B981", flexShrink: 0 }} />
+                    <span>Nenhum faturamento previsto para este período selecionado.</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── TAB 3: CONTAS A PAGAR ─────────────────────────────────────── */}
+            {collectionTab === "payables" && (
+              <div>
+                {/* Summary Strip */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 10px",
+                    background: "rgba(245,158,11,0.08)",
+                    border: "1px solid rgba(245,158,11,0.2)",
+                    borderRadius: 8,
+                    marginBottom: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "#FDE68A", fontWeight: 600 }}>Total de Contas Críticas</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#F59E0B" }}>{formatBRL(totalPayablesSum)}</span>
+                </div>
+
+                {overdueOutflows.length > 0 || todayDueOutflows.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[...overdueOutflows, ...todayDueOutflows].slice(0, 5).map((item) => {
+                      const isPaying = markingPaidId === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            background: "rgba(245,158,11,0.08)",
+                            border: "1px solid rgba(245,158,11,0.25)",
+                            borderRadius: 10,
+                            padding: isMobile ? "12px 10px" : "12px 14px",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{item.description}</span>
+                            <span style={{ fontSize: 12, fontWeight: 800, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
+                            <span>Vencimento: {formatShortDate(item.dueDate)}</span>
+                            <button
+                              onClick={() => handleQuickMarkPaid(item)}
+                              disabled={isPaying}
+                              style={{
+                                padding: "4px 10px",
+                                minHeight: isMobile ? 36 : 28,
+                                borderRadius: 5,
+                                background: "rgba(16,185,129,0.2)",
+                                border: "1px solid rgba(16,185,129,0.4)",
+                                color: "#10B981",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: isPaying ? "wait" : "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                              }}
+                            >
+                              {isPaying ? <RefreshCw className="animate-spin" size={11} /> : <CheckCircle2 size={11} />}
+                              <span>Dar Baixa</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 12, color: "#a1a1aa", display: "flex", alignItems: "center", gap: 8 }}>
+                    <CheckCircle2 size={16} style={{ color: "#10B981" }} />
+                    <span>Nenhuma conta atrasada ou vencendo hoje.</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── TAB 4: ALÇADAS ────────────────────────────────────────────── */}
+            {collectionTab === "approvals" && (
+              <div>
+                {dashboard.pendingApprovalsList && dashboard.pendingApprovalsList.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {dashboard.pendingApprovalsList.slice(0, 4).map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          background: "rgba(139,92,246,0.08)",
+                          border: "1px solid rgba(139,92,246,0.25)",
+                          borderRadius: 10,
+                          padding: "10px 12px",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{item.description}</span>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: "#EF4444" }}>{formatBRL(item.amount)}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#888" }}>
+                          <span>Por: {item.partnerName || "Membro"}</span>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              onClick={() => onApprove(item.id)}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 5,
+                                background: "#10B981",
+                                border: "none",
+                                color: "#fff",
+                                fontSize: 10,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => onReject(item.id)}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 5,
+                                background: "rgba(239,68,68,0.2)",
+                                border: "1px solid rgba(239,68,68,0.4)",
+                                color: "#EF4444",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Reprovar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, fontSize: 12, color: "#a1a1aa", display: "flex", alignItems: "center", gap: 8 }}>
+                    <CheckCircle2 size={16} style={{ color: "#10B981" }} />
+                    <span>Nenhuma despesa aguardando aprovação no momento.</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Bottom Button to Expand Modal */}
+            <button
+              onClick={() => {
+                setModalFilterTab(collectionTab === "overdue" ? "overdue" : collectionTab === "upcoming" ? "all" : "payables");
+                setShowFullCollectionModal(true);
+              }}
+              style={{
+                width: "100%",
+                marginTop: 12,
+                padding: "8px 12px",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#C4B5FD",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>Ver todos os registros na Central 360°</span>
+              <ChevronRight size={13} />
+            </button>
           </div>
 
           {/* Quick Shortcuts */}
@@ -3973,6 +4733,552 @@ function CockpitView({
           </div>
         </div>
       </div>
+
+      {/* ─── MODAL: Central de Cobranças & Recebimentos 360° ───────────────── */}
+      {showFullCollectionModal && (
+        <div
+          onClick={() => setShowFullCollectionModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.78)",
+            backdropFilter: "blur(8px)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: isMobile ? 8 : 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "linear-gradient(135deg, rgba(26,26,30,0.98), rgba(18,18,22,0.98))",
+              border: "1px solid rgba(139,92,246,0.3)",
+              borderRadius: 16,
+              width: "100%",
+              maxWidth: 960,
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.85)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: isMobile ? "14px 16px" : "18px 24px",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.02)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    padding: 8,
+                    borderRadius: 10,
+                    background: "rgba(139,92,246,0.15)",
+                    border: "1px solid rgba(139,92,246,0.3)",
+                    color: "#A78BFA",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: isMobile ? 15 : 17, fontWeight: 800, color: "#fff" }}>
+                    Central de Cobranças & Recebimentos 360°
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "#a1a1aa" }}>
+                    Visão expandida de faturas, liquidação direta (baixa rápida) e cobrança WhatsApp
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowFullCollectionModal(false)}
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "none",
+                  color: "#a1a1aa",
+                  padding: "6px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal KPI Header Bar (2x2 on mobile, 4 columns on desktop) */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
+                gap: 10,
+                padding: isMobile ? "12px 14px" : "16px 24px",
+                background: "rgba(0,0,0,0.25)",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              {/* 1. Vencido em Atraso */}
+              <div
+                style={{
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "#FCA5A5", fontWeight: 700, textTransform: "uppercase" }}>
+                  Em Atraso ({overdueInflows.length})
+                </div>
+                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#EF4444", marginTop: 2 }}>
+                  {formatBRL(totalOverdueSum)}
+                </div>
+              </div>
+
+              {/* 2. Vencendo Hoje */}
+              <div
+                style={{
+                  background: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.25)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "#FDE68A", fontWeight: 700, textTransform: "uppercase" }}>
+                  Vence Hoje ({todayInflowsCount})
+                </div>
+                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#F59E0B", marginTop: 2 }}>
+                  {formatBRL(todayInflowsSum)}
+                </div>
+              </div>
+
+              {/* 3. Próximos 7 Dias */}
+              <div
+                style={{
+                  background: "rgba(16,185,129,0.08)",
+                  border: "1px solid rgba(16,185,129,0.25)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "#6EE7B7", fontWeight: 700, textTransform: "uppercase" }}>
+                  Próximos 7 Dias ({next7DaysCount})
+                </div>
+                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#10B981", marginTop: 2 }}>
+                  {formatBRL(next7DaysSum)}
+                </div>
+              </div>
+
+              {/* 4. Total a Receber */}
+              <div
+                style={{
+                  background: "rgba(139,92,246,0.08)",
+                  border: "1px solid rgba(139,92,246,0.25)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                }}
+              >
+                <div style={{ fontSize: 10, color: "#C4B5FD", fontWeight: 700, textTransform: "uppercase" }}>
+                  Total a Receber ({upcomingInflows.length})
+                </div>
+                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 800, color: "#A78BFA", marginTop: 2 }}>
+                  {formatBRL(totalUpcomingAllSum)}
+                </div>
+              </div>
+            </div>
+
+            {/* Search & Filter Strip */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: isMobile ? "column" : "row",
+                alignItems: isMobile ? "stretch" : "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: isMobile ? "12px 14px" : "12px 24px",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                background: "rgba(0,0,0,0.15)",
+              }}
+            >
+              {/* Search Bar */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8,
+                  padding: "6px 12px",
+                  flex: isMobile ? "initial" : "0 0 280px",
+                }}
+              >
+                <Search size={14} style={{ color: "#a1a1aa" }} />
+                <input
+                  type="text"
+                  placeholder="Buscar cliente ou serviço..."
+                  value={collectionSearch}
+                  onChange={(e) => setCollectionSearch(e.target.value)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    outline: "none",
+                    color: "#fff",
+                    fontSize: 12,
+                    width: "100%",
+                  }}
+                />
+                {collectionSearch && (
+                  <button
+                    onClick={() => setCollectionSearch("")}
+                    style={{ background: "transparent", border: "none", color: "#a1a1aa", cursor: "pointer", padding: 0 }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Tabs */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 4,
+                  overflowX: "auto",
+                  WebkitOverflowScrolling: "touch",
+                  scrollbarWidth: "none",
+                  paddingBottom: isMobile ? 4 : 0,
+                }}
+              >
+                {[
+                  { id: "all", label: `Todos a Receber (${upcomingInflows.length + overdueInflows.length})` },
+                  { id: "overdue", label: `Em Atraso (${overdueInflows.length})` },
+                  { id: "today", label: `Hoje (${todayInflowsCount})` },
+                  { id: "7d", label: `7 Dias (${next7DaysCount})` },
+                  { id: "30d", label: `30 Dias (${next30DaysCount})` },
+                  { id: "payables", label: `Contas a Pagar (${overdueOutflows.length + todayDueOutflows.length})` },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setModalFilterTab(tab.id as any)}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 6,
+                      border: "none",
+                      fontSize: 11,
+                      fontWeight: modalFilterTab === tab.id ? 700 : 500,
+                      background: modalFilterTab === tab.id ? "#8B5CF6" : "rgba(255,255,255,0.05)",
+                      color: modalFilterTab === tab.id ? "#fff" : "#a1a1aa",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* List Body with Full Scroll */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: isMobile ? "12px 14px" : "16px 24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                maxHeight: "55vh",
+              }}
+            >
+              {(() => {
+                let list: Array<{
+                  id: string;
+                  description: string;
+                  amount: number;
+                  dueDate: string;
+                  daysOverdue?: number;
+                  clientId?: string;
+                  clientName?: string;
+                  clientPhone?: string | null;
+                  isToday?: boolean;
+                  isOverdue?: boolean;
+                  type?: "inflow" | "outflow";
+                  [key: string]: any;
+                }> = [];
+
+                if (modalFilterTab === "all") {
+                  list = [
+                    ...overdueInflows.map(i => ({ ...i, type: "inflow" as const, isOverdue: true })),
+                    ...upcomingInflows.map(i => ({ ...i, type: "inflow" as const, isOverdue: false })),
+                  ];
+                } else if (modalFilterTab === "overdue") {
+                  list = overdueInflows.map(i => ({ ...i, type: "inflow" as const, isOverdue: true }));
+                } else if (modalFilterTab === "today") {
+                  list = upcomingInflows
+                    .filter(i => {
+                      const d = new Date(i.dueDate).getTime();
+                      return d >= todayStartTs && d <= todayEndTs;
+                    })
+                    .map(i => ({ ...i, type: "inflow" as const, isToday: true, isOverdue: false }));
+                } else if (modalFilterTab === "7d") {
+                  list = upcomingInflows
+                    .filter(i => {
+                      const d = new Date(i.dueDate).getTime();
+                      return d >= todayStartTs && d <= next7DaysTs;
+                    })
+                    .map(i => ({ ...i, type: "inflow" as const, isOverdue: false }));
+                } else if (modalFilterTab === "30d") {
+                  list = upcomingInflows
+                    .filter(i => {
+                      const d = new Date(i.dueDate).getTime();
+                      return d >= todayStartTs && d <= next30DaysTs;
+                    })
+                    .map(i => ({ ...i, type: "inflow" as const, isOverdue: false }));
+                } else if (modalFilterTab === "payables") {
+                  list = [
+                    ...overdueOutflows.map(o => ({ ...o, type: "outflow" as const, isOverdue: true })),
+                    ...todayDueOutflows.map(o => ({ ...o, type: "outflow" as const, isToday: true })),
+                    ...upcomingOutflows.map(o => ({ ...o, type: "outflow" as const })),
+                  ];
+                }
+
+                if (collectionSearch.trim()) {
+                  const q = collectionSearch.toLowerCase().trim();
+                  list = list.filter(item =>
+                    (item.clientName && item.clientName.toLowerCase().includes(q)) ||
+                    (item.description && item.description.toLowerCase().includes(q)) ||
+                    (item.clientPhone && item.clientPhone.includes(q))
+                  );
+                }
+
+                if (list.length === 0) {
+                  return (
+                    <div style={{ padding: "40px 20px", textAlign: "center", color: "#a1a1aa" }}>
+                      <CheckCircle2 size={32} style={{ color: "#10B981", margin: "0 auto 10px" }} />
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                        Nenhum registro encontrado
+                      </div>
+                      <div style={{ fontSize: 12, color: "#71717a", marginTop: 4 }}>
+                        Não foram localizadas faturas com os filtros e busca aplicados.
+                      </div>
+                    </div>
+                  );
+                }
+
+                return list.map((item) => {
+                  const isOutflow = item.type === "outflow";
+                  const dueStatus = getDueBadge(item.dueDate, item.isOverdue, item.daysOverdue);
+                  const isPaying = markingPaidId === item.id;
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: item.isOverdue ? "1px solid rgba(239,68,68,0.25)" : "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 12,
+                        padding: isMobile ? "12px 14px" : "14px 18px",
+                        display: "flex",
+                        flexDirection: isMobile ? "column" : "row",
+                        justifyContent: "space-between",
+                        alignItems: isMobile ? "stretch" : "center",
+                        gap: 12,
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {/* Left side: Client / Description */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 10,
+                            background: isOutflow
+                              ? "rgba(239,68,68,0.18)"
+                              : item.isOverdue
+                              ? "rgba(239,68,68,0.18)"
+                              : "rgba(16,185,129,0.18)",
+                            color: isOutflow || item.isOverdue ? "#EF4444" : "#10B981",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 14,
+                            fontWeight: 800,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {isOutflow ? <CreditCard size={18} /> : (item.clientName?.charAt(0)?.toUpperCase() || "C")}
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                              {item.clientName || item.description}
+                            </span>
+                            {item.clientPhone && (
+                              <span style={{ fontSize: 11, color: "#25D366", fontWeight: 600 }}>
+                                📱 {item.clientPhone}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#a1a1aa", marginTop: 2 }}>
+                            {item.clientName ? item.description : "Conta / Despesa Operacional"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right side: Badge, Amount, and Actions */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: isMobile ? "stretch" : "center",
+                          justifyContent: "space-between",
+                          flexDirection: isMobile ? "column" : "row",
+                          gap: 12,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: isMobile ? "space-between" : "flex-end" }}>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "3px 8px",
+                              borderRadius: 6,
+                              background: dueStatus.bg,
+                              color: dueStatus.color,
+                              border: `1px solid ${dueStatus.border}`,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {dueStatus.label}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 800,
+                              color: isOutflow ? "#EF4444" : "#10B981",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {formatBRL(item.amount)}
+                          </span>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, width: isMobile ? "100%" : "auto" }}>
+                          {/* DAR BAIXA */}
+                          <button
+                            onClick={() => handleQuickMarkPaid(item)}
+                            disabled={isPaying}
+                            title="Confirmar pagamento e dar baixa imediata nesta fatura"
+                            style={{
+                              flex: isMobile ? 1 : "initial",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 6,
+                              padding: "7px 14px",
+                              minHeight: isMobile ? 40 : 32,
+                              borderRadius: 7,
+                              background: "rgba(16,185,129,0.2)",
+                              border: "1px solid rgba(16,185,129,0.45)",
+                              color: "#10B981",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: isPaying ? "wait" : "pointer",
+                              transition: "all 0.15s ease",
+                            }}
+                          >
+                            {isPaying ? (
+                              <RefreshCw className="animate-spin" size={13} />
+                            ) : (
+                              <CheckCircle2 size={13} />
+                            )}
+                            <span>Dar Baixa</span>
+                          </button>
+
+                          {/* COBRAR PIX (only for inflows) */}
+                          {!isOutflow && item.clientPhone && (
+                            <button
+                              onClick={() => handleCobrarPix(item)}
+                              title="Enviar cobrança Pix pelo WhatsApp"
+                              style={{
+                                flex: isMobile ? 1 : "initial",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 6,
+                                padding: "7px 14px",
+                                minHeight: isMobile ? 40 : 32,
+                                borderRadius: 7,
+                                background: "#25D366",
+                                border: "none",
+                                color: "#fff",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                transition: "all 0.15s ease",
+                              }}
+                            >
+                              <Send size={12} />
+                              <span>Cobrar Pix</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: isMobile ? "12px 14px" : "14px 24px",
+                borderTop: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(0,0,0,0.2)",
+              }}
+            >
+              <span style={{ fontSize: 12, color: "#a1a1aa" }}>
+                Ao clicar em <strong>Dar Baixa</strong>, a fatura é liquidada imediatamente no banco de dados.
+              </span>
+              <button
+                onClick={() => setShowFullCollectionModal(false)}
+                style={{
+                  padding: "6px 16px",
+                  borderRadius: 7,
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
