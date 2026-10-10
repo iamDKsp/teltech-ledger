@@ -23,6 +23,27 @@ function resolveUrl(path: string): string {
   return `${base}${cleanPath}`;
 }
 
+function toHeadersRecord(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) {
+    const record: Record<string, string> = {};
+    headers.forEach((val, key) => { record[key] = val; });
+    return record;
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return headers as Record<string, string>;
+}
+
+function buildHeaders(customHeaders?: HeadersInit, includeContentType = true): Record<string, string> {
+  return {
+    ...(includeContentType ? { "Content-Type": "application/json" } : {}),
+    ...getAuthHeader(),
+    ...toHeadersRecord(customHeaders),
+  };
+}
+
 async function handleResponse<T = any>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
@@ -45,87 +66,70 @@ export const API = {
 
   async get<T = any>(path: string, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
-      ...options,
+      ...restOptions,
+      headers: buildHeaders(headers, true),
     });
     return handleResponse<T>(res);
   },
 
   async post<T = any>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
+      ...restOptions,
+      headers: buildHeaders(headers, true),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      ...options,
     });
     return handleResponse<T>(res);
   },
 
   async put<T = any>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
+      ...restOptions,
+      headers: buildHeaders(headers, true),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      ...options,
     });
     return handleResponse<T>(res);
   },
 
   async patch<T = any>(path: string, body?: unknown, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
+      ...restOptions,
+      headers: buildHeaders(headers, true),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      ...options,
     });
     return handleResponse<T>(res);
   },
 
   async delete<T = any>(path: string, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
-      ...options,
+      ...restOptions,
+      headers: buildHeaders(headers, true),
     });
     return handleResponse<T>(res);
   },
 
   async postForm<T = any>(path: string, formData: FormData, options?: RequestInit): Promise<T> {
     const url = resolveUrl(path);
+    const { headers, ...restOptions } = options ?? {};
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        ...getAuthHeader(),
-        ...options?.headers,
-      },
+      ...restOptions,
+      headers: buildHeaders(headers, false),
       body: formData,
-      ...options,
     });
     return handleResponse<T>(res);
   },

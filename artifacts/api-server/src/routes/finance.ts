@@ -25,6 +25,7 @@ import { requireAuth } from "../middlewares/auth";
 import type { AuthenticatedRequest } from "../middlewares/auth";
 import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
 import { normalizeWhatsAppPhone } from "../services/whatsapp-session";
+import { syncAllSubscriptions } from "../services/sales-billing";
 import { randomUUID } from "node:crypto";
 
 const router: IRouter = Router();
@@ -135,7 +136,10 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     const startOfMonth = new Date(reqYear, reqMonth, 1);
     const endOfMonth = new Date(reqYear, reqMonth + 1, 0, 23, 59, 59);
 
-    const [transactions, accounts, categories, settingsList, budgets, users, clients, projects] = await Promise.all([
+    // Sincronização automática contínua de mensalidades
+    try { await syncAllSubscriptions(workspaceId); } catch (e) { /* non-blocking */ }
+
+    const [transactions, accounts, categories, settingsList, budgets, users, clients, projects, saleItems, sales, saleModules] = await Promise.all([
       db.select().from(financialTransactionsTable).where(eq(financialTransactionsTable.workspaceId, workspaceId)),
       db.select().from(financialAccountsTable).where(and(eq(financialAccountsTable.workspaceId, workspaceId), eq(financialAccountsTable.isActive, true))),
       db.select().from(financialCategoriesTable).where(eq(financialCategoriesTable.workspaceId, workspaceId)),
@@ -144,6 +148,9 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
       db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email }).from(usersTable),
       db.select().from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId)),
       db.select().from(projectsTable).where(eq(projectsTable.workspaceId, workspaceId)),
+      db.select().from(saleItemsTable).where(and(eq(saleItemsTable.workspaceId, workspaceId), eq(saleItemsTable.kind, "subscription"))),
+      db.select().from(clientSalesTable).where(eq(clientSalesTable.workspaceId, workspaceId)),
+      db.select().from(saleModulesTable).where(eq(saleModulesTable.workspaceId, workspaceId)),
     ]);
 
     const settings = settingsList[0] ?? { taxRatePercent: 600, emergencyReserveTarget: 5000000 };
@@ -160,8 +167,35 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     const monthOutflowPending = monthTxs.filter(t => t.type === "outflow" && t.status === "pending").reduce((s, t) => s + t.amount, 0);
     const monthBalance = monthInflow - monthOutflow;
 
-    // ── MRR: Sum of contracted recurring inflow due this month (not cancelled)
-    const mrr = monthTxs.filter(t => t.type === "inflow" && t.isRecurring && t.status !== "cancelled").reduce((s, t) => s + t.amount, 0);
+    // ── Contracted MRR: Soma real de todas as mensalidades recorrentes contratadas de clientes ativos
+    const activeClientIds = new Set(clients.filter(c => c.status === "active").map(c => c.id));
+    const activeSaleIds = new Set(sales.filter(s => s.status === "active" && activeClientIds.has(s.clientId)).map(s => s.id));
+    const activeSubs = saleItems.filter(i => activeSaleIds.has(i.saleId) && (i.status === "active" || i.status === "awaiting_start"));
+
+    let contractedMrr = 0;
+    for (const item of activeSubs) {
+      if (item.fixedAmount && item.fixedAmount > 0) {
+        contractedMrr += item.fixedAmount;
+      } else {
+        const itemMods = saleModules.filter(m => m.saleItemId === item.id);
+        const t = now.getTime();
+        const activeMods = itemMods.filter(m => {
+          const s = new Date(m.startDate).getTime();
+          const e = m.endDate ? new Date(m.endDate).getTime() : null;
+          return s <= t && (e === null || e >= t);
+        });
+        const modsTotal = (activeMods.length > 0 ? activeMods : itemMods).reduce((sum, m) => sum + m.price, 0);
+        contractedMrr += modsTotal;
+      }
+    }
+
+    // ── MRR Previsto no Mês: Faturas recorrentes com vencimento especificamente neste mês civil
+    const monthMrr = monthTxs
+      .filter(t => t.type === "inflow" && (t.isRecurring || t.revenueType === "recurring") && t.status !== "cancelled")
+      .reduce((s, t) => s + t.amount, 0);
+
+    // O MRR principal reflete o total contratado da carteira ativa (ou monthMrr como fallback)
+    const mrr = contractedMrr > 0 ? contractedMrr : monthMrr;
 
     // ── Receita pontual (projetos/entradas) prevista no mês e receita contratada para meses futuros
     const oneTimeContracted = monthTxs
@@ -618,6 +652,8 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     res.json({
       dashboard: {
         mrr,
+        contractedMrr: contractedMrr || mrr,
+        monthMrr,
         oneTimeContracted,
         contractedReceivable,
         monthInflow, monthInflowPending,

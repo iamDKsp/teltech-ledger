@@ -261,6 +261,8 @@ export interface ProductMacroReport {
 
 interface DashboardData {
   mrr: number;
+  contractedMrr?: number;
+  monthMrr?: number;
   oneTimeContracted?: number;
   contractedReceivable?: number;
   monthInflow: number;
@@ -3652,7 +3654,14 @@ function CockpitView({
           }}
         >
           {[
-            { label: "MRR — Mensalidades do mês", value: dashboard.mrr ?? 0, hint: "Receita recorrente (SaaS + manutenção)", color: "#A78BFA" },
+            {
+              label: "MRR — Carteira Recorrente",
+              value: dashboard.contractedMrr || dashboard.mrr || 0,
+              hint: dashboard.monthMrr !== undefined && dashboard.monthMrr !== (dashboard.contractedMrr || dashboard.mrr)
+                ? `${formatBRL(dashboard.monthMrr)} com vencimento no mês · ${formatBRL(Math.max(0, (dashboard.contractedMrr || dashboard.mrr) - dashboard.monthMrr))} nos próximos ciclos`
+                : "Receita recorrente total (SaaS + manutenção)",
+              color: "#A78BFA",
+            },
             { label: "Projetos / Entradas do mês", value: dashboard.oneTimeContracted ?? 0, hint: "Receita pontual prevista", color: "#60A5FA" },
             { label: "Já contratado p/ meses futuros", value: dashboard.contractedReceivable ?? 0, hint: "Parcelas e mensalidades já geradas", color: "#34D399" },
           ].map((k) => (
