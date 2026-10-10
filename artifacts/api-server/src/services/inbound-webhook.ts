@@ -164,7 +164,7 @@ class WebhookSync {
     if (data.version <= client.photoVersion) return { status: data.version < client.photoVersion ? "stale" : "unchanged",
       version: client.photoVersion, url: client.photoUrl };
     const url = validatePhotoUrl(data.sourceUrl, this.config.photoAllowedHosts);
-    const localUrl = await this.files.copy(url, this.config.workspaceId, client.id);
+    const localUrl = await this.files.copy(url, this.config.workspaceId, client.id, data.version);
     await this.tx.update(clientsTable).set({ photoUrl: localUrl, photoVersion: data.version,
       photoSource: this.config.source, updatedAt: new Date() }).where(eq(clientsTable.id, client.id));
     if (client.photoUrl !== localUrl) this.files.retire(client.photoUrl);

@@ -116,10 +116,12 @@ export class ClientPhotoFiles {
   private root: string;
   constructor(private options: PhotoStorageOptions = {}) { this.root = path.resolve(options.uploadRoot ?? path.join(process.cwd(), "public", "uploads")); }
 
-  async copy(url: URL, workspaceId: string, clientId: string) {
+  async copy(url: URL, workspaceId: string, clientId: string, version: number) {
     const bytes = await normalizeClientPhoto(await (this.options.download ?? downloadClientPhoto)(url));
     const hash = createHash("sha256").update(bytes).digest("hex");
-    const relative = `client-photos/${workspaceId}/${clientId}/${hash}.webp`;
+    // A later version can contain old pixels. Its own filename prevents a
+    // prior event's post-commit retirement from deleting the new current image.
+    const relative = `client-photos/${workspaceId}/${clientId}/${version}-${hash}.webp`;
     const target = path.join(this.root, relative);
     await mkdir(path.dirname(target), { recursive: true });
     try { await writeFile(target, bytes, { flag: "wx" }); }
@@ -129,7 +131,7 @@ export class ClientPhotoFiles {
 
   retire(url: string | null | undefined) {
     // Only retire files created by this service, never arbitrary upload paths.
-    if (url && /^\/uploads\/client-photos\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[a-f0-9]{64}\.webp$/.test(url)) {
+    if (url && /^\/uploads\/client-photos\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[1-9][0-9]{0,9}-[a-f0-9]{64}\.webp$/.test(url)) {
       this.obsolete.push(path.join(this.root, url.slice("/uploads/".length)));
     }
   }

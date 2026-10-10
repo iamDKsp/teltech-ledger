@@ -84,12 +84,16 @@ test("cópia persistente, deduplicação por conteúdo e remoção apenas após 
     const storage = new ClientPhotoFiles(options);
     const url = new URL("https://cdn.example.test/photo.png");
     const workspace = "00000000-0000-4000-8000-000000000001", client = "00000000-0000-4000-8000-000000000002";
-    const local = await storage.copy(url, workspace, client);
-    assert.equal(await storage.copy(url, workspace, client), local);
+    const local = await storage.copy(url, workspace, client, 1);
+    assert.equal(await storage.copy(url, workspace, client, 1), local);
     const target = path.join(root, local.slice("/uploads/".length));
     assert.equal((await sharp(await readFile(target)).metadata()).format, "webp");
     storage.retire(local); await storage.finish(false); await access(target);
+    const laterEvent = new ClientPhotoFiles(options);
+    const later = await laterEvent.copy(url, workspace, client, 2);
+    assert.notEqual(later, local);
     await storage.finish(true); await assert.rejects(access(target));
+    await access(path.join(root, later.slice("/uploads/".length)));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
