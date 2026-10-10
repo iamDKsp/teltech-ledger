@@ -31,15 +31,20 @@ No Leadger ela vira um contrato comercial com item de mensalidade. Não crie uma
 conta bancária por cliente: contas bancárias são o caixa/banco da Teltech e são
 configuradas apenas no receptor. Um cliente pode ter mais de uma base.
 
-2. CONFIGURAÇÃO QUE PRECISAMOS RECEBER DO RESPONSÁVEL PELO LEADGER
+2. CONFIGURAÇÃO DO EMISSOR E URL DEFINIDA PELO LEADGER
 
-LEADGER_WEBHOOK_URL=https://DOMINIO-REAL/api/webhooks/inbound/SOURCE
-LEADGER_WEBHOOK_SOURCE=SOURCE
+LEADGER_WEBHOOK_URL=https://leadger.teltech.com.br/api/webhooks/inbound/sistema-amigo
+LEADGER_WEBHOOK_SOURCE=sistema-amigo
 LEADGER_WEBHOOK_SECRET=SEGREDO-COMPARTILHADO
 
-SOURCE é o identificador configurado no Leadger, por exemplo sistema-amigo.
-Não existe domínio nem segredo real neste arquivo; solicite os três valores ao
-responsável antes de ativar o envio. Guarde segredo em variável de ambiente ou
+O domínio público é https://leadger.teltech.com.br. A rota /configuracoes é a
+página de configuração da aplicação; o envio deve usar a URL do webhook acima.
+A integração foi definida com source=sistema-amigo; mantenha esse identificador
+igual nos dois servidores e na assinatura. A equipe do Leadger deve publicar o
+receptor e ativar esse source no servidor antes do primeiro envio. A URL definida
+neste documento não comprova que o webhook já está ativado em produção.
+O segredo real não está neste arquivo: receba-o da equipe do Leadger por canal
+privado antes de ativar o envio. Guarde segredo em variável de ambiente ou
 secret manager do backend. Nunca no frontend, logs, Git ou nesta documentação.
 O mesmo segredo deve ser usado nos dois servidores. Cada integração tem seu
 próprio segredo e destino de workspace/produto; o emissor não escolhe UUIDs

@@ -5,10 +5,21 @@ bases/contratos de mensalidade e faturas, com HMAC, identificação externa,
 versões, transação de banco, ajustes de saldo e auditoria. O contrato para o
 desenvolvedor do emissor está em [INTEGRACAO-WEBHOOK-ENTRADA.txt](INTEGRACAO-WEBHOOK-ENTRADA.txt).
 
+Domínio de produção informado: `https://leadger.teltech.com.br`.
+URL definida para a integração `sistema-amigo`:
+
+```text
+POST https://leadger.teltech.com.br/api/webhooks/inbound/sistema-amigo
+```
+
+`https://leadger.teltech.com.br/configuracoes` é a tela de configurações, não a
+URL de recebimento. A URL acima depende da versão nova publicada e do source
+`sistema-amigo` ativado no servidor; definir o endereço não ativa o webhook.
+
 ## Ativar no servidor
 
-1. Defina o domínio público do Leadger com HTTPS. O Nginx existente já encaminha
-   `/api/` para a API, portanto o webhook usa o mesmo domínio da aplicação.
+1. Use o domínio público `https://leadger.teltech.com.br`. O Nginx existente já
+   encaminha `/api/` para a API; mantenha o HTTPS no proxy público.
 2. Selecione o workspace, projeto/produto e a conta bancária de recebimento.
    Os UUIDs podem ser consultados nas respostas autenticadas de `/api/auth/me`,
    `/api/projects` e `/api/finance/accounts`, ou no banco. A tela Configurações >
@@ -26,7 +37,8 @@ desenvolvedor do emissor está em [INTEGRACAO-WEBHOOK-ENTRADA.txt](INTEGRACAO-WE
    [{"source":"sistema-amigo","name":"Sistema do amigo","secret":"SEU_SEGREDO_ALEATORIO","workspaceId":"UUID_WORKSPACE","projectId":"UUID_PROJETO","accountId":"UUID_CONTA_RECEBIMENTO"}]
    ```
 
-   Os valores acima são placeholders. `source` aceita minúsculas, dígitos, `_`
+   `source=sistema-amigo` corresponde à URL definida acima. Secret e UUIDs são
+   placeholders e precisam ser substituídos. `source` aceita minúsculas, dígitos, `_`
    e `-`, até 60 caracteres; começa com letra/dígito. `secret` tem pelo menos
    32 caracteres. UUIDs devem ser reais, do mesmo workspace. `accountId` pode
    ser null: nesse caso baixas entram nos relatórios, sem crédito em saldo
