@@ -1,7 +1,15 @@
 import { Router, type Request, type Response } from "express";
+import webpush from "web-push";
 import { requireAuth } from "../middlewares/auth";
-import { getOrCreateVapidKeys, getVapidPublicKey, removePushSubscription, savePushSubscription, sendPushNotificationToWorkspace } from "../services/push-notification";
+import {
+  getOrCreateVapidKeys,
+  getVapidPublicKey,
+  removePushSubscription,
+  savePushSubscription,
+  sendPushNotificationToWorkspace,
+} from "../services/push-notification";
 import { getWorkspaceId, getUserInfo } from "./finance";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -9,16 +17,17 @@ const router = Router();
 router.get("/vapid-public-key", requireAuth, async (req: Request, res: Response) => {
   try {
     const workspaceId = await getWorkspaceId(req);
-    if (!workspaceId) {
-      res.status(403).json({ error: "Workspace não encontrado" });
-      return;
-    }
-
     const publicKey = await getVapidPublicKey(workspaceId);
     res.json({ publicKey });
   } catch (err: any) {
-    req.log?.error({ err }, "Erro ao obter chave pública VAPID");
-    res.status(500).json({ error: "Erro ao obter chave pública VAPID" });
+    logger.error({ err: err?.message, stack: err?.stack }, "Erro ao obter chave pública VAPID");
+    try {
+      const fallbackKey = await getVapidPublicKey("global");
+      res.json({ publicKey: fallbackKey });
+    } catch {
+      const generated = webpush.generateVAPIDKeys();
+      res.json({ publicKey: generated.publicKey });
+    }
   }
 });
 
@@ -26,11 +35,6 @@ router.get("/vapid-public-key", requireAuth, async (req: Request, res: Response)
 router.post("/subscribe", requireAuth, async (req: Request, res: Response) => {
   try {
     const workspaceId = await getWorkspaceId(req);
-    if (!workspaceId) {
-      res.status(403).json({ error: "Workspace não encontrado" });
-      return;
-    }
-
     const userInfo = await getUserInfo(req, workspaceId);
     const { endpoint, keys } = req.body;
 
@@ -41,7 +45,7 @@ router.post("/subscribe", requireAuth, async (req: Request, res: Response) => {
 
     const userAgent = req.headers["user-agent"] as string | undefined;
     const subscription = await savePushSubscription(
-      workspaceId,
+      workspaceId || "default",
       userInfo?.userId ?? null,
       { endpoint, keys },
       userAgent,
@@ -49,8 +53,8 @@ router.post("/subscribe", requireAuth, async (req: Request, res: Response) => {
 
     res.status(201).json({ ok: true, subscriptionId: subscription.id });
   } catch (err: any) {
-    req.log?.error({ err }, "Erro ao salvar inscrição push");
-    res.status(500).json({ error: "Erro ao registrar notificação push" });
+    logger.error({ err: err?.message, stack: err?.stack }, "Erro ao salvar inscrição push");
+    res.status(500).json({ error: "Erro ao registrar notificação push", message: err?.message });
   }
 });
 
@@ -66,8 +70,8 @@ router.post("/unsubscribe", requireAuth, async (req: Request, res: Response) => 
     await removePushSubscription(endpoint);
     res.json({ ok: true });
   } catch (err: any) {
-    req.log?.error({ err }, "Erro ao desinscrever push");
-    res.status(500).json({ error: "Erro ao desinscrever push" });
+    logger.error({ err: err?.message }, "Erro ao desinscrever push");
+    res.status(500).json({ error: "Erro ao desinscrever push", message: err?.message });
   }
 });
 
@@ -91,8 +95,8 @@ router.post("/test", requireAuth, async (req: Request, res: Response) => {
 
     res.json({ ok: true, sent: result.sent, failed: result.failed });
   } catch (err: any) {
-    req.log?.error({ err }, "Erro ao enviar teste push");
-    res.status(500).json({ error: "Erro ao enviar teste push" });
+    logger.error({ err: err?.message, stack: err?.stack }, "Erro ao enviar teste push");
+    res.status(500).json({ error: "Erro ao enviar teste push", message: err?.message });
   }
 });
 

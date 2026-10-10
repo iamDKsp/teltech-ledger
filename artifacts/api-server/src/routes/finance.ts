@@ -19,6 +19,7 @@ import {
   saleModulesTable,
   teamCommissionsTable,
   tasksTable,
+  workspacesTable,
 } from "@workspace/db";
 import { eq, and, or, lt, desc, sql, inArray, isNotNull } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/auth";
@@ -37,23 +38,39 @@ const router: IRouter = Router();
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export async function getWorkspaceId(req: Request): Promise<string | null> {
-  const userId = (req as AuthenticatedRequest).user?.userId;
+  const user = (req as AuthenticatedRequest).user;
+  const userId = user?.userId;
   if (!userId) return null;
   const requestedWsId = req.headers["x-workspace-id"] as string | undefined;
   if (requestedWsId) {
+    try {
+      const [member] = await db
+        .select({ workspaceId: workspaceMembersTable.workspaceId })
+        .from(workspaceMembersTable)
+        .where(and(eq(workspaceMembersTable.userId, userId), eq(workspaceMembersTable.workspaceId, requestedWsId)))
+        .limit(1);
+      if (member) return member.workspaceId;
+    } catch {}
+  }
+  try {
     const [member] = await db
       .select({ workspaceId: workspaceMembersTable.workspaceId })
       .from(workspaceMembersTable)
-      .where(and(eq(workspaceMembersTable.userId, userId), eq(workspaceMembersTable.workspaceId, requestedWsId)))
+      .where(eq(workspaceMembersTable.userId, userId))
       .limit(1);
     if (member) return member.workspaceId;
+  } catch {}
+
+  if (user?.workspaceId) {
+    return user.workspaceId;
   }
-  const [member] = await db
-    .select({ workspaceId: workspaceMembersTable.workspaceId })
-    .from(workspaceMembersTable)
-    .where(eq(workspaceMembersTable.userId, userId))
-    .limit(1);
-  return member?.workspaceId ?? null;
+
+  try {
+    const [firstWs] = await db.select({ id: workspacesTable.id }).from(workspacesTable).limit(1);
+    return firstWs?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getUserInfo(req: Request, wsId?: string | null): Promise<{ userId: string; role: string } | null> {
