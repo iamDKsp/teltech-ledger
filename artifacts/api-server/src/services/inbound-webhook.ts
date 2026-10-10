@@ -114,7 +114,14 @@ class WebhookSync {
         email: clientsTable.email, phone: clientsTable.phone }).from(clientsTable)
         .where(eq(clientsTable.workspaceId, this.config.workspaceId));
       const matchedId = findExistingWebhookClient(data, candidates);
-      if (matchedId) [existing] = await this.tx.select().from(clientsTable).where(eq(clientsTable.id, matchedId)).limit(1).for("update");
+      if (matchedId) {
+        const claims = await this.tx.select({ id: inboundWebhookEntitiesTable.id }).from(inboundWebhookEntitiesTable).where(and(
+          eq(inboundWebhookEntitiesTable.workspaceId, this.config.workspaceId), eq(inboundWebhookEntitiesTable.source, this.config.source),
+          eq(inboundWebhookEntitiesTable.kind, "client"), eq(inboundWebhookEntitiesTable.internalId, matchedId),
+        )).limit(1);
+        if (claims.length) throw new WebhookError(409, "client_already_linked", "Cliente já vinculado a outro ID externo desse sistema. Use o ID original.");
+        [existing] = await this.tx.select().from(clientsTable).where(eq(clientsTable.id, matchedId)).limit(1).for("update");
+      }
     }
     const { externalId, version, ...fields } = data;
     // First linking must not erase manual contact details absent in the source.

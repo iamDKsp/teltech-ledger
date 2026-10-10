@@ -40,8 +40,9 @@ desenvolvedor do emissor está em [INTEGRACAO-WEBHOOK-ENTRADA.txt](INTEGRACAO-WE
 6. Confira Configurações > Integrações, copie a URL e entregue URL, source,
    segredo (por canal privado) e o TXT ao desenvolvedor do emissor.
 
-O código preexistente de `seed.ts` contém um reset financeiro one-off com ID
-`2026-10-04_reset_financial_module`. Antes do deploy, confirme que ele já está
+O código preexistente de `seed.ts` contém um reset financeiro one-off, atualmente
+com ID `2026-10-05_reset_financial_module_v4`. Antes do deploy, confira o ID vigente
+na função `runOneTimeFinancialReset` e confirme que ele já está
 registrado em `system_migrations` no seu banco: se estiver pendente, a inicialização
 existente pode limpar o financeiro. Este trabalho não executa seed/reset nem
 acessa o banco da aplicação.

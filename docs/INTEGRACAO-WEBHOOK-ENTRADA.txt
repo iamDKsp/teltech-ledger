@@ -293,7 +293,7 @@ Em base.upsert, resultado também identifica clientId, saleItemId e as faturas.
   base_not_synced: entregar a base primeiro e depois tentar a fatura novamente.
   event_id_conflict: mesmo eventId com corpo diferente.
   version_conflict: mesma version com dados diferentes.
-  client_match_ambiguous/client_identity_conflict/existing_client_requires_link:
+  client_match_ambiguous/client_identity_conflict/existing_client_requires_link/client_already_linked:
     resolução/vinculação do cliente existente.
   existing_contract_requires_link: vincular contrato existente antes de enviar.
   legacy_contract_requires_migration: reconciliar modelo antigo de contrato.
