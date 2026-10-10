@@ -864,6 +864,13 @@ export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   sentAt: timestamp("sent_at"),
   waMessageId: text("wa_message_id"),
   lastError: text("last_error"),
+  // Media support: image, audio, video, document/pdf
+  mediaType: text("media_type"), // 'image' | 'audio' | 'video' | 'document'
+  mediaUrl: text("media_url"),
+  mediaMimeType: text("media_mime_type"),
+  mediaFilename: text("media_filename"),
+  mediaSize: integer("media_size"),
+  mediaDuration: integer("media_duration"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

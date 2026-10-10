@@ -33,6 +33,20 @@ import {
   ChevronDown,
   Smartphone,
   UserCheck,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Download,
+  Maximize2,
+  Image as ImageIcon,
+  Paperclip,
+  Film,
+  Mic,
+  Music,
+  FileSpreadsheet,
+  FileArchive,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../lib/api";
@@ -58,6 +72,10 @@ interface ConversationItem {
     kind: string;
     status: string;
     senderName?: string | null;
+    mediaType?: "image" | "audio" | "video" | "document" | null;
+    mediaUrl?: string | null;
+    mediaFilename?: string | null;
+    mediaDuration?: number | null;
   } | null;
   totalMessages: number;
   inboundCount: number;
@@ -87,6 +105,12 @@ interface ChatMessage {
   sentAt?: string | null;
   createdAt: string;
   waMessageId?: string | null;
+  mediaType?: "image" | "audio" | "video" | "document" | null;
+  mediaUrl?: string | null;
+  mediaMimeType?: string | null;
+  mediaFilename?: string | null;
+  mediaSize?: number | null;
+  mediaDuration?: number | null;
   transaction?: {
     id: string;
     amount: number;
@@ -428,6 +452,529 @@ function PixPaymentCard({ pixCode, amount }: { pixCode: string; amount?: number 
   );
 }
 
+function resolveMediaSrc(mediaUrl?: string | null): string {
+  if (!mediaUrl) return "";
+  if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) return mediaUrl;
+  const base = API.baseUrl ? API.baseUrl.replace(/\/$/, "") : "";
+  return `${base}${mediaUrl.startsWith("/") ? "" : "/"}${mediaUrl}`;
+}
+
+function formatFileSize(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatAudioTime(seconds: number): string {
+  if (isNaN(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+}
+
+function WhatsAppAudioPlayer({
+  src,
+  durationSec,
+  isOutbound,
+}: {
+  src?: string | null;
+  durationSec?: number | null;
+  isOutbound: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(durationSec || 0);
+  const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
+
+  const mediaSrc = resolveMediaSrc(src);
+
+  const togglePlay = () => {
+    if (!audioRef.current || !mediaSrc) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch((e) => console.warn("Audio play failed", e));
+    }
+  };
+
+  const toggleRate = () => {
+    const nextRate: 1 | 1.5 | 2 = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    setPlaybackRate(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
+    }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percent = Math.max(0, Math.min(1, clickX / rect.width));
+    const newTime = percent * duration;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: "10px 14px",
+        background: isOutbound ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.35)",
+        borderRadius: 12,
+        border: isOutbound ? "1px solid hsl(265 85% 62% / 0.3)" : "1px solid rgba(255,255,255,0.1)",
+        minWidth: 260,
+        maxWidth: 340,
+      }}
+    >
+      {mediaSrc && (
+        <audio
+          ref={audioRef}
+          src={mediaSrc}
+          preload="metadata"
+          onTimeUpdate={() => {
+            if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current && audioRef.current.duration) {
+              setDuration(audioRef.current.duration);
+            }
+          }}
+          onEnded={() => {
+            setIsPlaying(false);
+            setCurrentTime(0);
+          }}
+        />
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Play / Pause Button */}
+        <button
+          onClick={togglePlay}
+          disabled={!mediaSrc}
+          title={isPlaying ? "Pausar áudio" : "Ouvir áudio"}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: "50%",
+            background: isPlaying
+              ? "hsl(152 65% 45%)"
+              : isOutbound
+              ? "hsl(265 85% 62%)"
+              : "hsl(265 85% 62% / 0.4)",
+            border: "none",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: mediaSrc ? "pointer" : "default",
+            flexShrink: 0,
+            transition: "all 0.15s ease",
+            boxShadow: isPlaying ? "0 0 12px hsl(152 65% 45% / 0.5)" : "none",
+          }}
+        >
+          {isPlaying ? <Pause size={18} /> : <Play size={18} style={{ marginLeft: 2 }} />}
+        </button>
+
+        {/* Waveform Scrubber & Progress */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+          <div
+            onClick={handleSeek}
+            style={{
+              height: 24,
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+              cursor: mediaSrc ? "pointer" : "default",
+              position: "relative",
+            }}
+          >
+            {/* WhatsApp-style audio waveform bars */}
+            {Array.from({ length: 24 }).map((_, i) => {
+              const barProgress = (i / 24) * 100;
+              const isFilled = barProgress <= progress;
+              const heights = [8, 14, 20, 12, 18, 22, 10, 16, 24, 18, 12, 22, 16, 10, 18, 24, 14, 8, 16, 20, 12, 18, 14, 8];
+              const h = heights[i % heights.length];
+              return (
+                <div
+                  key={i}
+                  style={{
+                    width: 3,
+                    height: h,
+                    borderRadius: 2,
+                    background: isFilled
+                      ? isOutbound
+                        ? "#c4a3ff"
+                        : "hsl(152 65% 55%)"
+                      : "rgba(255,255,255,0.2)",
+                    transition: "background 0.1s ease",
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Time Display */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10, color: "#aaa" }}>
+            <span>{formatAudioTime(currentTime)}</span>
+            <span>{formatAudioTime(duration || durationSec || 0)}</span>
+          </div>
+        </div>
+
+        {/* Speed Toggle */}
+        <button
+          onClick={toggleRate}
+          title="Alternar velocidade de reprodução"
+          style={{
+            padding: "2px 6px",
+            borderRadius: 8,
+            fontSize: 10,
+            fontWeight: 700,
+            background: playbackRate > 1 ? "hsl(265 85% 62% / 0.3)" : "rgba(255,255,255,0.08)",
+            color: playbackRate > 1 ? "#c4a3ff" : "#888",
+            border: "1px solid rgba(255,255,255,0.1)",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          {playbackRate}x
+        </button>
+      </div>
+
+      {/* Audio footer actions */}
+      {mediaSrc && (
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 6, marginTop: 2 }}>
+          <a
+            href={mediaSrc}
+            download="audio-whatsapp.ogg"
+            style={{
+              fontSize: 10,
+              color: "#aaa",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              transition: "color 0.15s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#c4a3ff")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#aaa")}
+          >
+            <Download size={11} /> Baixar Áudio
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WhatsAppVideoPlayer({
+  src,
+  caption,
+  isOutbound,
+}: {
+  src?: string | null;
+  caption?: string | null;
+  isOutbound: boolean;
+}) {
+  const mediaSrc = resolveMediaSrc(src);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        maxWidth: 320,
+        borderRadius: 12,
+        overflow: "hidden",
+        background: "#0f0f12",
+        border: isOutbound ? "1px solid hsl(265 85% 62% / 0.3)" : "1px solid rgba(255,255,255,0.1)",
+      }}
+    >
+      {mediaSrc ? (
+        <video
+          src={mediaSrc}
+          controls
+          playsInline
+          preload="metadata"
+          style={{
+            width: "100%",
+            maxHeight: 260,
+            borderRadius: 10,
+            background: "#000",
+            display: "block",
+          }}
+        />
+      ) : (
+        <div style={{ padding: 24, textAlign: "center", color: "#888", fontSize: 12 }}>
+          <Film size={28} style={{ margin: "0 auto 8px", opacity: 0.5 }} />
+          <div>Vídeo do WhatsApp</div>
+        </div>
+      )}
+
+      {caption && (
+        <div style={{ padding: "6px 10px", fontSize: 12, color: "#eee", lineHeight: 1.4 }}>
+          {caption}
+        </div>
+      )}
+
+      {mediaSrc && (
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 10px 8px" }}>
+          <a
+            href={mediaSrc}
+            download="video-whatsapp.mp4"
+            style={{
+              fontSize: 10,
+              color: "#aaa",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#c4a3ff")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#aaa")}
+          >
+            <Download size={11} /> Baixar Vídeo
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WhatsAppImageViewer({
+  src,
+  caption,
+  isOutbound,
+  onOpenLightbox,
+}: {
+  src?: string | null;
+  caption?: string | null;
+  isOutbound: boolean;
+  onOpenLightbox: (src: string, caption?: string | null) => void;
+}) {
+  const mediaSrc = resolveMediaSrc(src);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        maxWidth: 300,
+      }}
+    >
+      {mediaSrc ? (
+        <div
+          onClick={() => onOpenLightbox(mediaSrc, caption)}
+          style={{
+            position: "relative",
+            borderRadius: 10,
+            overflow: "hidden",
+            cursor: "pointer",
+            background: "#0c0c10",
+            border: isOutbound ? "1px solid hsl(265 85% 62% / 0.3)" : "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          <img
+            src={mediaSrc}
+            alt={caption || "Foto enviada"}
+            style={{
+              width: "100%",
+              maxHeight: 260,
+              objectFit: "cover",
+              display: "block",
+              transition: "transform 0.2s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          />
+          <div
+            style={{
+              position: "absolute",
+              bottom: 6,
+              right: 6,
+              padding: "3px 6px",
+              borderRadius: 6,
+              background: "rgba(0,0,0,0.6)",
+              color: "#fff",
+              fontSize: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <Maximize2 size={10} /> Ampliar
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: 20, textAlign: "center", color: "#888", fontSize: 12 }}>
+          <ImageIcon size={28} style={{ margin: "0 auto 8px", opacity: 0.5 }} />
+          <div>Foto enviada via WhatsApp</div>
+        </div>
+      )}
+
+      {caption && (
+        <div style={{ fontSize: 12, color: "#eee", lineHeight: 1.4, padding: "2px 4px" }}>
+          {caption}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WhatsAppDocumentCard({
+  src,
+  filename,
+  size,
+  caption,
+  isOutbound,
+}: {
+  src?: string | null;
+  filename?: string | null;
+  size?: number | null;
+  caption?: string | null;
+  isOutbound: boolean;
+}) {
+  const mediaSrc = resolveMediaSrc(src);
+  const isPdf = filename?.toLowerCase().endsWith(".pdf") || caption?.toLowerCase().includes("pdf");
+  const isSheet = filename?.match(/\.(xlsx?|csv)$/i);
+  const isArchive = filename?.match(/\.(zip|rar|7z|tar|gz)$/i);
+  const safeName = filename || (isPdf ? "Documento.pdf" : "Arquivo");
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        minWidth: 240,
+        maxWidth: 320,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 14px",
+          background: isOutbound ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.35)",
+          borderRadius: 10,
+          border: isPdf
+            ? "1px solid rgba(239, 68, 68, 0.35)"
+            : isOutbound
+            ? "1px solid hsl(265 85% 62% / 0.3)"
+            : "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            background: isPdf
+              ? "rgba(239, 68, 68, 0.15)"
+              : isSheet
+              ? "rgba(16, 185, 129, 0.15)"
+              : isArchive
+              ? "rgba(245, 158, 11, 0.15)"
+              : "rgba(255,255,255,0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {isPdf ? (
+            <FileText size={20} color="#f87171" />
+          ) : isSheet ? (
+            <FileSpreadsheet size={20} color="#34d399" />
+          ) : isArchive ? (
+            <FileArchive size={20} color="#fbbf24" />
+          ) : (
+            <FileText size={20} color="#c4a3ff" />
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#fff",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={safeName}
+          >
+            {safeName}
+          </div>
+          <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
+            {isPdf ? "Documento PDF" : "Arquivo"} {formatFileSize(size)}
+          </div>
+        </div>
+
+        {mediaSrc && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <a
+              href={mediaSrc}
+              target="_blank"
+              rel="noreferrer"
+              title="Visualizar em nova aba"
+              style={{
+                padding: 6,
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.08)",
+                color: "#ddd",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                textDecoration: "none",
+              }}
+            >
+              <Eye size={14} />
+            </a>
+            <a
+              href={mediaSrc}
+              download={safeName}
+              title="Baixar arquivo"
+              style={{
+                padding: 6,
+                borderRadius: 6,
+                background: isPdf ? "rgba(239, 68, 68, 0.2)" : "rgba(255,255,255,0.08)",
+                color: isPdf ? "#fca5a5" : "#ddd",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                textDecoration: "none",
+              }}
+            >
+              <Download size={14} />
+            </a>
+          </div>
+        )}
+      </div>
+
+      {caption && (
+        <div style={{ fontSize: 12, color: "#eee", padding: "2px 4px", lineHeight: 1.4 }}>
+          {caption}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MonitoramentoPage() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
@@ -453,6 +1000,38 @@ export function MonitoramentoPage() {
   const [isMarkingPaid, setIsMarkingPaid] = useState<string | null>(null);
   const [isTogglingOptIn, setIsTogglingOptIn] = useState(false);
   const [showInvoiceSelector, setShowInvoiceSelector] = useState(false);
+
+  // Media Lightbox & Attachment States
+  const [lightboxImage, setLightboxImage] = useState<{ src: string; caption?: string | null } | null>(null);
+  const [selectedAttachment, setSelectedAttachment] = useState<{
+    file: File;
+    previewUrl: string;
+    type: "image" | "audio" | "video" | "document";
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSelectAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    let type: "image" | "audio" | "video" | "document" = "document";
+    if (file.type.startsWith("image/")) type = "image";
+    else if (file.type.startsWith("video/")) type = "video";
+    else if (file.type.startsWith("audio/")) type = "audio";
+
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedAttachment({ file, previewUrl, type });
+  };
+
+  const handleClearAttachment = () => {
+    if (selectedAttachment?.previewUrl) {
+      URL.revokeObjectURL(selectedAttachment.previewUrl);
+    }
+    setSelectedAttachment(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isPollingRef = useRef(false);
@@ -571,25 +1150,42 @@ export function MonitoramentoPage() {
     return conversations.find((c) => c.id === selectedTarget) || null;
   }, [conversations, selectedTarget]);
 
-  // Enviar mensagem manual
+  // Enviar mensagem manual (texto ou anexo de mídia)
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? messageInput).trim();
-    if (!text || !selectedTarget || isSending) return;
+    if ((!text && !selectedAttachment) || !selectedTarget || isSending) return;
 
     setIsSending(true);
     try {
-      const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/messages`, {
-        text,
-        transactionId: openTransactions[0]?.id ?? null,
-      });
+      if (selectedAttachment) {
+        const formData = new FormData();
+        formData.append("file", selectedAttachment.file);
+        if (text) {
+          formData.append("caption", text);
+        }
+        if (openTransactions[0]?.id) {
+          formData.append("transactionId", openTransactions[0].id);
+        }
 
-      if (res?.message) {
+        await API.postForm(`/whatsapp/monitoring/conversations/${selectedTarget}/send-media`, formData);
+        handleClearAttachment();
         setMessageInput("");
-        toast.success("Mensagem enviada via WhatsApp!");
-        await fetchMessages(selectedTarget, true);
-        await fetchConversations(false);
-        await fetchStats();
+        toast.success("Mídia enviada via WhatsApp!");
+      } else {
+        const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/messages`, {
+          text,
+          transactionId: openTransactions[0]?.id ?? null,
+        });
+
+        if (res?.message) {
+          setMessageInput("");
+          toast.success("Mensagem enviada via WhatsApp!");
+        }
       }
+
+      await fetchMessages(selectedTarget, true);
+      await fetchConversations(false);
+      await fetchStats();
     } catch (err: any) {
       toast.error(err.message || "Não foi possível enviar a mensagem.");
     } finally {
@@ -1589,8 +2185,61 @@ export function MonitoramentoPage() {
                             </span>
                           </div>
 
-                          {/* Message Body with WhatsApp Markup & Dedicated Pix Card */}
-                          <FormattedWhatsAppBody text={msg.body} amount={msg.transaction?.amount} />
+                          {/* Message Body, Media Player (Audio, Video, Photo, PDF, Document) or WhatsApp Markup */}
+                          {(() => {
+                            const isAudio = msg.mediaType === "audio" || msg.body?.includes("[Mensagem de Áudio]") || msg.body?.includes("[Áudio]");
+                            const isVideo = msg.mediaType === "video" || msg.body?.includes("[Vídeo]");
+                            const isImage = msg.mediaType === "image" || msg.body?.includes("[Foto]") || msg.body?.includes("[Imagem");
+                            const isDoc = msg.mediaType === "document" || msg.body?.includes("[Documento") || msg.body?.includes("[PDF");
+
+                            if (isAudio) {
+                              return (
+                                <WhatsAppAudioPlayer
+                                  src={msg.mediaUrl}
+                                  durationSec={msg.mediaDuration}
+                                  isOutbound={isOutbound}
+                                />
+                              );
+                            }
+
+                            if (isVideo) {
+                              const caption = msg.body && !msg.body.startsWith("[Vídeo]") ? msg.body : undefined;
+                              return (
+                                <WhatsAppVideoPlayer
+                                  src={msg.mediaUrl}
+                                  caption={caption}
+                                  isOutbound={isOutbound}
+                                />
+                              );
+                            }
+
+                            if (isImage) {
+                              const caption = msg.body && !msg.body.startsWith("[Foto]") && !msg.body.startsWith("[Imagem") ? msg.body : undefined;
+                              return (
+                                <WhatsAppImageViewer
+                                  src={msg.mediaUrl}
+                                  caption={caption}
+                                  isOutbound={isOutbound}
+                                  onOpenLightbox={(src, cap) => setLightboxImage({ src, caption: cap })}
+                                />
+                              );
+                            }
+
+                            if (isDoc) {
+                              const caption = msg.body && !msg.body.startsWith("[Documento") && !msg.body.startsWith("[PDF") ? msg.body : undefined;
+                              return (
+                                <WhatsAppDocumentCard
+                                  src={msg.mediaUrl}
+                                  filename={msg.mediaFilename}
+                                  size={msg.mediaSize}
+                                  caption={caption}
+                                  isOutbound={isOutbound}
+                                />
+                              );
+                            }
+
+                            return <FormattedWhatsAppBody text={msg.body} amount={msg.transaction?.amount} />;
+                          })()}
 
                           {/* Embedded Linked Transaction Card with Quick Mark-Paid Button */}
                           {msg.transaction && (
@@ -1730,6 +2379,69 @@ export function MonitoramentoPage() {
                   ))}
                 </div>
 
+                {/* Selected Attachment Preview Card */}
+                {selectedAttachment && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid hsl(265 85% 62% / 0.4)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      {selectedAttachment.type === "image" ? (
+                        <img
+                          src={selectedAttachment.previewUrl}
+                          alt="Preview"
+                          style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover" }}
+                        />
+                      ) : selectedAttachment.type === "video" ? (
+                        <div style={{ width: 36, height: 36, borderRadius: 6, background: "rgba(168, 85, 247, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#c4a3ff" }}>
+                          <Film size={18} />
+                        </div>
+                      ) : selectedAttachment.type === "audio" ? (
+                        <div style={{ width: 36, height: 36, borderRadius: 6, background: "rgba(16, 185, 129, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#34d399" }}>
+                          <Mic size={18} />
+                        </div>
+                      ) : (
+                        <div style={{ width: 36, height: 36, borderRadius: 6, background: "rgba(59, 130, 246, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#60a5fa" }}>
+                          <FileText size={18} />
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {selectedAttachment.file.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#888" }}>
+                          {formatFileSize(selectedAttachment.file.size)} • Pronto para enviar
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleClearAttachment}
+                      title="Remover anexo"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#aaa",
+                        cursor: "pointer",
+                        padding: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "#f87171")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "#aaa")}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+
                 {/* Main Input Textarea & Send button */}
                 <div
                   style={{
@@ -1742,9 +2454,46 @@ export function MonitoramentoPage() {
                     padding: "8px 12px",
                   }}
                 >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleSelectAttachment}
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
+                    style={{ display: "none" }}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Anexar foto, vídeo, áudio, PDF ou documento"
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 8,
+                      background: selectedAttachment ? "hsl(265 85% 62% / 0.25)" : "transparent",
+                      border: selectedAttachment ? "1px solid hsl(265 85% 62% / 0.5)" : "none",
+                      color: selectedAttachment ? "#c4a3ff" : "#888",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      transition: "all 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!selectedAttachment) e.currentTarget.style.color = "#c4a3ff";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!selectedAttachment) e.currentTarget.style.color = "#888";
+                    }}
+                  >
+                    <Paperclip size={18} />
+                  </button>
+
                   <textarea
                     rows={2}
-                    placeholder="Digite uma mensagem para o cliente (Nexus enviará via WhatsApp)..."
+                    placeholder={selectedAttachment ? "Adicione uma legenda opcional para a mídia..." : "Digite uma mensagem para o cliente (Nexus enviará via WhatsApp)..."}
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -1767,21 +2516,21 @@ export function MonitoramentoPage() {
 
                   <button
                     onClick={() => handleSendMessage()}
-                    disabled={!messageInput.trim() || isSending}
+                    disabled={(!messageInput.trim() && !selectedAttachment) || isSending}
                     style={{
                       width: 40,
                       height: 40,
                       borderRadius: 10,
-                      background: messageInput.trim()
+                      background: (messageInput.trim() || selectedAttachment)
                         ? "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 50%))"
                         : "#282832",
                       border: "none",
-                      color: messageInput.trim() ? "#fff" : "#666",
+                      color: (messageInput.trim() || selectedAttachment) ? "#fff" : "#666",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      cursor: messageInput.trim() && !isSending ? "pointer" : "not-allowed",
-                      boxShadow: messageInput.trim() ? "0 0 16px hsl(265 85% 62% / 0.4)" : "none",
+                      cursor: (messageInput.trim() || selectedAttachment) && !isSending ? "pointer" : "not-allowed",
+                      boxShadow: (messageInput.trim() || selectedAttachment) ? "0 0 16px hsl(265 85% 62% / 0.4)" : "none",
                       transition: "all 0.15s ease",
                       flexShrink: 0,
                     }}
@@ -2227,6 +2976,108 @@ export function MonitoramentoPage() {
                     <RefreshCw size={14} className={isReconnecting ? "animate-spin" : ""} />
                     {isReconnecting ? "Solicitando..." : "Gerar QR Code Agora"}
                   </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Lightbox Modal para Visualização de Imagens ─── */}
+      <AnimatePresence>
+        {lightboxImage && (
+          <div
+            onClick={() => setLightboxImage(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.88)",
+              backdropFilter: "blur(8px)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 200,
+              padding: 24,
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "90vw",
+                maxHeight: "85vh",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                position: "relative",
+              }}
+            >
+              <div style={{ alignSelf: "flex-end", display: "flex", gap: 10, marginBottom: 10 }}>
+                <a
+                  href={lightboxImage.src}
+                  download="imagem-whatsapp.jpg"
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.15)",
+                    color: "#fff",
+                    textDecoration: "none",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Download size={15} /> Baixar
+                </a>
+                <button
+                  onClick={() => setLightboxImage(null)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.15)",
+                    border: "none",
+                    color: "#fff",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <img
+                src={lightboxImage.src}
+                alt="Visualização"
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "75vh",
+                  borderRadius: 12,
+                  boxShadow: "0 25px 60px rgba(0,0,0,0.9)",
+                  objectFit: "contain",
+                }}
+              />
+
+              {lightboxImage.caption && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.6)",
+                    color: "#eee",
+                    fontSize: 13,
+                    maxWidth: "80%",
+                    textAlign: "center",
+                  }}
+                >
+                  {lightboxImage.caption}
                 </div>
               )}
             </motion.div>

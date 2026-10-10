@@ -116,6 +116,20 @@ export const API = {
     return handleResponse<T>(res);
   },
 
+  async postForm<T = any>(path: string, formData: FormData, options?: RequestInit): Promise<T> {
+    const url = resolveUrl(path);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeader(),
+        ...options?.headers,
+      },
+      body: formData,
+      ...options,
+    });
+    return handleResponse<T>(res);
+  },
+
   // Enable string coercion for backwards compatibility with `${API}/api/...`
   toString(): string {
     return API_BASE;

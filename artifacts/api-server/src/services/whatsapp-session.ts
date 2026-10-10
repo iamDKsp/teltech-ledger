@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import makeWASocket, { DisconnectReason, generateWAMessageFromContent, proto, type WASocket } from "@whiskeysockets/baileys";
+import fs from "node:fs/promises";
+import path from "node:path";
+import makeWASocket, {
+  DisconnectReason,
+  generateWAMessageFromContent,
+  proto,
+  type WASocket,
+  downloadMediaMessage,
+  downloadContentFromMessage,
+} from "@whiskeysockets/baileys";
 import { db, clientsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable, whatsappContactsTable, usersTable, workspaceMembersTable } from "@workspace/db";
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import pino from "pino";
@@ -180,6 +189,62 @@ export function unwrapMessage(msg: any): any {
   return msg;
 }
 
+export function extractMessageMediaInfo(rawMessage: any): {
+  type: "image" | "audio" | "video" | "document" | null;
+  mimetype: string | null;
+  filename: string | null;
+  caption: string | null;
+  seconds: number | null;
+  fileLength: number | null;
+} {
+  if (!rawMessage) return { type: null, mimetype: null, filename: null, caption: null, seconds: null, fileLength: null };
+  const message = unwrapMessage(rawMessage);
+  if (!message) return { type: null, mimetype: null, filename: null, caption: null, seconds: null, fileLength: null };
+
+  if (message.imageMessage) {
+    return {
+      type: "image",
+      mimetype: message.imageMessage.mimetype || "image/jpeg",
+      filename: null,
+      caption: message.imageMessage.caption?.trim() || null,
+      seconds: null,
+      fileLength: message.imageMessage.fileLength ? Number(message.imageMessage.fileLength) : null,
+    };
+  }
+  if (message.audioMessage) {
+    return {
+      type: "audio",
+      mimetype: message.audioMessage.mimetype || "audio/ogg; codecs=opus",
+      filename: null,
+      caption: null,
+      seconds: message.audioMessage.seconds ? Number(message.audioMessage.seconds) : null,
+      fileLength: message.audioMessage.fileLength ? Number(message.audioMessage.fileLength) : null,
+    };
+  }
+  if (message.videoMessage) {
+    return {
+      type: "video",
+      mimetype: message.videoMessage.mimetype || "video/mp4",
+      filename: null,
+      caption: message.videoMessage.caption?.trim() || null,
+      seconds: message.videoMessage.seconds ? Number(message.videoMessage.seconds) : null,
+      fileLength: message.videoMessage.fileLength ? Number(message.videoMessage.fileLength) : null,
+    };
+  }
+  if (message.documentMessage) {
+    const fn = message.documentMessage.fileName || "documento";
+    return {
+      type: "document",
+      mimetype: message.documentMessage.mimetype || "application/octet-stream",
+      filename: fn,
+      caption: message.documentMessage.caption?.trim() || null,
+      seconds: null,
+      fileLength: message.documentMessage.fileLength ? Number(message.documentMessage.fileLength) : null,
+    };
+  }
+  return { type: null, mimetype: null, filename: null, caption: null, seconds: null, fileLength: null };
+}
+
 export function extractMessageText(rawMessage: any): string | null {
   if (!rawMessage) return null;
   const message = unwrapMessage(rawMessage);
@@ -204,20 +269,23 @@ export function extractMessageText(rawMessage: any): string | null {
     return `📷 [Imagem]: ${message.imageMessage.caption.trim()}`;
   }
   if (message.imageMessage) {
-    return "📷 [Imagem / Comprovante de Pagamento]";
+    return "📷 [Imagem / Foto]";
   }
   if (typeof message.documentMessage?.caption === "string" && message.documentMessage.caption.trim()) {
-    return `📄 [Documento]: ${message.documentMessage.caption.trim()}`;
+    const fn = message.documentMessage.fileName || "Documento";
+    return `📄 [Documento: ${fn}] ${message.documentMessage.caption.trim()}`;
   }
   if (message.documentMessage) {
-    const filename = message.documentMessage.fileName || "Comprovante";
-    return `📄 [Documento / PDF: ${filename}]`;
+    const filename = message.documentMessage.fileName || "Documento";
+    return `📄 [Documento: ${filename}]`;
   }
   if (message.audioMessage) {
-    return "🎵 [Mensagem de Áudio]";
+    const sec = message.audioMessage.seconds ? ` (${message.audioMessage.seconds}s)` : "";
+    return `🎵 [Mensagem de Áudio${sec}]`;
   }
   if (message.videoMessage) {
-    return "🎥 [Vídeo]";
+    const caption = message.videoMessage.caption ? `: ${message.videoMessage.caption.trim()}` : "";
+    return `🎥 [Vídeo${caption}]`;
   }
   if (message.stickerMessage) {
     return "💟 [Figurinha]";
@@ -229,6 +297,104 @@ export function extractMessageText(rawMessage: any): string | null {
     return "📍 [Localização]";
   }
   return null;
+}
+
+export async function downloadAndStoreMedia(
+  workspaceId: string,
+  session: Session,
+  item: any,
+  mediaInfo: ReturnType<typeof extractMessageMediaInfo>
+): Promise<{
+  mediaUrl: string | null;
+  mediaType: string | null;
+  mediaMimeType: string | null;
+  mediaFilename: string | null;
+  mediaSize: number | null;
+  mediaDuration: number | null;
+}> {
+  if (!mediaInfo.type) {
+    return {
+      mediaUrl: null,
+      mediaType: null,
+      mediaMimeType: null,
+      mediaFilename: null,
+      mediaSize: null,
+      mediaDuration: null,
+    };
+  }
+
+  const message = unwrapMessage(item.message);
+  let ext = "bin";
+  if (mediaInfo.type === "image") {
+    ext = mediaInfo.mimetype?.includes("png") ? "png" : (mediaInfo.mimetype?.includes("webp") ? "webp" : "jpg");
+  } else if (mediaInfo.type === "audio") {
+    ext = mediaInfo.mimetype?.includes("mp4") ? "m4a" : "ogg";
+  } else if (mediaInfo.type === "video") {
+    ext = "mp4";
+  } else if (mediaInfo.type === "document") {
+    if (mediaInfo.filename && mediaInfo.filename.includes(".")) {
+      ext = mediaInfo.filename.split(".").pop() || "bin";
+    } else if (mediaInfo.mimetype?.includes("pdf")) {
+      ext = "pdf";
+    }
+  }
+
+  const waId = item.key?.id || randomUUID();
+  const safeFilename = mediaInfo.filename || `${mediaInfo.type}_${waId.slice(0, 8)}.${ext}`;
+  const diskFilename = `${waId}.${ext}`;
+  const uploadDir = path.join(process.cwd(), "public", "uploads", "whatsapp-media", workspaceId);
+  const diskPath = path.join(uploadDir, diskFilename);
+
+  let buffer: Buffer | null = null;
+
+  try {
+    await fs.mkdir(uploadDir, { recursive: true });
+
+    // Try downloading via Baileys downloadMediaMessage
+    try {
+      buffer = (await downloadMediaMessage(
+        item,
+        "buffer",
+        {},
+        {
+          logger: baileysLogger,
+          reuploadRequest: session.socket.updateMediaMessage,
+        }
+      )) as Buffer;
+    } catch {
+      // Fallback via downloadContentFromMessage
+      const mediaMsg = message?.imageMessage || message?.audioMessage || message?.videoMessage || message?.documentMessage;
+      if (mediaMsg) {
+        const stream = await downloadContentFromMessage(mediaMsg, mediaInfo.type as any);
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        buffer = Buffer.concat(chunks);
+      }
+    }
+
+    if (buffer && buffer.length > 0) {
+      await fs.writeFile(diskPath, buffer);
+      return {
+        mediaUrl: `/uploads/whatsapp-media/${workspaceId}/${diskFilename}`,
+        mediaType: mediaInfo.type,
+        mediaMimeType: mediaInfo.mimetype,
+        mediaFilename: safeFilename,
+        mediaSize: buffer.length,
+        mediaDuration: mediaInfo.seconds,
+      };
+    }
+  } catch (err) {
+    logger.warn({ err, workspaceId, waId }, "Could not download WhatsApp media buffer");
+  }
+
+  return {
+    mediaUrl: null,
+    mediaType: mediaInfo.type,
+    mediaMimeType: mediaInfo.mimetype,
+    mediaFilename: safeFilename,
+    mediaSize: mediaInfo.fileLength,
+    mediaDuration: mediaInfo.seconds,
+  };
 }
 
 async function processIncomingMessages(workspaceId: string, session: Session, messages: any[]): Promise<void> {
@@ -339,6 +505,9 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         ? new Date(Number(item.messageTimestamp) * 1000)
         : new Date();
 
+      const mediaInfo = extractMessageMediaInfo(item.message);
+      const mediaResult = await downloadAndStoreMedia(workspaceId, session, item, mediaInfo);
+
       if (isFromMe) {
         // Record outbound messages sent from physical mobile phone
         await db.insert(whatsappMessagesTable).values({
@@ -352,6 +521,12 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           senderName: "Operador (Celular)",
           direction: "outbound",
           body: text,
+          mediaType: mediaResult.mediaType,
+          mediaUrl: mediaResult.mediaUrl,
+          mediaMimeType: mediaResult.mediaMimeType,
+          mediaFilename: mediaResult.mediaFilename,
+          mediaSize: mediaResult.mediaSize,
+          mediaDuration: mediaResult.mediaDuration,
           status: "sent",
           isRead: true,
           sentAt,
@@ -371,13 +546,26 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           senderName: resolvedSenderName,
           direction: "inbound",
           body: text,
+          mediaType: mediaResult.mediaType,
+          mediaUrl: mediaResult.mediaUrl,
+          mediaMimeType: mediaResult.mediaMimeType,
+          mediaFilename: mediaResult.mediaFilename,
+          mediaSize: mediaResult.mediaSize,
+          mediaDuration: mediaResult.mediaDuration,
           status: "received",
           isRead: false,
           sentAt,
           waMessageId: item.key?.id ?? null,
         }).onConflictDoNothing();
 
-        logger.info({ workspaceId, sender: canonicalSender || jidClean, contactName: resolvedSenderName, isPartner, body: text.slice(0, 50) }, "WhatsApp incoming message recorded");
+        logger.info({
+          workspaceId,
+          sender: canonicalSender || jidClean,
+          contactName: resolvedSenderName,
+          isPartner,
+          mediaType: mediaResult.mediaType,
+          body: text.slice(0, 50),
+        }, "WhatsApp incoming message recorded");
       }
     } catch (err) {
       logger.error({ err, workspaceId, jidClean }, "Failed to persist WhatsApp message from messages.upsert");
@@ -805,5 +993,121 @@ export async function sendManualTextMessage(
   }
 
   return created;
+}
+
+export async function sendManualMediaMessage(
+  workspaceId: string,
+  recipient: string,
+  media: {
+    buffer: Buffer;
+    mimetype: string;
+    filename?: string;
+    caption?: string;
+    mediaType: "image" | "audio" | "video" | "document";
+  },
+  options?: { clientId?: string | null; transactionId?: string | null; senderName?: string }
+): Promise<typeof whatsappMessagesTable.$inferSelect> {
+  const session = connectedSession(workspaceId);
+  const phone = normalizeWhatsAppPhone(recipient);
+  if (!phone) throw new Error("Telefone de destino inválido");
+
+  const messageId = randomUUID();
+  const id = stableMessageId(messageId);
+  const target = await resolveDestinationJid(session, phone);
+
+  // Save to public/uploads/whatsapp-media/${workspaceId}
+  const uploadDir = path.join(process.cwd(), "public", "uploads", "whatsapp-media", workspaceId);
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  let ext = "bin";
+  if (media.mediaType === "image") {
+    ext = media.mimetype.includes("png") ? "png" : (media.mimetype.includes("webp") ? "webp" : "jpg");
+  } else if (media.mediaType === "audio") {
+    ext = media.mimetype.includes("mp4") ? "m4a" : "ogg";
+  } else if (media.mediaType === "video") {
+    ext = "mp4";
+  } else if (media.mediaType === "document") {
+    if (media.filename && media.filename.includes(".")) {
+      ext = media.filename.split(".").pop() || "bin";
+    } else if (media.mimetype.includes("pdf")) {
+      ext = "pdf";
+    }
+  }
+
+  const diskFilename = `${id}.${ext}`;
+  const diskPath = path.join(uploadDir, diskFilename);
+  await fs.writeFile(diskPath, media.buffer);
+  const mediaUrl = `/uploads/whatsapp-media/${workspaceId}/${diskFilename}`;
+
+  let sent: any;
+  if (media.mediaType === "image") {
+    sent = await session.socket.sendMessage(target, {
+      image: media.buffer,
+      caption: media.caption || undefined,
+      mimetype: media.mimetype,
+    }, { messageId: id });
+  } else if (media.mediaType === "audio") {
+    sent = await session.socket.sendMessage(target, {
+      audio: media.buffer,
+      mimetype: media.mimetype || "audio/mp4",
+      ptt: true,
+    }, { messageId: id });
+  } else if (media.mediaType === "video") {
+    sent = await session.socket.sendMessage(target, {
+      video: media.buffer,
+      caption: media.caption || undefined,
+      mimetype: media.mimetype || "video/mp4",
+    }, { messageId: id });
+  } else {
+    sent = await session.socket.sendMessage(target, {
+      document: media.buffer,
+      mimetype: media.mimetype,
+      fileName: media.filename || "documento.pdf",
+      caption: media.caption || undefined,
+    }, { messageId: id });
+  }
+
+  const waMessageId = sent?.key?.id ?? id;
+  const dedupeKey = `outbound:${workspaceId}:${waMessageId}`;
+
+  let body = media.caption || "";
+  if (!body) {
+    if (media.mediaType === "image") body = "📷 [Imagem / Foto]";
+    else if (media.mediaType === "audio") body = "🎵 [Mensagem de Áudio]";
+    else if (media.mediaType === "video") body = "🎥 [Vídeo]";
+    else body = `📄 [Documento: ${media.filename || "arquivo"}]`;
+  }
+
+  const [created] = await db.insert(whatsappMessagesTable).values({
+    id: messageId,
+    workspaceId,
+    clientId: options?.clientId ?? null,
+    transactionId: options?.transactionId ?? null,
+    dedupeKey,
+    kind: "manual_chat",
+    recipient: phone,
+    senderPhone: session.phone ?? null,
+    senderName: options?.senderName ?? "Operador (Celular)",
+    direction: "outbound",
+    body,
+    mediaType: media.mediaType,
+    mediaUrl,
+    mediaMimeType: media.mimetype,
+    mediaFilename: media.filename || diskFilename,
+    mediaSize: media.buffer.length,
+    status: "sent",
+    isRead: true,
+    sentAt: new Date(),
+    waMessageId,
+  }).onConflictDoNothing().returning();
+
+  if (!created) {
+    const [existing] = await db.select().from(whatsappMessagesTable)
+      .where(and(eq(whatsappMessagesTable.workspaceId, workspaceId), eq(whatsappMessagesTable.waMessageId, waMessageId)))
+      .limit(1);
+    if (existing) return existing;
+  }
+
+  return created!;
 }
 

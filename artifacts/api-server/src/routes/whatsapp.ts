@@ -1,4 +1,7 @@
 import { Router, type IRouter } from "express";
+import fs from "node:fs/promises";
+import path from "node:path";
+import multer from "multer";
 import {
   db,
   clientsTable,
@@ -24,6 +27,7 @@ import {
   normalizeWhatsAppPhoneList,
   phonesMatch,
   sendManualTextMessage,
+  sendManualMediaMessage,
 } from "../services/whatsapp-session";
 import { sendTestMessage, TestSendError } from "../services/whatsapp-test";
 import {
@@ -38,6 +42,22 @@ import { detectPixKeyType, normalizePixKey, PIX_KEY_TYPE_LABEL } from "../lib/pi
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 64 * 1024 * 1024 }, // 64MB max
+});
+
+// Auto-ensure WhatsApp media columns exist in PostgreSQL
+void db.execute(sql`
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime_type TEXT;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+  CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_media_type ON whatsapp_messages (media_type);
+`).catch((err) => logger.warn({ err }, "WhatsApp media columns migration check warning"));
 const ADMIN_ROLES = ["owner", "admin", "ceo", "cto", "cmo", "member"];
 router.use(requireAuth, requireWorkspace, requireRole(ADMIN_ROLES));
 
@@ -1030,6 +1050,10 @@ router.get("/monitoring/conversations", async (req, res) => {
           kind: lastMessage.kind,
           status: lastMessage.status,
           senderName: lastMessage.senderName,
+          mediaType: lastMessage.mediaType,
+          mediaUrl: lastMessage.mediaUrl,
+          mediaFilename: lastMessage.mediaFilename,
+          mediaDuration: lastMessage.mediaDuration,
         } : null,
         totalMessages: msgs.length,
         inboundCount,
@@ -1294,6 +1318,49 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
   }
 });
 
+async function resolveTargetDestination(wsId: string, target: string): Promise<{ clientId: string | null; destinationPhone: string | null }> {
+  const cleanTarget = target.startsWith("client:") ? target.replace("client:", "")
+    : target.startsWith("partner:") ? target.replace("partner:", "")
+    : target.startsWith("phone:") ? target.replace("phone:", "")
+    : target;
+
+  const isUuid = z.string().uuid().safeParse(cleanTarget).success;
+  let clientId: string | null = null;
+  let destinationPhone: string | null = null;
+
+  if (isUuid) {
+    const [client] = await db.select().from(clientsTable)
+      .where(and(eq(clientsTable.id, cleanTarget), eq(clientsTable.workspaceId, wsId))).limit(1);
+    if (client) {
+      clientId = client.id;
+      destinationPhone = canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone);
+    } else {
+      const [contact] = await db.select().from(whatsappContactsTable)
+        .where(and(eq(whatsappContactsTable.id, cleanTarget), eq(whatsappContactsTable.workspaceId, wsId))).limit(1);
+      if (contact) {
+        destinationPhone = canonicalBrazilianPhone(contact.phone) || normalizeWhatsAppPhone(contact.phone);
+      } else {
+        const [member] = await db.select().from(usersTable)
+          .where(eq(usersTable.id, cleanTarget)).limit(1);
+        if (member?.phone) {
+          destinationPhone = canonicalBrazilianPhone(member.phone) || normalizeWhatsAppPhone(member.phone);
+        }
+      }
+    }
+  } else {
+    destinationPhone = canonicalBrazilianPhone(cleanTarget) || normalizeWhatsAppPhone(cleanTarget);
+    if (destinationPhone) {
+      const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
+      const matched = allClients.find(c => phonesMatch(c.phone, destinationPhone));
+      if (matched) {
+        clientId = matched.id;
+      }
+    }
+  }
+
+  return { clientId, destinationPhone };
+}
+
 router.post("/monitoring/conversations/:target/messages", async (req, res) => {
   const wsId = workspaceId(req);
   const target = req.params.target;
@@ -1308,44 +1375,7 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
   }
 
   try {
-    const cleanTarget = target.startsWith("client:") ? target.replace("client:", "")
-      : target.startsWith("partner:") ? target.replace("partner:", "")
-      : target.startsWith("phone:") ? target.replace("phone:", "")
-      : target;
-
-    const isUuid = z.string().uuid().safeParse(cleanTarget).success;
-    let clientId: string | null = null;
-    let destinationPhone: string | null = null;
-
-    if (isUuid) {
-      const [client] = await db.select().from(clientsTable)
-        .where(and(eq(clientsTable.id, cleanTarget), eq(clientsTable.workspaceId, wsId))).limit(1);
-      if (client) {
-        clientId = client.id;
-        destinationPhone = canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone);
-      } else {
-        const [contact] = await db.select().from(whatsappContactsTable)
-          .where(and(eq(whatsappContactsTable.id, cleanTarget), eq(whatsappContactsTable.workspaceId, wsId))).limit(1);
-        if (contact) {
-          destinationPhone = canonicalBrazilianPhone(contact.phone) || normalizeWhatsAppPhone(contact.phone);
-        } else {
-          const [member] = await db.select().from(usersTable)
-            .where(eq(usersTable.id, cleanTarget)).limit(1);
-          if (member?.phone) {
-            destinationPhone = canonicalBrazilianPhone(member.phone) || normalizeWhatsAppPhone(member.phone);
-          }
-        }
-      }
-    } else {
-      destinationPhone = canonicalBrazilianPhone(cleanTarget) || normalizeWhatsAppPhone(cleanTarget);
-      if (destinationPhone) {
-        const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
-        const matched = allClients.find(c => phonesMatch(c.phone, destinationPhone));
-        if (matched) {
-          clientId = matched.id;
-        }
-      }
-    }
+    const { clientId, destinationPhone } = await resolveTargetDestination(wsId, target);
 
     if (!destinationPhone) {
       res.status(400).json({ error: "Número de telefone de destino inválido ou contato sem telefone cadastrado" });
@@ -1353,7 +1383,7 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
     }
 
     const settings = await readSettings(wsId);
-    const senderName = settings?.assistantName || "Nexus";
+    const senderName = "Operador (Celular)";
 
     const created = await sendManualTextMessage(wsId, destinationPhone, parsed.data.text, {
       clientId,
@@ -1367,6 +1397,93 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
     const status = message === "WhatsApp não conectado" ? 409 : 500;
     if (status === 500) logger.error({ err: error, workspaceId: wsId }, "Send manual WhatsApp message failed");
     res.status(status).json({ error: message });
+  }
+});
+
+router.post("/monitoring/conversations/:target/send-media", mediaUpload.single("file"), async (req, res) => {
+  const wsId = workspaceId(req);
+  const target = String(req.params.target);
+  const file = req.file;
+
+  if (!file) {
+    res.status(400).json({ error: "Arquivo de mídia não informado" });
+    return;
+  }
+
+  const caption = typeof req.body.caption === "string" ? req.body.caption.trim() : undefined;
+  const transactionId = typeof req.body.transactionId === "string" && z.string().uuid().safeParse(req.body.transactionId).success
+    ? req.body.transactionId
+    : null;
+
+  try {
+    const { clientId, destinationPhone } = await resolveTargetDestination(wsId, target);
+
+    if (!destinationPhone) {
+      res.status(400).json({ error: "Número de telefone de destino inválido ou contato sem telefone cadastrado" });
+      return;
+    }
+
+    let mediaType: "image" | "audio" | "video" | "document" = "document";
+    if (file.mimetype.startsWith("image/")) {
+      mediaType = "image";
+    } else if (file.mimetype.startsWith("audio/")) {
+      mediaType = "audio";
+    } else if (file.mimetype.startsWith("video/")) {
+      mediaType = "video";
+    }
+
+    const senderName = "Operador (Celular)";
+
+    const created = await sendManualMediaMessage(wsId, destinationPhone, {
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      filename: file.originalname,
+      caption,
+      mediaType,
+    }, {
+      clientId,
+      transactionId,
+      senderName,
+    });
+
+    res.status(201).json({ ok: true, message: created });
+  } catch (error: any) {
+    const message = error instanceof Error ? error.message : "Falha ao enviar arquivo pelo WhatsApp";
+    const status = message === "WhatsApp não conectado" ? 409 : 500;
+    if (status === 500) logger.error({ err: error, workspaceId: wsId, target }, "Send WhatsApp media message failed");
+    res.status(status).json({ error: message });
+  }
+});
+
+router.get("/monitoring/media/:messageId", async (req, res) => {
+  const wsId = workspaceId(req);
+  const messageId = String(req.params.messageId);
+
+  try {
+    const [msg] = await db.select().from(whatsappMessagesTable)
+      .where(and(eq(whatsappMessagesTable.workspaceId, wsId), eq(whatsappMessagesTable.id, messageId)))
+      .limit(1);
+
+    if (!msg || !msg.mediaUrl) {
+      res.status(404).json({ error: "Mídia não encontrada para esta mensagem" });
+      return;
+    }
+
+    const relPath = msg.mediaUrl.replace(/^\/uploads\//, "");
+    const absPath = path.join(process.cwd(), "public", "uploads", relPath);
+
+    try {
+      await fs.access(absPath);
+      if (msg.mediaMimeType) {
+        res.setHeader("Content-Type", msg.mediaMimeType);
+      }
+      res.sendFile(absPath);
+    } catch {
+      res.status(404).json({ error: "Arquivo de mídia não encontrado no disco" });
+    }
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId, messageId }, "Serve WhatsApp media failed");
+    res.status(500).json({ error: "Falha ao carregar mídia" });
   }
 });
 
