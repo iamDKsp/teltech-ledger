@@ -11,6 +11,7 @@ import {
   financialCategoriesTable,
   workspaceMembersTable,
   usersTable,
+  financialAccountsTable,
 } from "@workspace/db";
 import { eq, and, or, sql, inArray, desc, gte, lte } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
@@ -228,8 +229,8 @@ router.get("/team/performance", requireAuth, async (req: Request, res: Response)
     const startDate = new Date(Date.UTC(reqYear, reqMonth - 1, 1, 0, 0, 0));
     const endDate = new Date(Date.UTC(reqYear, reqMonth, 0, 23, 59, 59));
 
-    // Carregar membros ativos, vendas do período e transações geradas para folha
-    const [members, sales, existingPayoutTxs] = await Promise.all([
+    // Carregar membros ativos, vendas do período, transações geradas para folha e contas bancárias ativas
+    const [members, sales, existingPayoutTxs, accounts] = await Promise.all([
       db
         .select()
         .from(teamMembersTable)
@@ -261,6 +262,10 @@ router.get("/team/performance", requireAuth, async (req: Request, res: Response)
             eq(financialTransactionsTable.type, "outflow")
           )
         ),
+      db
+        .select()
+        .from(financialAccountsTable)
+        .where(and(eq(financialAccountsTable.workspaceId, workspaceId), eq(financialAccountsTable.isActive, true))),
     ]);
 
     // Carregar itens das vendas do mês para calcular as 1ªs parcelas e valores de projeto
@@ -430,6 +435,19 @@ router.get("/team/performance", requireAuth, async (req: Request, res: Response)
     const totalRealizedPayroll = totalFixedSalaries + totalFirstInstallmentCommissions + totalProjectCommissions + totalTargetBonusesUnlocked;
     const totalMaxProjectedPayroll = totalRealizedPayroll + totalTargetBonusesAtRisk;
 
+    // Métricas de Caixa vs. Provisão Máxima
+    const currentCash = accounts.reduce((acc, a) => acc + (a.currentBalance || 0), 0);
+    const cashAfterMaxPayroll = currentCash - totalMaxProjectedPayroll;
+    const cashCoverageRatio = totalMaxProjectedPayroll > 0 ? Number((currentCash / totalMaxProjectedPayroll).toFixed(2)) : null;
+    const cashCommitmentPercent = currentCash > 0 ? Math.min(100, Math.round((totalMaxProjectedPayroll / currentCash) * 100)) : (totalMaxProjectedPayroll > 0 ? 100 : 0);
+    const accountsBreakdown = accounts.map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: a.type,
+      color: a.color,
+      currentBalance: a.currentBalance,
+    }));
+
     res.json({
       period: {
         month: reqMonth,
@@ -447,6 +465,11 @@ router.get("/team/performance", requireAuth, async (req: Request, res: Response)
         totalClientsClosed,
         activeMembersCount: members.length,
         membersHittingTargetCount,
+        currentCash,
+        cashAfterMaxPayroll,
+        cashCoverageRatio,
+        cashCommitmentPercent,
+        accountsBreakdown,
       },
       performance: performanceList,
     });

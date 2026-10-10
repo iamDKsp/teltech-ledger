@@ -125,6 +125,9 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
       : "Tentativa anterior não foi enviada; revise o histórico e tente novamente amanhã";
     return { ok: false, reason, conflict: true, message };
   }
+  if (inserted) {
+    triggerImmediateWorker();
+  }
   return { ok: true, message, created: Boolean(inserted) };
 }
 
@@ -485,6 +488,10 @@ async function scheduleTick(): Promise<void> {
   } finally {
     schedulerBusy = false;
   }
+}
+
+export function triggerImmediateWorker(): void {
+  void processNextMessage().catch((error) => logger.error({ err: error }, "WhatsApp immediate outbox worker failed"));
 }
 
 export async function startWhatsAppAutomation(): Promise<void> {

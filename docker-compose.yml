@@ -30,6 +30,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
+      INBOUND_WEBHOOK_INTEGRATIONS: ${INBOUND_WEBHOOK_INTEGRATIONS:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-teltech}:${POSTGRES_PASSWORD:-teltech_secure_password_2026}@db:5432/${POSTGRES_DB:-teltech_ledger}
       JWT_SECRET: ${JWT_SECRET:-teltech-leadge-prod-secret-2026}
       WHATSAPP_SESSION_KEY: ${WHATSAPP_SESSION_KEY:-973871a19f10a6bfe9b0654f88ddb51f13ef9bc30b79db3c7b4ff359a2692840}

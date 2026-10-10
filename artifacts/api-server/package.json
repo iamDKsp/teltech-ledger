@@ -9,7 +9,8 @@
     "start": "set PORT=5000 && node --env-file=../../.env --enable-source-maps ./dist/index.mjs",
     "start:prod": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "esbuild src/__tests__/sales-schedule.test.ts src/__tests__/whatsapp-messages.test.ts --bundle --platform=node --format=esm --outdir=dist/tests --out-extension:.js=.mjs --log-level=error && node --test dist/tests/sales-schedule.test.mjs dist/tests/whatsapp-messages.test.mjs"
+    "test": "node ../../scripts/build-api-tests.mjs && node --test dist/tests/*.test.mjs",
+    "test:webhook-db": "node ../../scripts/build-api-tests.mjs && node --test dist/tests/inbound-webhooks-db.test.mjs"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

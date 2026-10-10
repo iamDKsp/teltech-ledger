@@ -24,6 +24,13 @@ import {
   AlertCircle,
   HelpCircle,
   FileText,
+  ChevronRight,
+  QrCode,
+  X,
+  CreditCard,
+  CheckCircle2,
+  SlidersHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../lib/api";
@@ -82,6 +89,16 @@ interface ChatMessage {
   } | null;
 }
 
+interface FinancialTransactionItem {
+  id: string;
+  amount: number;
+  dueDate: string;
+  description: string;
+  status: "pending" | "paid" | "canceled";
+  paidAt?: string | null;
+  type: string;
+}
+
 interface MonitoringStats {
   status: {
     status: "connecting" | "qr" | "connected" | "disconnected";
@@ -89,6 +106,7 @@ interface MonitoringStats {
     configured: boolean;
     paired: boolean;
     phone: string | null;
+    qr?: string | null;
   };
   totalConversations: number;
   totalSent: number;
@@ -132,6 +150,9 @@ function formatPhoneDisplay(raw: string): string {
   if (digits.length === 11) {
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
   return raw;
 }
 
@@ -143,15 +164,249 @@ function kindBadge(kind: string): { label: string; color: string } {
       return { label: "Vence Hoje", color: "#F59E0B" };
     case "after_due":
       return { label: "Aviso de Atraso", color: "#EF4444" };
+    case "payment_receipt":
     case "receipt":
-      return { label: "Comprovante", color: "#10B981" };
+      return { label: "Comprovante / Quitação", color: "#10B981" };
     case "client_reply":
       return { label: "Resposta do Cliente", color: "#10B981" };
     case "manual_chat":
-      return { label: "Chat Direto", color: "#7C5AC2" };
+      return { label: "Chat Direto", color: "#8B5CF6" };
+    case "manual_billing":
+      return { label: "Cobrança Manual", color: "#A855F7" };
     default:
       return { label: "Notificação", color: "#8B5CF6" };
   }
+}
+
+/**
+ * Subcomponent to render rich WhatsApp message text (bold, italic, links, emojis)
+ * and isolate Pix Copia e Cola codes into an interactive card.
+ */
+function FormattedWhatsAppBody({ text, amount }: { text: string; amount?: number | null }) {
+  // Regex to extract Brazilian BR Code Pix: starts with 000201...
+  const pixRegex = /(000201[0-9]{2}[0-9A-Za-z.+_\-]{30,})/;
+  const match = text.match(pixRegex);
+  const pixCode = match ? match[1] : null;
+
+  // Clean the text to avoid repeating the huge code
+  let cleanText = text;
+  if (pixCode) {
+    cleanText = cleanText
+      .replace(pixCode, "")
+      .replace(/Pix Copia e Cola:?/gi, "")
+      .trim();
+  }
+
+  // Parse basic WhatsApp markup (*bold*, _italic_, ~strike~)
+  const renderFormatted = (raw: string) => {
+    const lines = raw.split("\n");
+    return lines.map((line, lineIdx) => {
+      // Bold regex: \*([^*]+)\*
+      // Italic regex: _([^_]+)_
+      const parts = line.split(/(\*[^*]+\*|_[^_]+_)/g);
+      return (
+        <div key={lineIdx} style={{ minHeight: line === "" ? "0.8em" : undefined }}>
+          {parts.map((part, partIdx) => {
+            if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+              return (
+                <strong key={partIdx} style={{ fontWeight: 700, color: "#fff" }}>
+                  {part.slice(1, -1)}
+                </strong>
+              );
+            }
+            if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+              return (
+                <em key={partIdx} style={{ fontStyle: "italic", color: "#aaa" }}>
+                  {part.slice(1, -1)}
+                </em>
+              );
+            }
+            return <span key={partIdx}>{part}</span>;
+          })}
+        </div>
+      );
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 13, color: "#eaeaf0", lineHeight: 1.55, wordBreak: "break-word" }}>
+        {renderFormatted(cleanText)}
+      </div>
+
+      {pixCode && <PixPaymentCard pixCode={pixCode} amount={amount} />}
+    </div>
+  );
+}
+
+/**
+ * Dedicated Interactive Pix Card with 1-click copy, QR code expander, and visual status.
+ */
+function PixPaymentCard({ pixCode, amount }: { pixCode: string; amount?: number | null }) {
+  const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(pixCode);
+    setCopied(true);
+    toast.success("Código Pix Copia e Cola copiado com sucesso!");
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  // Safe fallback QR server URL
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(pixCode)}`;
+
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        padding: "12px 14px",
+        borderRadius: 12,
+        background: "linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(16, 185, 129, 0.08))",
+        border: "1px solid hsl(265 85% 62% / 0.4)",
+        boxShadow: "0 4px 18px -4px rgba(139, 92, 246, 0.25)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 6,
+              background: "hsl(265 85% 62% / 0.3)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#c4a3ff",
+            }}
+          >
+            <CreditCard size={14} />
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#e4d4ff" }}>Pix Copia e Cola</span>
+        </div>
+
+        {amount && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: 6,
+              background: "hsl(152 65% 45% / 0.2)",
+              border: "1px solid hsl(152 65% 45% / 0.4)",
+              color: "hsl(152 65% 60%)",
+            }}
+          >
+            {formatCents(amount)}
+          </span>
+        )}
+      </div>
+
+      {/* Code Snippet Box */}
+      <div
+        style={{
+          background: "#121217",
+          border: "1px solid #2a2a36",
+          borderRadius: 8,
+          padding: "8px 10px",
+          fontFamily: "monospace",
+          fontSize: 11,
+          color: "#9ca3af",
+          maxHeight: 50,
+          overflowY: "auto",
+          wordBreak: "break-all",
+          userSelect: "all",
+          marginBottom: 10,
+        }}
+      >
+        {pixCode}
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          onClick={handleCopy}
+          style={{
+            flex: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            padding: "7px 12px",
+            borderRadius: 8,
+            background: copied
+              ? "linear-gradient(135deg, hsl(152 65% 45%), hsl(152 65% 38%))"
+              : "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
+            border: "none",
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+            boxShadow: copied ? "0 0 12px hsl(152 65% 45% / 0.4)" : "0 0 14px hsl(265 85% 62% / 0.35)",
+          }}
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+          {copied ? "Copiado!" : "Copiar Código Pix"}
+        </button>
+
+        <button
+          onClick={() => setShowQr(!showQr)}
+          title="Exibir QR Code para leitura por celular"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            padding: "7px 10px",
+            borderRadius: 8,
+            background: showQr ? "#322744" : "#202028",
+            border: "1px solid #363645",
+            color: showQr ? "#c4a3ff" : "#bbb",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <QrCode size={14} />
+          {showQr ? "Ocultar QR" : "Ver QR Code"}
+        </button>
+      </div>
+
+      {/* Expandable QR Code */}
+      <AnimatePresence>
+        {showQr && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            style={{
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              paddingTop: 12,
+            }}
+          >
+            <div
+              style={{
+                padding: 10,
+                background: "#fff",
+                borderRadius: 12,
+                boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
+              }}
+            >
+              <img src={qrUrl} alt="QR Code Pix" style={{ width: 170, height: 170, display: "block" }} />
+            </div>
+            <span style={{ fontSize: 10, color: "#888", marginTop: 6 }}>
+              Aponte o app do banco para pagar instantaneamente
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 export function MonitoramentoPage() {
@@ -159,7 +414,8 @@ export function MonitoramentoPage() {
   const [stats, setStats] = useState<MonitoringStats | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [openTransactions, setOpenTransactions] = useState<any[]>([]);
+  const [openTransactions, setOpenTransactions] = useState<FinancialTransactionItem[]>([]);
+  const [allTransactions, setAllTransactions] = useState<FinancialTransactionItem[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
 
   const [search, setSearch] = useState("");
@@ -169,6 +425,14 @@ export function MonitoramentoPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isTriggeringBilling, setIsTriggeringBilling] = useState(false);
+
+  // New Drawer & Reconnection Modal States
+  const [showClientDrawer, setShowClientDrawer] = useState(false);
+  const [showReconnectModal, setShowReconnectModal] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isMarkingPaid, setIsMarkingPaid] = useState<string | null>(null);
+  const [isTogglingOptIn, setIsTogglingOptIn] = useState(false);
+  const [showInvoiceSelector, setShowInvoiceSelector] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isPollingRef = useRef(false);
@@ -209,12 +473,14 @@ export function MonitoramentoPage() {
       const res = await API.get<{
         messages: ChatMessage[];
         client: any;
-        openTransactions: any[];
+        openTransactions: FinancialTransactionItem[];
+        allTransactions?: FinancialTransactionItem[];
       }>(`/whatsapp/monitoring/conversations/${target}/messages`);
 
       setMessages(res?.messages ?? []);
       setSelectedClient(res?.client ?? null);
       setOpenTransactions(res?.openTransactions ?? []);
+      setAllTransactions(res?.allTransactions ?? res?.openTransactions ?? []);
     } catch (err) {
       console.error("Falha ao carregar mensagens da conversa", err);
     } finally {
@@ -222,7 +488,7 @@ export function MonitoramentoPage() {
     }
   }, []);
 
-  // Inicialização e Polling em background a cada 6s
+  // Polling em background a cada 6s
   useEffect(() => {
     fetchStats();
     fetchConversations(true);
@@ -260,6 +526,7 @@ export function MonitoramentoPage() {
       setMessages([]);
       setSelectedClient(null);
       setOpenTransactions([]);
+      setAllTransactions([]);
     }
   }, [selectedTarget, fetchMessages]);
 
@@ -267,6 +534,11 @@ export function MonitoramentoPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Conversa ativa selecionada
+  const activeConversation = useMemo(() => {
+    return conversations.find((c) => c.id === selectedTarget) || null;
+  }, [conversations, selectedTarget]);
 
   // Enviar mensagem manual
   const handleSendMessage = async (textToSend?: string) => {
@@ -304,6 +576,7 @@ export function MonitoramentoPage() {
       });
       if (res?.ok) {
         toast.success("Cobrança e Pix disparados por Nexus!");
+        setShowInvoiceSelector(false);
         await fetchMessages(selectedTarget, true);
         await fetchConversations(false);
         await fetchStats();
@@ -315,16 +588,76 @@ export function MonitoramentoPage() {
     }
   };
 
-  // Conversa ativa selecionada
-  const activeConversation = useMemo(() => {
-    return conversations.find((c) => c.id === selectedTarget) || null;
-  }, [conversations, selectedTarget]);
-
-  // Copiar código Pix
-  const handleCopyPix = (pixCode: string) => {
-    navigator.clipboard.writeText(pixCode);
-    toast.success("Código Pix copiado para a área de transferência!");
+  // Baixa manual e quitação da fatura diretamente pelo Chat/Drawer
+  const handleMarkPaid = async (transactionId: string) => {
+    if (!selectedTarget || isMarkingPaid) return;
+    setIsMarkingPaid(transactionId);
+    try {
+      const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/mark-paid`, {
+        transactionId,
+        sendReceipt: true,
+      });
+      if (res?.ok) {
+        toast.success("Fatura liquidada! Recibo de quitação disparado via WhatsApp.");
+        await fetchMessages(selectedTarget, true);
+        await fetchConversations(false);
+        await fetchStats();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Falha ao marcar fatura como paga");
+    } finally {
+      setIsMarkingPaid(null);
+    }
   };
+
+  // Alternar Opt-in do cliente diretamente no chat
+  const handleToggleOptIn = async () => {
+    if (!selectedTarget || isTogglingOptIn) return;
+    const currentOptIn = activeConversation?.optIn ?? false;
+    setIsTogglingOptIn(true);
+    try {
+      const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/toggle-optin`, {
+        optIn: !currentOptIn,
+      });
+      if (res?.ok) {
+        toast.success(!currentOptIn ? "Opt-in do WhatsApp ativado!" : "Opt-in do WhatsApp desativado.");
+        await fetchConversations(false);
+        if (selectedClient) {
+          setSelectedClient({ ...selectedClient, whatsappOptIn: !currentOptIn });
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Falha ao alterar consentimento");
+    } finally {
+      setIsTogglingOptIn(false);
+    }
+  };
+
+  // Solicitar reconexão do WhatsApp diretamente
+  const handleReconnectWhatsApp = async () => {
+    setIsReconnecting(true);
+    try {
+      const res = await API.post<{ ok: boolean; status: any }>("/whatsapp/monitoring/reconnect");
+      if (res?.ok) {
+        toast.success("Reconexão solicitada! Escaneie o QR Code.");
+        await fetchStats();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Falha ao solicitar reconexão");
+    } finally {
+      setIsReconnecting(false);
+    }
+  };
+
+  // Dynamic filter counts
+  const filterCounts = useMemo(() => {
+    return {
+      all: conversations.length,
+      replied: conversations.filter((c) => c.hasReplied).length,
+      waiting: conversations.filter((c) => !c.hasReplied && c.totalMessages > 0).length,
+      overdue: conversations.filter((c) => c.financialInfo.overdueCount > 0).length,
+    };
+  }, [conversations]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "#111113", color: "#fafafa" }}>
@@ -363,13 +696,15 @@ export function MonitoramentoPage() {
               <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", color: "#fff" }}>
                 Monitoramento Nexus • Chat de Cobranças
               </h1>
+
+              {/* Status Badge with Reconnection Button */}
               {stats?.status.connected ? (
                 <div
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
-                    padding: "3px 9px",
+                    padding: "3px 10px",
                     borderRadius: 20,
                     background: "hsl(152 65% 45% / 0.15)",
                     border: "1px solid hsl(152 65% 45% / 0.4)",
@@ -379,26 +714,32 @@ export function MonitoramentoPage() {
                   }}
                 >
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(152 65% 50%)", boxShadow: "0 0 8px hsl(152 65% 50%)" }} />
-                  Online {stats.status.phone ? `(${stats.status.phone})` : ""}
+                  Online {stats.status.phone ? `(${formatPhoneDisplay(stats.status.phone)})` : ""}
                 </div>
               ) : (
-                <div
+                <button
+                  onClick={() => setShowReconnectModal(true)}
+                  title="Clique para conectar ou escanear QR Code"
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
-                    padding: "3px 9px",
+                    padding: "3px 10px",
                     borderRadius: 20,
                     background: "hsl(0 70% 58% / 0.15)",
                     border: "1px solid hsl(0 70% 58% / 0.4)",
                     color: "hsl(0 70% 68%)",
                     fontSize: 11,
                     fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
                   }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.25)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "hsl(0 70% 58% / 0.15)")}
                 >
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(0 70% 58%)" }} />
-                  WhatsApp Desconectado
-                </div>
+                  WhatsApp Desconectado • Conectar
+                </button>
               )}
             </div>
             <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
@@ -407,8 +748,8 @@ export function MonitoramentoPage() {
           </div>
         </div>
 
-        {/* Mini KPI Cards */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        {/* Mini KPI Cards - Interactive */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div
             style={{
               padding: "8px 14px",
@@ -444,12 +785,14 @@ export function MonitoramentoPage() {
           </div>
 
           <div
+            onClick={() => setFilter("replied")}
             style={{
               padding: "8px 14px",
-              background: "#1c1c22",
-              border: "1px solid #2b2b36",
+              background: filter === "replied" ? "hsl(152 65% 45% / 0.15)" : "#1c1c22",
+              border: filter === "replied" ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #2b2b36",
               borderRadius: 10,
               minWidth: 130,
+              cursor: "pointer",
             }}
           >
             <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
@@ -462,12 +805,14 @@ export function MonitoramentoPage() {
           </div>
 
           <div
+            onClick={() => setFilter("overdue")}
             style={{
               padding: "8px 14px",
-              background: "#1c1c22",
-              border: "1px solid #2b2b36",
+              background: filter === "overdue" ? "hsl(0 70% 58% / 0.15)" : "#1c1c22",
+              border: filter === "overdue" ? "1px solid hsl(0 70% 58% / 0.5)" : "1px solid #2b2b36",
               borderRadius: 10,
               minWidth: 140,
+              cursor: "pointer",
             }}
           >
             <div style={{ fontSize: 10, color: "#8a8a93", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.05em" }}>
@@ -480,7 +825,7 @@ export function MonitoramentoPage() {
         </div>
       </div>
 
-      {/* ─── Main Two-Column Layout ─── */}
+      {/* ─── Main Two/Three-Column Layout ─── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
         {/* ─── Left Pane: Conversations List ─── */}
         <div
@@ -533,13 +878,21 @@ export function MonitoramentoPage() {
               )}
             </div>
 
-            {/* Filter pills */}
-            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+            {/* Filter pills with dynamic counts & scrollable without truncation */}
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                overflowX: "auto",
+                paddingBottom: 2,
+                scrollbarWidth: "none",
+              }}
+            >
               {[
-                { id: "all", label: "Todos" },
-                { id: "replied", label: "💬 Responderam" },
-                { id: "waiting", label: "⏳ Aguardando" },
-                { id: "overdue", label: "⚠️ Em Atraso" },
+                { id: "all", label: `Todos (${filterCounts.all})` },
+                { id: "replied", label: `💬 Respostas (${filterCounts.replied})` },
+                { id: "waiting", label: `⏳ Aguardando (${filterCounts.waiting})` },
+                { id: "overdue", label: `⚠️ Em Atraso (${filterCounts.overdue})` },
               ].map((tab) => {
                 const active = filter === tab.id;
                 return (
@@ -547,15 +900,16 @@ export function MonitoramentoPage() {
                     key={tab.id}
                     onClick={() => setFilter(tab.id as any)}
                     style={{
-                      padding: "4px 10px",
+                      padding: "5px 11px",
                       borderRadius: 16,
                       fontSize: 11,
-                      fontWeight: active ? 600 : 400,
+                      fontWeight: active ? 700 : 500,
                       background: active ? "hsl(265 85% 62% / 0.25)" : "#202028",
                       color: active ? "#c4a3ff" : "#888",
                       border: active ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid #2c2c36",
                       cursor: "pointer",
                       whiteSpace: "nowrap",
+                      flexShrink: 0,
                       transition: "all 0.15s ease",
                     }}
                   >
@@ -736,8 +1090,8 @@ export function MonitoramentoPage() {
           </div>
         </div>
 
-        {/* ─── Right Pane: WhatsApp Chat Window ─── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", background: "#0d0d0f" }}>
+        {/* ─── Center Pane: WhatsApp Chat Window ─── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", background: "#0d0d0f", minWidth: 0 }}>
           {!selectedTarget ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "#666" }}>
               <div
@@ -766,7 +1120,7 @@ export function MonitoramentoPage() {
               {/* Chat Header */}
               <div
                 style={{
-                  padding: "14px 24px",
+                  padding: "12px 20px",
                   background: "#18181c",
                   borderBottom: "1px solid #27272e",
                   display: "flex",
@@ -776,11 +1130,11 @@ export function MonitoramentoPage() {
                   gap: 12,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
                     style={{
-                      width: 44,
-                      height: 44,
+                      width: 42,
+                      height: 42,
                       borderRadius: "50%",
                       background: "linear-gradient(135deg, hsl(265 85% 62% / 0.3), #202028)",
                       border: "1px solid hsl(265 85% 62% / 0.4)",
@@ -789,59 +1143,51 @@ export function MonitoramentoPage() {
                       justifyContent: "center",
                       color: "#c4a3ff",
                       fontWeight: 700,
-                      fontSize: 16,
+                      fontSize: 15,
                     }}
                   >
                     {(activeConversation?.clientName || "C").slice(0, 2).toUpperCase()}
                   </div>
 
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
                         {activeConversation?.clientName || "Contato"}
                       </span>
-                      {activeConversation?.optIn ? (
-                        <span
-                          title="Cliente optou por receber mensagens via WhatsApp"
-                          style={{
-                            fontSize: 10,
-                            padding: "2px 7px",
-                            borderRadius: 12,
-                            background: "hsl(152 65% 45% / 0.15)",
-                            color: "hsl(152 65% 55%)",
-                            fontWeight: 600,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                          }}
-                        >
-                          <Shield size={11} /> Opt-in Ativo
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            padding: "2px 7px",
-                            borderRadius: 12,
-                            background: "#25252b",
-                            color: "#888",
-                            fontWeight: 500,
-                          }}
-                        >
-                          Sem Opt-in
-                        </span>
-                      )}
+
+                      {/* Interactive Opt-in Toggle */}
+                      <button
+                        onClick={handleToggleOptIn}
+                        disabled={isTogglingOptIn}
+                        title="Clique para alternar o consentimento de WhatsApp"
+                        style={{
+                          fontSize: 10,
+                          padding: "2px 8px",
+                          borderRadius: 12,
+                          background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.15)" : "#25252b",
+                          border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #33333d",
+                          color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
+                          fontWeight: 600,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          cursor: "pointer",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        <Shield size={11} /> {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
+                      </button>
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 12, color: "#888" }}>
                       <span>{formatPhoneDisplay(activeConversation?.phone || "")}</span>
-                      {activeConversation?.document && <span>• Doc: {activeConversation.document}</span>}
+                      {activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
                     </div>
                   </div>
                 </div>
 
                 {/* Right side header actions & Financial summary */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   {openTransactions.length > 0 && (
                     <div
                       style={{
@@ -870,31 +1216,123 @@ export function MonitoramentoPage() {
                     </div>
                   )}
 
+                  {/* Cobrar via Nexus with Multi-Invoice Dropdown */}
                   {openTransactions.length > 0 && (
-                    <button
-                      onClick={() => handleTriggerBilling(openTransactions[0].id)}
-                      disabled={isTriggeringBilling}
-                      title="Dispara cobrança imediata com chave Pix para o cliente via Nexus"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
-                        border: "none",
-                        color: "#fff",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: isTriggeringBilling ? "not-allowed" : "pointer",
-                        opacity: isTriggeringBilling ? 0.7 : 1,
-                        boxShadow: "0 0 16px hsl(265 85% 62% / 0.35)",
-                      }}
-                    >
-                      <Zap size={14} />
-                      {isTriggeringBilling ? "Disparando..." : "Cobrar via Nexus"}
-                    </button>
+                    <div style={{ position: "relative" }}>
+                      <button
+                        onClick={() => setShowInvoiceSelector(!showInvoiceSelector)}
+                        disabled={isTriggeringBilling}
+                        title="Selecione qual fatura disparar para o cliente"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
+                          border: "none",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: isTriggeringBilling ? "not-allowed" : "pointer",
+                          boxShadow: "0 0 16px hsl(265 85% 62% / 0.35)",
+                        }}
+                      >
+                        <Zap size={14} />
+                        {isTriggeringBilling ? "Disparando..." : `Cobrar via Nexus (${openTransactions.length})`}
+                        <ChevronDown size={14} />
+                      </button>
+
+                      {/* Dropdown to pick which invoice to charge */}
+                      <AnimatePresence>
+                        {showInvoiceSelector && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: "100%",
+                              marginTop: 6,
+                              width: 290,
+                              background: "#1c1c24",
+                              border: "1px solid #323242",
+                              borderRadius: 10,
+                              padding: 8,
+                              boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+                              zIndex: 50,
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", padding: "4px 8px 8px" }}>
+                              Selecione a fatura para disparar:
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                              {openTransactions.map((tx) => {
+                                const isOverdue = new Date(tx.dueDate) < new Date();
+                                return (
+                                  <div
+                                    key={tx.id}
+                                    onClick={() => handleTriggerBilling(tx.id)}
+                                    style={{
+                                      padding: "8px 10px",
+                                      borderRadius: 6,
+                                      background: "#242430",
+                                      border: "1px solid #2e2e3e",
+                                      cursor: "pointer",
+                                      transition: "all 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = "hsl(265 85% 62% / 0.5)")}
+                                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#2e2e3e")}
+                                  >
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                      <span style={{ fontSize: 11, fontWeight: 600, color: "#fff" }}>
+                                        {tx.description || "Fatura"}
+                                      </span>
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: "#c4a3ff" }}>
+                                        {formatCents(tx.amount)}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10 }}>
+                                      <span style={{ color: isOverdue ? "#ff7b7b" : "#888" }}>
+                                        Venc: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
+                                      </span>
+                                      <span style={{ color: "hsl(265 85% 62%)", fontWeight: 700 }}>
+                                        Disparar Pix ➔
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   )}
+
+                  {/* Client 360° Drawer Toggle Button */}
+                  <button
+                    onClick={() => setShowClientDrawer(!showClientDrawer)}
+                    title="Abrir painel 360° com histórico de faturas e baixas"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: showClientDrawer ? "hsl(265 85% 62% / 0.2)" : "#22222a",
+                      border: showClientDrawer ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid #333342",
+                      color: showClientDrawer ? "#c4a3ff" : "#ccc",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <SlidersHorizontal size={14} />
+                    Painel 360°
+                  </button>
 
                   <button
                     onClick={() => fetchMessages(selectedTarget)}
@@ -1020,20 +1458,10 @@ export function MonitoramentoPage() {
                             </span>
                           </div>
 
-                          {/* Message Body */}
-                          <div
-                            style={{
-                              fontSize: 13,
-                              color: "#eaeaf0",
-                              lineHeight: 1.55,
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {msg.body}
-                          </div>
+                          {/* Message Body with WhatsApp Markup & Dedicated Pix Card */}
+                          <FormattedWhatsAppBody text={msg.body} amount={msg.transaction?.amount} />
 
-                          {/* Embedded Transaction Card (if linked) */}
+                          {/* Embedded Linked Transaction Card with Quick Mark-Paid Button */}
                           {msg.transaction && (
                             <div
                               style={{
@@ -1056,20 +1484,42 @@ export function MonitoramentoPage() {
                                   Vencimento: {new Date(msg.transaction.dueDate).toLocaleDateString("pt-BR")}
                                 </div>
                               </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#c4a3ff" }}>
-                                  {formatCents(msg.transaction.amount)}
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#c4a3ff" }}>
+                                    {formatCents(msg.transaction.amount)}
+                                  </div>
+                                  <span
+                                    style={{
+                                      fontSize: 9,
+                                      color: msg.transaction.status === "paid" ? "hsl(152 65% 55%)" : "hsl(0 70% 65%)",
+                                      fontWeight: 600,
+                                      textTransform: "uppercase",
+                                    }}
+                                  >
+                                    {msg.transaction.status === "paid" ? "Pago" : "Pendente"}
+                                  </span>
                                 </div>
-                                <span
-                                  style={{
-                                    fontSize: 9,
-                                    color: msg.transaction.status === "paid" ? "hsl(152 65% 55%)" : "hsl(0 70% 65%)",
-                                    fontWeight: 600,
-                                    textTransform: "uppercase",
-                                  }}
-                                >
-                                  {msg.transaction.status === "paid" ? "Pago" : "Pendente"}
-                                </span>
+
+                                {msg.transaction.status !== "paid" && (
+                                  <button
+                                    onClick={() => handleMarkPaid(msg.transaction!.id)}
+                                    disabled={Boolean(isMarkingPaid)}
+                                    title="Marcar como recebido e enviar recibo de quitação"
+                                    style={{
+                                      padding: "4px 8px",
+                                      borderRadius: 6,
+                                      background: "hsl(152 65% 45% / 0.2)",
+                                      border: "1px solid hsl(152 65% 45% / 0.5)",
+                                      color: "hsl(152 65% 60%)",
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    {isMarkingPaid === msg.transaction.id ? "Baixando..." : "Dar Baixa"}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1099,7 +1549,7 @@ export function MonitoramentoPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input Bar & Quick Replies */}
+              {/* Chat Input Bar & Dynamic Quick Replies */}
               <div
                 style={{
                   padding: "12px 20px 16px",
@@ -1111,19 +1561,20 @@ export function MonitoramentoPage() {
                 }}
               >
                 {/* Quick Reply Pills */}
-                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
                   {[
                     "👋 Olá! Segue o lembrete da sua fatura.",
-                    "💳 Segue a nossa chave Pix para pagamento:",
+                    "🔑 Segue a nossa chave Pix para pagamento:",
                     "📄 Pode nos enviar o comprovante por aqui?",
                     "🤝 Conseguimos negociar um novo prazo caso precise.",
+                    "✅ Pagamento confirmado com sucesso! Muito obrigado.",
                   ].map((phrase, i) => (
                     <button
                       key={i}
                       onClick={() => handleSendMessage(phrase)}
                       disabled={isSending}
                       style={{
-                        padding: "4px 10px",
+                        padding: "5px 12px",
                         borderRadius: 14,
                         background: "#22222a",
                         border: "1px solid #2f2f3c",
@@ -1131,6 +1582,7 @@ export function MonitoramentoPage() {
                         fontSize: 11,
                         cursor: "pointer",
                         whiteSpace: "nowrap",
+                        flexShrink: 0,
                         transition: "all 0.15s ease",
                       }}
                       onMouseEnter={(e) => {
@@ -1210,7 +1662,312 @@ export function MonitoramentoPage() {
             </>
           )}
         </div>
+
+        {/* ─── Right Drawer: Painel 360° do Cliente ─── */}
+        <AnimatePresence>
+          {showClientDrawer && selectedTarget && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 340, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              style={{
+                borderLeft: "1px solid #27272e",
+                background: "#16161b",
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                overflow: "hidden",
+              }}
+            >
+              {/* Drawer Header */}
+              <div
+                style={{
+                  padding: "16px 20px",
+                  borderBottom: "1px solid #252530",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <SlidersHorizontal size={16} color="#c4a3ff" />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Cliente</span>
+                </div>
+                <button
+                  onClick={() => setShowClientDrawer(false)}
+                  style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer" }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Drawer Content */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Client Profile Card */}
+                <div
+                  style={{
+                    padding: 14,
+                    background: "#1c1c24",
+                    borderRadius: 10,
+                    border: "1px solid #2b2b38",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                    {activeConversation?.clientName}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                    {formatPhoneDisplay(activeConversation?.phone || "")}
+                  </div>
+                  {activeConversation?.document && (
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                      Doc: {activeConversation.document}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#888" }}>WhatsApp Opt-in</span>
+                    <button
+                      onClick={handleToggleOptIn}
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.2)" : "#2a2a36",
+                        border: "none",
+                        color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {activeConversation?.optIn ? "Ativo" : "Inativo"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Financial Summary */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                    <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Total Aberto</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
+                      {formatCents(allTransactions.filter((t) => t.status === "pending").reduce((a, b) => a + b.amount, 0))}
+                    </div>
+                  </div>
+                  <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                    <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Em Atraso</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
+                      {formatCents(allTransactions.filter((t) => t.status === "pending" && new Date(t.dueDate) < new Date()).reduce((a, b) => a + b.amount, 0))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Invoices List */}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+                    <span>Faturas ({allTransactions.length})</span>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {allTransactions.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#777", textAlign: "center", padding: 16 }}>
+                        Nenhuma fatura registrada para este cliente.
+                      </div>
+                    ) : (
+                      allTransactions.map((tx) => {
+                        const isOverdue = tx.status === "pending" && new Date(tx.dueDate) < new Date();
+                        const isPaid = tx.status === "paid";
+
+                        return (
+                          <div
+                            key={tx.id}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: 8,
+                              background: isPaid ? "#171f1a" : "#1c1c24",
+                              border: isPaid
+                                ? "1px solid hsl(152 65% 45% / 0.3)"
+                                : isOverdue
+                                ? "1px solid hsl(0 70% 58% / 0.35)"
+                                : "1px solid #2b2b38",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: "#eee" }}>
+                                  {tx.description || "Fatura"}
+                                </div>
+                                <div style={{ fontSize: 10, color: isOverdue ? "#ff7b7b" : "#888", marginTop: 2 }}>
+                                  Vencimento: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
+                                </div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: isPaid ? "hsl(152 65% 55%)" : "#c4a3ff" }}>
+                                  {formatCents(tx.amount)}
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    padding: "1px 5px",
+                                    borderRadius: 4,
+                                    background: isPaid ? "hsl(152 65% 45% / 0.2)" : isOverdue ? "hsl(0 70% 58% / 0.2)" : "#282835",
+                                    color: isPaid ? "hsl(152 65% 60%)" : isOverdue ? "hsl(0 70% 65%)" : "#aaa",
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  {isPaid ? "Pago" : isOverdue ? "Atrasado" : "Pendente"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Actions for Pending Invoices */}
+                            {!isPaid && (
+                              <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 8, borderTop: "1px solid #282836" }}>
+                                <button
+                                  onClick={() => handleTriggerBilling(tx.id)}
+                                  disabled={isTriggeringBilling}
+                                  title="Dispara cobrança com código Pix no WhatsApp"
+                                  style={{
+                                    flex: 1,
+                                    padding: "5px 8px",
+                                    borderRadius: 6,
+                                    background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
+                                    border: "none",
+                                    color: "#fff",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  ⚡ Cobrar Pix
+                                </button>
+                                <button
+                                  onClick={() => handleMarkPaid(tx.id)}
+                                  disabled={Boolean(isMarkingPaid)}
+                                  title="Registra quitação e envia recibo automático"
+                                  style={{
+                                    flex: 1,
+                                    padding: "5px 8px",
+                                    borderRadius: 6,
+                                    background: "hsl(152 65% 45% / 0.2)",
+                                    border: "1px solid hsl(152 65% 45% / 0.4)",
+                                    color: "hsl(152 65% 60%)",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {isMarkingPaid === tx.id ? "Baixando..." : "✅ Dar Baixa"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* ─── WhatsApp Reconnection Modal ─── */}
+      <AnimatePresence>
+        {showReconnectModal && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.75)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 100,
+              padding: 20,
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              style={{
+                background: "#18181e",
+                border: "1px solid #333342",
+                borderRadius: 16,
+                padding: 24,
+                width: 380,
+                maxWidth: "100%",
+                boxShadow: "0 20px 50px rgba(0,0,0,0.8)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>Conexão WhatsApp Nexus</span>
+                <button
+                  onClick={() => setShowReconnectModal(false)}
+                  style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer" }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {stats?.status.connected ? (
+                <div style={{ padding: "20px 0" }}>
+                  <CheckCircle2 size={48} color="hsl(152 65% 55%)" style={{ margin: "0 auto 12px" }} />
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>WhatsApp Conectado!</div>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                    Número pareado: {formatPhoneDisplay(stats.status.phone || "")}
+                  </div>
+                </div>
+              ) : stats?.status.qr ? (
+                <div style={{ padding: "10px 0" }}>
+                  <div style={{ padding: 12, background: "#fff", borderRadius: 12, display: "inline-block", boxShadow: "0 4px 20px rgba(0,0,0,0.5)" }}>
+                    <img src={stats.status.qr} alt="QR Code WhatsApp" style={{ width: 220, height: 220, display: "block" }} />
+                  </div>
+                  <p style={{ fontSize: 12, color: "#aaa", marginTop: 12 }}>
+                    Abra o WhatsApp no celular ➔ Aparelhos Conectados ➔ Conectar Aparelho e aponte para o código.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ padding: "20px 0" }}>
+                  <Bot size={44} color="#c4a3ff" style={{ margin: "0 auto 12px" }} />
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#eee" }}>WhatsApp está desconectado</div>
+                  <p style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                    Clique no botão abaixo para gerar um novo QR Code de conexão.
+                  </p>
+                  <button
+                    onClick={handleReconnectWhatsApp}
+                    disabled={isReconnecting}
+                    style={{
+                      marginTop: 14,
+                      padding: "9px 18px",
+                      borderRadius: 8,
+                      background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
+                      border: "none",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <RefreshCw size={14} className={isReconnecting ? "animate-spin" : ""} />
+                    {isReconnecting ? "Solicitando..." : "Gerar QR Code Agora"}
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -613,7 +613,8 @@ router.get("/sales", requireAuth, async (req: Request, res: Response) => {
             startDate: item.startDate,
             endDate: item.endDate,
             fixedAmount: item.fixedAmount,
-            currentMonthly: item.kind === "subscription" ? subscriptionAmountAt(today, windows, item.fixedAmount) : 0,
+            billingSource: item.billingSource,
+            currentMonthly: item.kind === "subscription" ? (item.billingSource === "external" ? item.fixedAmount ?? 0 : subscriptionAmountAt(today, windows, item.fixedAmount)) : 0,
             modules: itemModules.map((m) => ({
               id: m.row.id,
               moduleId: m.row.moduleId,
@@ -719,6 +720,7 @@ router.put("/sales/items/:itemId/modules", requireAuth, async (req: Request, res
       .where(and(eq(saleItemsTable.id, itemId), eq(saleItemsTable.workspaceId, workspaceId)))
       .limit(1);
     if (!item || item.kind !== "subscription") throw new HttpError(404, "Mensalidade não encontrada");
+    if (item.billingSource === "external") throw new HttpError(409, "Altere a mensalidade no sistema de origem da integração.");
     if (item.status === "cancelled") throw new HttpError(400, "Mensalidade cancelada");
 
     if (incoming.length > 0) {
@@ -792,6 +794,9 @@ router.put("/sales/:id/status", requireAuth, async (req: Request, res: Response)
       .where(and(eq(clientSalesTable.id, id), eq(clientSalesTable.workspaceId, workspaceId)))
       .limit(1);
     if (!sale) throw new HttpError(404, "Venda não encontrada");
+    const externalItems = await db.select({ id: saleItemsTable.id }).from(saleItemsTable)
+      .where(and(eq(saleItemsTable.saleId, id), eq(saleItemsTable.billingSource, "external"))).limit(1);
+    if (externalItems.length) throw new HttpError(409, "Altere o status da base no sistema de origem da integração.");
     if (sale.status === "cancelled") throw new HttpError(400, "Venda já cancelada");
 
     const result = await db.transaction(async (tx) => {

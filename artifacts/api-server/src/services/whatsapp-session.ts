@@ -33,14 +33,97 @@ const baileysLogger = pino({ level: "error" });
 /** Returns a normalized E.164 number without +. Brazilian local numbers get 55. */
 export function normalizeWhatsAppPhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const trimmed = raw.trim();
+  const beforeAt = raw.split("@")[0].split(":")[0];
+  const trimmed = beforeAt.trim();
   if (!/^\+?[\d\s().-]+$/.test(trimmed)) return null;
   let digits = trimmed.replace(/\D/g, "");
   if (!trimmed.startsWith("+") && (digits.length === 10 || digits.length === 11)) {
     digits = `55${digits}`;
   }
-  if (digits.length < 12 || digits.length > 15 || digits.startsWith("0")) return null;
+  if (digits.length < 10 || digits.length > 15 || digits.startsWith("0")) return null;
   return digits;
+}
+
+/**
+ * Canonical Brazilian phone representation:
+ * Handles 8-digit vs 9-digit Brazilian mobile numbers.
+ * E.g., '551497603870' (12 digits) and '5514997603870' (13 digits)
+ * both resolve canonically to '5514997603870'.
+ */
+export function canonicalBrazilianPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const normalized = normalizeWhatsAppPhone(raw);
+  if (!normalized) return null;
+
+  if (normalized.startsWith("55") && normalized.length === 12) {
+    const ddd = normalized.slice(2, 4);
+    const localNumber = normalized.slice(4);
+    // If local number starts with 6, 7, 8, or 9, it's a mobile missing the 9 digit
+    if (/^[6-9]/.test(localNumber)) {
+      return `55${ddd}9${localNumber}`;
+    }
+  }
+  return normalized;
+}
+
+/**
+ * Checks whether two phone numbers refer to the exact same WhatsApp contact,
+ * factoring in Brazilian 9th digit variations and country codes.
+ */
+export function phonesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const canA = canonicalBrazilianPhone(a);
+  const canB = canonicalBrazilianPhone(b);
+  if (canA && canB && canA === canB) return true;
+
+  const normA = normalizeWhatsAppPhone(a);
+  const normB = normalizeWhatsAppPhone(b);
+  if (normA && normB && normA === normB) return true;
+
+  const digA = a.replace(/\D/g, "");
+  const digB = b.replace(/\D/g, "");
+  if (digA && digB && (digA === digB || digA.endsWith(digB) || digB.endsWith(digA))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolves the destination JID by consulting WhatsApp servers through onWhatsApp.
+ * Checks the exact number and automatically tests the 8-digit / 9-digit variation for Brazil.
+ */
+export async function resolveDestinationJid(session: Session, phone: string): Promise<string> {
+  const normalized = normalizeWhatsAppPhone(phone);
+  if (!normalized) throw new Error("Telefone de destino inválido");
+
+  try {
+    const [result] = (await session.socket.onWhatsApp(normalized).catch(() => [])) ?? [];
+    if (result?.exists && result.jid) {
+      return result.jid;
+    }
+
+    // If Brazilian 13 digits (with 9), try 12 digits (without 9)
+    if (normalized.startsWith("55") && normalized.length === 13) {
+      const without9 = `55${normalized.slice(2, 4)}${normalized.slice(5)}`;
+      const [alt] = (await session.socket.onWhatsApp(without9).catch(() => [])) ?? [];
+      if (alt?.exists && alt.jid) {
+        return alt.jid;
+      }
+    }
+
+    // If Brazilian 12 digits (without 9), try 13 digits (with 9)
+    if (normalized.startsWith("55") && normalized.length === 12) {
+      const with9 = `55${normalized.slice(2, 4)}9${normalized.slice(4)}`;
+      const [alt] = (await session.socket.onWhatsApp(with9).catch(() => [])) ?? [];
+      if (alt?.exists && alt.jid) {
+        return alt.jid;
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, phone: normalized }, "Falha ao verificar onWhatsApp; usando JID padrão");
+  }
+
+  return `${normalized}@s.whatsapp.net`;
 }
 
 /** Parses and normalizes a list of phone numbers separated by comma, semicolon, space or line break */
@@ -72,7 +155,7 @@ async function processOptOut(workspaceId: string, messages: any[]): Promise<void
     const clients = await db.select({ id: clientsTable.id, phone: clientsTable.phone })
       .from(clientsTable)
       .where(and(eq(clientsTable.workspaceId, workspaceId), eq(clientsTable.whatsappOptIn, true)));
-    const ids = clients.filter((client) => normalizeWhatsAppPhone(client.phone) === sender).map((client) => client.id);
+    const ids = clients.filter((client) => phonesMatch(client.phone, sender)).map((client) => client.id);
     if (!ids.length) continue;
     await db.transaction(async (tx) => {
       await tx.update(clientsTable)
@@ -87,29 +170,85 @@ async function processOptOut(workspaceId: string, messages: any[]): Promise<void
   }
 }
 
-export function extractMessageText(message: any): string | null {
+export function unwrapMessage(msg: any): any {
+  if (!msg) return msg;
+  if (msg.ephemeralMessage?.message) return unwrapMessage(msg.ephemeralMessage.message);
+  if (msg.viewOnceMessage?.message) return unwrapMessage(msg.viewOnceMessage.message);
+  if (msg.viewOnceMessageV2?.message) return unwrapMessage(msg.viewOnceMessageV2.message);
+  if (msg.viewOnceMessageV2Extension?.message) return unwrapMessage(msg.viewOnceMessageV2Extension.message);
+  if (msg.documentWithCaptionMessage?.message) return unwrapMessage(msg.documentWithCaptionMessage.message);
+  return msg;
+}
+
+export function extractMessageText(rawMessage: any): string | null {
+  if (!rawMessage) return null;
+  const message = unwrapMessage(rawMessage);
   if (!message) return null;
-  if (typeof message.conversation === "string" && message.conversation.trim()) return message.conversation.trim();
-  if (typeof message.extendedTextMessage?.text === "string" && message.extendedTextMessage.text.trim()) return message.extendedTextMessage.text.trim();
-  if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") return message.buttonsResponseMessage.selectedDisplayText.trim();
-  if (typeof message.templateButtonReplyMessage?.selectedDisplayText === "string") return message.templateButtonReplyMessage.selectedDisplayText.trim();
-  if (typeof message.listResponseMessage?.title === "string") return message.listResponseMessage.title.trim();
-  if (typeof message.imageMessage?.caption === "string") return message.imageMessage.caption.trim();
-  if (typeof message.documentMessage?.caption === "string") return message.documentMessage.caption.trim();
+
+  if (typeof message.conversation === "string" && message.conversation.trim()) {
+    return message.conversation.trim();
+  }
+  if (typeof message.extendedTextMessage?.text === "string" && message.extendedTextMessage.text.trim()) {
+    return message.extendedTextMessage.text.trim();
+  }
+  if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") {
+    return message.buttonsResponseMessage.selectedDisplayText.trim();
+  }
+  if (typeof message.templateButtonReplyMessage?.selectedDisplayText === "string") {
+    return message.templateButtonReplyMessage.selectedDisplayText.trim();
+  }
+  if (typeof message.listResponseMessage?.title === "string") {
+    return message.listResponseMessage.title.trim();
+  }
+  if (typeof message.imageMessage?.caption === "string" && message.imageMessage.caption.trim()) {
+    return `📷 [Imagem]: ${message.imageMessage.caption.trim()}`;
+  }
+  if (message.imageMessage) {
+    return "📷 [Imagem / Comprovante de Pagamento]";
+  }
+  if (typeof message.documentMessage?.caption === "string" && message.documentMessage.caption.trim()) {
+    return `📄 [Documento]: ${message.documentMessage.caption.trim()}`;
+  }
+  if (message.documentMessage) {
+    const filename = message.documentMessage.fileName || "Comprovante";
+    return `📄 [Documento / PDF: ${filename}]`;
+  }
+  if (message.audioMessage) {
+    return "🎵 [Mensagem de Áudio]";
+  }
+  if (message.videoMessage) {
+    return "🎥 [Vídeo]";
+  }
+  if (message.stickerMessage) {
+    return "💟 [Figurinha]";
+  }
+  if (message.contactMessage) {
+    return "👤 [Contato]";
+  }
+  if (message.locationMessage) {
+    return "📍 [Localização]";
+  }
   return null;
 }
 
 async function processIncomingMessages(workspaceId: string, session: Session, messages: any[]): Promise<void> {
   for (const item of messages) {
-    if (item.key?.fromMe) continue;
-    const jid: string | undefined = item.key?.remoteJidAlt?.endsWith("@s.whatsapp.net")
-      ? item.key.remoteJidAlt
-      : item.key?.remoteJid;
-    if (!jid?.endsWith("@s.whatsapp.net")) continue;
+    // Determine counterparty JID from all available Baileys key fields
+    const rawJid = item.key?.remoteJidAlt || item.key?.participantPn || item.key?.remoteJid || item.key?.participant;
+    if (!rawJid) continue;
+
+    // Ignore group chats and status broadcasts
+    if (rawJid.endsWith("@g.us") || rawJid.includes("status@broadcast")) continue;
+
+    const jidClean = rawJid.split("@")[0].split(":")[0];
+    const normalizedSender = normalizeWhatsAppPhone(jidClean);
+    const canonicalSender = canonicalBrazilianPhone(jidClean) || normalizedSender;
+    if (!normalizedSender && !canonicalSender) continue;
+
     const text = extractMessageText(item.message);
     if (!text) continue;
-    const sender = normalizeWhatsAppPhone(jid.split("@")[0]);
-    if (!sender) continue;
+
+    const isFromMe = Boolean(item.key?.fromMe);
 
     try {
       const clients = await db.select({
@@ -118,7 +257,9 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         phone: clientsTable.phone,
       }).from(clientsTable).where(eq(clientsTable.workspaceId, workspaceId));
 
-      const matchingClient = clients.find((c) => normalizeWhatsAppPhone(c.phone) === sender);
+      const matchingClient = clients.find(
+        (c) => phonesMatch(c.phone, jidClean) || phonesMatch(c.phone, canonicalSender) || phonesMatch(c.phone, normalizedSender)
+      );
 
       let transactionId: string | null = null;
       if (matchingClient) {
@@ -130,31 +271,52 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         transactionId = latestTx?.id ?? null;
       }
 
-      const dedupeKey = `inbound:${workspaceId}:${item.key?.id || `${sender}_${Date.now()}`}`;
+      const dedupeKey = `${isFromMe ? "outbound" : "inbound"}:${workspaceId}:${item.key?.id || `${jidClean}_${Date.now()}`}`;
       const sentAt = item.messageTimestamp
         ? new Date(Number(item.messageTimestamp) * 1000)
         : new Date();
 
-      await db.insert(whatsappMessagesTable).values({
-        workspaceId,
-        clientId: matchingClient?.id ?? null,
-        transactionId,
-        dedupeKey,
-        kind: "client_reply",
-        recipient: session.phone ?? "Nexus",
-        senderPhone: sender,
-        senderName: matchingClient?.name ?? item.pushName ?? "Cliente",
-        direction: "inbound",
-        body: text,
-        status: "received",
-        isRead: false,
-        sentAt,
-        waMessageId: item.key?.id ?? null,
-      }).onConflictDoNothing();
+      if (isFromMe) {
+        // Record outbound messages sent from physical mobile phone
+        await db.insert(whatsappMessagesTable).values({
+          workspaceId,
+          clientId: matchingClient?.id ?? null,
+          transactionId,
+          dedupeKey,
+          kind: "manual_chat",
+          recipient: canonicalSender || normalizedSender || jidClean,
+          senderPhone: session.phone ?? null,
+          senderName: "Operador (Celular)",
+          direction: "outbound",
+          body: text,
+          status: "sent",
+          isRead: true,
+          sentAt,
+          waMessageId: item.key?.id ?? null,
+        }).onConflictDoNothing();
+      } else {
+        // Record inbound messages from client
+        await db.insert(whatsappMessagesTable).values({
+          workspaceId,
+          clientId: matchingClient?.id ?? null,
+          transactionId,
+          dedupeKey,
+          kind: "client_reply",
+          recipient: session.phone ?? "Nexus",
+          senderPhone: canonicalSender || normalizedSender || jidClean,
+          senderName: matchingClient?.name ?? item.pushName ?? "Cliente",
+          direction: "inbound",
+          body: text,
+          status: "received",
+          isRead: false,
+          sentAt,
+          waMessageId: item.key?.id ?? null,
+        }).onConflictDoNothing();
 
-      logger.info({ workspaceId, sender, clientName: matchingClient?.name }, "WhatsApp incoming message recorded from client");
+        logger.info({ workspaceId, sender: canonicalSender || jidClean, clientName: matchingClient?.name, body: text.slice(0, 50) }, "WhatsApp incoming message recorded from client");
+      }
     } catch (err) {
-      logger.error({ err, workspaceId, sender }, "Failed to persist WhatsApp incoming message");
+      logger.error({ err, workspaceId, jidClean }, "Failed to persist WhatsApp message from messages.upsert");
     }
   }
 }
@@ -485,7 +647,7 @@ export async function sendWhatsAppMessage(
   const session = connectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
-  const target = jid ?? `${phone}@s.whatsapp.net`;
+  const target = jid ?? (await resolveDestinationJid(session, phone));
   const id = stableMessageId(messageId);
 
   let fallbackReason: string | undefined;
@@ -546,7 +708,7 @@ export async function sendManualTextMessage(
 
   const messageId = randomUUID();
   const id = stableMessageId(messageId);
-  const target = `${phone}@s.whatsapp.net`;
+  const target = await resolveDestinationJid(session, phone);
 
   const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
   const waMessageId = sent?.key?.id ?? null;

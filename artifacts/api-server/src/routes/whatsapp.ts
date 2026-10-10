@@ -12,15 +12,17 @@ import {
 import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest } from "../middlewares/auth";
-import { enqueueManualBilling, requeueMessage } from "../services/whatsapp-automation";
-import { callName, composePreview } from "../services/whatsapp-compose";
+import { enqueueManualBilling, requeueMessage, triggerImmediateWorker } from "../services/whatsapp-automation";
+import { callName, composePreview, composeReceipt, storedBody } from "../services/whatsapp-compose";
 import {
+  canonicalBrazilianPhone,
   checkWhatsAppNumber,
   connectWhatsApp,
   disconnectWhatsApp,
   getWhatsAppStatus,
   normalizeWhatsAppPhone,
   normalizeWhatsAppPhoneList,
+  phonesMatch,
   sendManualTextMessage,
 } from "../services/whatsapp-session";
 import { sendTestMessage, TestSendError } from "../services/whatsapp-test";
@@ -739,6 +741,24 @@ router.get("/monitoring/stats", async (req, res) => {
   }
 });
 
+function formatPhoneDisplayServer(raw: string): string {
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 13 && digits.startsWith("55")) {
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length === 12 && digits.startsWith("55")) {
+    return `+55 (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  }
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return raw;
+}
+
 router.get("/monitoring/conversations", async (req, res) => {
   const wsId = workspaceId(req);
   const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
@@ -749,9 +769,19 @@ router.get("/monitoring/conversations", async (req, res) => {
     const clientMap = new Map(allClients.map(c => [c.id, c]));
     const phoneToClientMap = new Map<string, typeof allClients[0]>();
     for (const c of allClients) {
+      if (!c.phone) continue;
       const norm = normalizeWhatsAppPhone(c.phone);
+      const canon = canonicalBrazilianPhone(c.phone);
       if (norm) phoneToClientMap.set(norm, c);
+      if (canon) phoneToClientMap.set(canon, c);
+      if (canon && canon.startsWith("55") && canon.length === 13) {
+        const without9 = `55${canon.slice(2, 4)}${canon.slice(5)}`;
+        phoneToClientMap.set(without9, c);
+      }
     }
+
+    const sessionStatus = await getWhatsAppStatus(wsId);
+    const selfPhoneCanon = sessionStatus.phone ? (canonicalBrazilianPhone(sessionStatus.phone) || normalizeWhatsAppPhone(sessionStatus.phone)) : null;
 
     const allMessages = await db.select().from(whatsappMessagesTable)
       .where(eq(whatsappMessagesTable.workspaceId, wsId))
@@ -767,16 +797,25 @@ router.get("/monitoring/conversations", async (req, res) => {
     const conversationGroups = new Map<string, typeof allMessages>();
 
     for (const msg of allMessages) {
+      const rawTargetPhone = msg.direction === "inbound" ? msg.senderPhone : msg.recipient;
+      const targetPhoneNorm = normalizeWhatsAppPhone(rawTargetPhone);
+      const targetPhoneCanon = canonicalBrazilianPhone(rawTargetPhone) || targetPhoneNorm;
+
+      // Exclude internal test messages to self if there is no client associated
+      if (selfPhoneCanon && targetPhoneCanon === selfPhoneCanon && !msg.clientId) {
+        continue;
+      }
+
       let key: string;
-      if (msg.clientId) {
+      if (msg.clientId && clientMap.has(msg.clientId)) {
         key = `client:${msg.clientId}`;
       } else {
-        const phone = normalizeWhatsAppPhone(msg.direction === "inbound" ? msg.senderPhone : msg.recipient);
-        const matchedClient = phone ? phoneToClientMap.get(phone) : null;
+        const matchedClient = (targetPhoneNorm ? phoneToClientMap.get(targetPhoneNorm) : null) ||
+                              (targetPhoneCanon ? phoneToClientMap.get(targetPhoneCanon) : null);
         if (matchedClient) {
           key = `client:${matchedClient.id}`;
-        } else if (phone) {
-          key = `phone:${phone}`;
+        } else if (targetPhoneCanon) {
+          key = `phone:${targetPhoneCanon}`;
         } else {
           key = `msg:${msg.id}`;
         }
@@ -787,11 +826,14 @@ router.get("/monitoring/conversations", async (req, res) => {
       conversationGroups.set(key, list);
     }
 
-    // Include clients with registered phone or pending transaction so they appear for charging
+    // Include clients with open transactions or if searching
     for (const client of allClients) {
       const key = `client:${client.id}`;
+      const hasPendingTxs = allTransactions.some(t => t.clientId === client.id);
       if (!conversationGroups.has(key)) {
-        conversationGroups.set(key, []);
+        if (hasPendingTxs || search) {
+          conversationGroups.set(key, []);
+        }
       }
     }
 
@@ -805,7 +847,7 @@ router.get("/monitoring/conversations", async (req, res) => {
       if (key.startsWith("client:")) {
         const cId = key.replace("client:", "");
         client = clientMap.get(cId) ?? null;
-        targetPhone = client?.phone ? (normalizeWhatsAppPhone(client.phone) || client.phone) : "";
+        targetPhone = client?.phone ? (canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone) || client.phone) : "";
       } else if (key.startsWith("phone:")) {
         targetPhone = key.replace("phone:", "");
         client = phoneToClientMap.get(targetPhone) ?? null;
@@ -827,10 +869,21 @@ router.get("/monitoring/conversations", async (req, res) => {
       const unreadCount = msgs.filter(m => m.direction === "inbound" && !m.isRead).length;
       const hasReplied = inboundCount > 0;
 
+      let displayName = client?.name;
+      if (!displayName) {
+        if (lastMessage?.senderName && lastMessage.senderName !== "Nexus" && lastMessage.senderName !== "Cliente") {
+          displayName = lastMessage.senderName;
+        } else if (targetPhone) {
+          displayName = formatPhoneDisplayServer(targetPhone);
+        } else {
+          displayName = "Contato";
+        }
+      }
+
       const conversationItem = {
         id: client?.id ?? targetPhone,
         clientId: client?.id ?? null,
-        clientName: client?.name ?? lastMessage?.senderName ?? (targetPhone ? `+${targetPhone}` : "Contato"),
+        clientName: displayName,
         phone: targetPhone || client?.phone || lastMessage?.recipient || lastMessage?.senderPhone || "",
         document: client?.document ?? null,
         optIn: client?.whatsappOptIn ?? false,
@@ -900,28 +953,42 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
     const isUuid = z.string().uuid().safeParse(target).success;
     let client: any = null;
     let phone = normalizeWhatsAppPhone(target);
+    const targetCanon = canonicalBrazilianPhone(target);
 
     if (isUuid) {
       const [foundClient] = await db.select().from(clientsTable)
         .where(and(eq(clientsTable.id, target), eq(clientsTable.workspaceId, wsId))).limit(1);
       client = foundClient ?? null;
       if (client?.phone) phone = normalizeWhatsAppPhone(client.phone);
-    } else if (phone) {
+    } else if (phone || targetCanon) {
       const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
-      client = allClients.find(c => normalizeWhatsAppPhone(c.phone) === phone) ?? null;
+      client = allClients.find(c => phonesMatch(c.phone, target)) ?? null;
+    }
+
+    const phoneSet = new Set<string>();
+    if (phone) phoneSet.add(phone);
+    if (targetCanon) phoneSet.add(targetCanon);
+    if (client?.phone) {
+      const cNorm = normalizeWhatsAppPhone(client.phone);
+      const cCanon = canonicalBrazilianPhone(client.phone);
+      if (cNorm) phoneSet.add(cNorm);
+      if (cCanon) phoneSet.add(cCanon);
+      if (cCanon && cCanon.startsWith("55") && cCanon.length === 13) {
+        phoneSet.add(`55${cCanon.slice(2, 4)}${cCanon.slice(5)}`);
+      }
     }
 
     const conditions = [];
     if (client) {
       conditions.push(eq(whatsappMessagesTable.clientId, client.id));
     }
-    if (phone) {
-      conditions.push(eq(whatsappMessagesTable.recipient, phone));
-      conditions.push(eq(whatsappMessagesTable.senderPhone, phone));
+    for (const p of phoneSet) {
+      conditions.push(eq(whatsappMessagesTable.recipient, p));
+      conditions.push(eq(whatsappMessagesTable.senderPhone, p));
     }
 
     if (conditions.length === 0) {
-      res.json({ messages: [], client: null, transactions: [] });
+      res.json({ messages: [], client: null, openTransactions: [], allTransactions: [] });
       return;
     }
 
@@ -950,9 +1017,9 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
         .catch(err => logger.warn({ err }, "Failed to mark messages as read"));
     }
 
-    let openTransactions: any[] = [];
+    let allClientTransactions: any[] = [];
     if (client) {
-      openTransactions = await db.select().from(financialTransactionsTable)
+      allClientTransactions = await db.select().from(financialTransactionsTable)
         .where(and(
           eq(financialTransactionsTable.workspaceId, wsId),
           eq(financialTransactionsTable.clientId, client.id),
@@ -961,9 +1028,11 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
         .orderBy(asc(financialTransactionsTable.dueDate));
     }
 
+    const openTransactions = allClientTransactions.filter(t => t.status === "pending");
+
     res.json({
       client,
-      phone,
+      phone: targetCanon || phone || client?.phone || "",
       messages: messages.map(({ message, txAmount, txDueDate, txDescription, txStatus }) => ({
         ...message,
         transaction: message.transactionId ? {
@@ -975,6 +1044,7 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
         } : null,
       })),
       openTransactions,
+      allTransactions: allClientTransactions,
     });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId, target }, "WhatsApp monitoring messages failed");
@@ -1005,13 +1075,13 @@ router.post("/monitoring/conversations/:target/messages", async (req, res) => {
         .where(and(eq(clientsTable.id, target), eq(clientsTable.workspaceId, wsId))).limit(1);
       if (client) {
         clientId = client.id;
-        destinationPhone = normalizeWhatsAppPhone(client.phone);
+        destinationPhone = canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone);
       }
     } else {
-      destinationPhone = normalizeWhatsAppPhone(target);
+      destinationPhone = canonicalBrazilianPhone(target) || normalizeWhatsAppPhone(target);
       if (destinationPhone) {
         const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
-        const matched = allClients.find(c => normalizeWhatsAppPhone(c.phone) === destinationPhone);
+        const matched = allClients.find(c => phonesMatch(c.phone, destinationPhone));
         if (matched) {
           clientId = matched.id;
         }
@@ -1058,10 +1128,130 @@ router.post("/monitoring/conversations/:target/send-pix", async (req, res) => {
       res.status(result.conflict ? 409 : 422).json({ error: result.reason });
       return;
     }
+    triggerImmediateWorker();
     res.json({ ok: true, message: result.message });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId }, "Monitoring send Pix failed");
     res.status(500).json({ error: "Falha ao enviar Pix para o cliente" });
+  }
+});
+
+router.post("/monitoring/conversations/:target/mark-paid", async (req, res) => {
+  const wsId = workspaceId(req);
+  const parsed = z.object({
+    transactionId: z.string().uuid(),
+    sendReceipt: z.boolean().optional().default(true),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({ error: "transactionId é obrigatório" });
+    return;
+  }
+
+  try {
+    const { transactionId, sendReceipt } = parsed.data;
+    const [tx] = await db.select().from(financialTransactionsTable)
+      .where(and(eq(financialTransactionsTable.id, transactionId), eq(financialTransactionsTable.workspaceId, wsId))).limit(1);
+
+    if (!tx) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+
+    const updated = await db.update(financialTransactionsTable)
+      .set({
+        status: "paid",
+        paidAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(financialTransactionsTable.id, transactionId), eq(financialTransactionsTable.workspaceId, wsId)))
+      .returning();
+
+    // Optionally enqueue receipt message via Nexus
+    if (sendReceipt && tx.clientId) {
+      const [client] = await db.select().from(clientsTable)
+        .where(and(eq(clientsTable.id, tx.clientId), eq(clientsTable.workspaceId, wsId))).limit(1);
+      const settings = await readSettings(wsId);
+      if (client?.whatsappOptIn && client.phone && settings?.receiptEnabled !== false) {
+        const phone = normalizeWhatsAppPhone(client.phone);
+        if (phone) {
+          const receipt = composeReceipt({ ...tx, status: "paid" }, client, settings);
+          await db.insert(whatsappMessagesTable).values({
+            workspaceId: wsId,
+            clientId: client.id,
+            transactionId: tx.id,
+            dedupeKey: `${wsId}:receipt:${tx.id}:${Date.now()}`,
+            kind: "payment_receipt",
+            recipient: phone,
+            body: storedBody(receipt),
+            status: "queued",
+          }).onConflictDoNothing();
+          triggerImmediateWorker();
+        }
+      }
+    }
+
+    res.json({ ok: true, transaction: updated[0] });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "Failed to mark transaction as paid from monitoring");
+    res.status(500).json({ error: "Falha ao registrar quitação da fatura" });
+  }
+});
+
+router.post("/monitoring/conversations/:target/toggle-optin", async (req, res) => {
+  const wsId = workspaceId(req);
+  const target = req.params.target;
+  const parsed = z.object({
+    optIn: z.boolean(),
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({ error: "optIn é obrigatório" });
+    return;
+  }
+
+  try {
+    const isUuid = z.string().uuid().safeParse(target).success;
+    let clientId: string | null = null;
+
+    if (isUuid) {
+      clientId = target;
+    } else {
+      const allClients = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId));
+      const found = allClients.find(c => phonesMatch(c.phone, target));
+      if (found) clientId = found.id;
+    }
+
+    if (!clientId) {
+      res.status(404).json({ error: "Cliente não encontrado para alterar opt-in" });
+      return;
+    }
+
+    const [updated] = await db.update(clientsTable)
+      .set({
+        whatsappOptIn: parsed.data.optIn,
+        whatsappOptInAt: parsed.data.optIn ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(clientsTable.id, clientId), eq(clientsTable.workspaceId, wsId)))
+      .returning();
+
+    res.json({ ok: true, client: updated });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "Failed to toggle WhatsApp opt-in");
+    res.status(500).json({ error: "Falha ao atualizar consentimento" });
+  }
+});
+
+router.post("/monitoring/reconnect", async (req, res) => {
+  const wsId = workspaceId(req);
+  try {
+    await connectWhatsApp(wsId);
+    const status = await getWhatsAppStatus(wsId);
+    res.json({ ok: true, status });
+  } catch (error) {
+    logger.error({ err: error, workspaceId: wsId }, "Failed to reconnect WhatsApp from monitoring");
+    res.status(500).json({ error: "Falha ao iniciar reconexão do WhatsApp" });
   }
 });
 

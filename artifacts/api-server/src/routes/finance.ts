@@ -980,7 +980,9 @@ router.get("/projects/:projectId/clients", requireAuth, async (req: Request, res
       ));
 
     const contractByClientId = new Map(contracts.map(c => [c.clientId, c]));
-    const clientIdsWithContract = contracts.map(c => c.clientId);
+    const sales = await db.select({ clientId: clientSalesTable.clientId }).from(clientSalesTable)
+      .where(and(eq(clientSalesTable.workspaceId, workspaceId), eq(clientSalesTable.projectId, projectId)));
+    const clientIdsWithContract = [...new Set([...contracts.map(c => c.clientId), ...sales.map(s => s.clientId)])];
 
     // 2. Busca clientes vinculados diretamente via clientsTable.projectId OU via clientContractsTable.projectId
     const whereConditions = [
@@ -2015,6 +2017,80 @@ router.get("/export", requireAuth, async (req: Request, res: Response) => {
     res.send("\uFEFF" + csv);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── Configurações Financeiras (Reserva de Emergência e Impostos) ─────────────
+router.get("/settings", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+
+    const [settings] = await db
+      .select()
+      .from(financialSettingsTable)
+      .where(eq(financialSettingsTable.workspaceId, workspaceId))
+      .limit(1);
+
+    res.json({
+      settings: settings ?? {
+        workspaceId,
+        emergencyReserveTarget: 5000000,
+        taxRatePercent: 600,
+      },
+    });
+  } catch (err) {
+    console.error("Erro ao buscar configurações financeiras:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/settings", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const workspaceId = await getWorkspaceId(req);
+    if (!workspaceId) { res.status(403).json({ error: "No workspace" }); return; }
+
+    const { emergencyReserveTarget, taxRatePercent } = req.body || {};
+
+    const [existing] = await db
+      .select()
+      .from(financialSettingsTable)
+      .where(eq(financialSettingsTable.workspaceId, workspaceId))
+      .limit(1);
+
+    const updateData: Partial<typeof financialSettingsTable.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+
+    if (typeof emergencyReserveTarget === "number" && !isNaN(emergencyReserveTarget) && emergencyReserveTarget >= 0) {
+      updateData.emergencyReserveTarget = Math.round(emergencyReserveTarget);
+    }
+    if (typeof taxRatePercent === "number" && !isNaN(taxRatePercent) && taxRatePercent >= 0) {
+      updateData.taxRatePercent = Math.round(taxRatePercent);
+    }
+
+    let saved;
+    if (existing) {
+      [saved] = await db
+        .update(financialSettingsTable)
+        .set(updateData)
+        .where(eq(financialSettingsTable.id, existing.id))
+        .returning();
+    } else {
+      [saved] = await db
+        .insert(financialSettingsTable)
+        .values({
+          workspaceId,
+          emergencyReserveTarget: updateData.emergencyReserveTarget ?? 5000000,
+          taxRatePercent: updateData.taxRatePercent ?? 600,
+        })
+        .returning();
+    }
+
+    res.json({ success: true, settings: saved });
+  } catch (err) {
+    console.error("Erro ao atualizar configurações financeiras:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

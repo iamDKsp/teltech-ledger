@@ -545,6 +545,7 @@ export const saleItemsTable = pgTable("sale_items", {
   startDate: timestamp("start_date"),   // data do 1º vencimento (null enquanto aguarda entrega)
   endDate: timestamp("end_date"),
   fixedAmount: integer("fixed_amount"), // usado quando a mensalidade não tem módulos
+  billingSource: text("billing_source").notNull().default("ledger"), // ledger | external (faturas enviadas pelo sistema de origem)
   generatedThrough: text("generated_through"), // 'YYYY-MM' do último mês gerado
 
   status: text("status").notNull().default("active"), // 'active' | 'awaiting_start' | 'paused' | 'cancelled' | 'completed'
@@ -740,6 +741,36 @@ export const financialAuditLogsTable = pgTable("financial_audit_logs", {
 });
 
 export type FinancialAuditLog = typeof financialAuditLogsTable.$inferSelect;
+
+// IDs externos são separados dos UUIDs internos. Mantemos o vínculo mesmo se
+// alguém apagar o registro interno, para rejeitar recriação acidental em retries.
+export const inboundWebhookEntitiesTable = pgTable("inbound_webhook_entities", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  kind: text("kind").notNull(), // client | base | invoice
+  externalId: text("external_id").notNull(),
+  internalId: uuid("internal_id").notNull(),
+  parentExternalId: text("parent_external_id"),
+  version: integer("version").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("inbound_webhook_entity_identity_uq").on(table.workspaceId, table.source, table.kind, table.externalId),
+]);
+
+export const inboundWebhookEventsTable = pgTable("inbound_webhook_events", {
+  id: serial("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  eventId: text("event_id").notNull(),
+  eventType: text("event_type").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  result: jsonb("result").$type<Record<string, unknown>>().notNull(),
+  processedAt: timestamp("processed_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("inbound_webhook_event_identity_uq").on(table.workspaceId, table.source, table.eventId),
+]);
 
 // ─── WhatsApp ─────────────────────────────────────────────────────────────────
 // Credentials and Signal keys are encrypted by the API before they reach these

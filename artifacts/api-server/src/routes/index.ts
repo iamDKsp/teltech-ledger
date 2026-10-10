@@ -13,6 +13,7 @@ import goalsRouter from "./goals";
 import workspaceRouter from "./workspace";
 import meetingsRouter from "./meetings";
 import whatsappRouter from "./whatsapp";
+import webhookIntegrationsRouter from "./webhook-integrations";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use("/goals", goalsRouter);
 router.use("/workspace", workspaceRouter);
 router.use("/meetings", meetingsRouter);
 router.use("/whatsapp", whatsappRouter);
+router.use("/integrations/webhooks", webhookIntegrationsRouter);
 
 export default router;

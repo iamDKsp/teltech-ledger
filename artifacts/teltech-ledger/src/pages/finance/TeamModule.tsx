@@ -29,6 +29,7 @@ import {
   X,
   Send,
   Zap,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../../lib/api";
@@ -105,6 +106,17 @@ export interface PerformanceSummary {
   totalClientsClosed: number;
   activeMembersCount: number;
   membersHittingTargetCount: number;
+  currentCash?: number;
+  cashAfterMaxPayroll?: number;
+  cashCoverageRatio?: number | null;
+  cashCommitmentPercent?: number;
+  accountsBreakdown?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    color: string;
+    currentBalance: number;
+  }>;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,7 +150,13 @@ const MONTH_NAMES = [
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-export function TeamModule({ onGoToTransactions }: { onGoToTransactions?: () => void }) {
+export function TeamModule({
+  onGoToTransactions,
+  currentCash: propCurrentCash,
+}: {
+  onGoToTransactions?: () => void;
+  currentCash?: number;
+}) {
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
@@ -156,6 +174,7 @@ export function TeamModule({ onGoToTransactions }: { onGoToTransactions?: () => 
   // Modal Fechamento Folha
   const [closingPayroll, setClosingPayroll] = useState(false);
   const [payrollModalOpen, setPayrollModalOpen] = useState(false);
+  const [showCashBreakdown, setShowCashBreakdown] = useState(false);
   const [payrollDueDate, setPayrollDueDate] = useState(() => {
     const d = new Date(selectedYear, selectedMonth, 5);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-05`;
@@ -264,6 +283,13 @@ export function TeamModule({ onGoToTransactions }: { onGoToTransactions?: () => 
       setClosingPayroll(false);
     }
   };
+
+  const effectiveCash = typeof propCurrentCash === "number" ? propCurrentCash : (summary?.currentCash ?? 0);
+  const maxPayroll = summary?.totalMaxProjectedPayroll ?? 0;
+  const cashAfterMax = effectiveCash - maxPayroll;
+  const isCashHealthy = effectiveCash >= maxPayroll;
+  const coverageRatio = maxPayroll > 0 ? Number((effectiveCash / maxPayroll).toFixed(1)) : 0;
+  const commitmentPercent = effectiveCash > 0 ? Math.min(100, Math.round((maxPayroll / effectiveCash) * 100)) : (maxPayroll > 0 ? 100 : 0);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px 20px", gap: 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
@@ -387,20 +413,140 @@ export function TeamModule({ onGoToTransactions }: { onGoToTransactions?: () => 
             </div>
           </div>
 
-          {/* Card 2: Provisão Teto com Metas 100% */}
-          <div style={{ background: "rgba(22,22,26,0.85)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "#F59E0B" }} />
+          {/* Card 2: Provisão Máxima vs. Caixa Atual */}
+          <div
+            style={{
+              background: "rgba(22,22,26,0.85)",
+              border: `1px solid ${isCashHealthy ? "rgba(245,158,11,0.22)" : "rgba(239,68,68,0.3)"}`,
+              borderRadius: 12,
+              padding: "16px 18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 9,
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                background: isCashHealthy ? "linear-gradient(90deg, #F59E0B, #10B981)" : "#EF4444",
+              }}
+            />
+
+            {/* Cabeçalho */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase" }}>
-                Provisão Máxima (Se Todos Baterem)
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                Provisão Máxima vs. Caixa
               </span>
-              <ShieldCheck size={16} style={{ color: "#F59E0B" }} />
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: isCashHealthy ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+                  color: isCashHealthy ? "#10B981" : "#EF4444",
+                  border: `1px solid ${isCashHealthy ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {isCashHealthy ? (
+                  <>
+                    <CheckCircle2 size={11} /> Cobre 100%
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle size={11} /> Déficit
+                  </>
+                )}
+              </span>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#FBBF24" }}>
-              {brl(summary.totalMaxProjectedPayroll)}
+
+            {/* Comparativo lado a lado: Provisão Máxima vs Caixa Atual */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, alignItems: "flex-end" }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase" }}>
+                  Provisão Máxima
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#FBBF24", lineHeight: 1.2, marginTop: 2 }}>
+                  {brl(summary.totalMaxProjectedPayroll)}
+                </div>
+              </div>
+
+              <div style={{ borderLeft: "1px solid rgba(255,255,255,0.08)", paddingLeft: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#a1a1aa", textTransform: "uppercase" }}>
+                    Caixa Atual
+                  </span>
+                  {summary.accountsBreakdown && summary.accountsBreakdown.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCashBreakdown(true)}
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 4,
+                        padding: "1px 5px",
+                        color: "#c4b5fd",
+                        fontSize: 9,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                      title="Ver contas bancárias"
+                    >
+                      Contas
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: isCashHealthy ? "#10B981" : "#EF4444", lineHeight: 1.2, marginTop: 2 }}>
+                  {brl(effectiveCash)}
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: "#a1a1aa" }}>
-              Bônus em Risco/Aberto: <span style={{ color: "#F59E0B", fontWeight: 700 }}>{brl(summary.totalTargetBonusesAtRisk)}</span>
+
+            {/* Termômetro de Comprometimento de Caixa */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#71717a", marginBottom: 3 }}>
+                <span>Comprometimento do Caixa</span>
+                <span style={{ fontWeight: 700, color: !isCashHealthy ? "#EF4444" : commitmentPercent > 65 ? "#F59E0B" : "#10B981" }}>
+                  {effectiveCash > 0 ? `${commitmentPercent}% da liquidez` : "100% (Sem saldo)"}
+                </span>
+              </div>
+              <div style={{ height: 5, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, commitmentPercent)}%`,
+                    background: !isCashHealthy
+                      ? "linear-gradient(90deg, #F59E0B, #EF4444)"
+                      : commitmentPercent > 65
+                      ? "linear-gradient(90deg, #10B981, #F59E0B)"
+                      : "linear-gradient(90deg, #059669, #10B981)",
+                    borderRadius: 999,
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Linha Inferior com Sobra/Déficit e Bônus em Risco */}
+            <div style={{ fontSize: 11, color: "#a1a1aa", display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+              <span>
+                {isCashHealthy ? "Sobra Líquida:" : "Déficit:"}{" "}
+                <strong style={{ color: isCashHealthy ? "#10B981" : "#EF4444", fontWeight: 700 }}>
+                  {brl(Math.abs(cashAfterMax))}
+                </strong>
+              </span>
+              <span style={{ fontSize: 10, color: "#71717a" }}>
+                Bônus em Risco: <span style={{ color: "#F59E0B", fontWeight: 700 }}>{brl(summary.totalTargetBonusesAtRisk)}</span>
+              </span>
             </div>
           </div>
 
@@ -913,14 +1059,119 @@ export function TeamModule({ onGoToTransactions }: { onGoToTransactions?: () => 
               </label>
             </div>
 
-            <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 12, fontSize: 12, color: "#a1a1aa", display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: 8, padding: 12, fontSize: 12, color: "#a1a1aa", display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>Total de Proventos a Lançar:</span>
                 <strong style={{ color: "#10B981" }}>{summary ? brl(summary.totalRealizedPayroll) : "R$ 0,00"}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Caixa Atual em Contas:</span>
+                <strong style={{ color: "#38BDF8" }}>{brl(effectiveCash)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 4 }}>
+                <span>Saldo Pós-Liquidação da Folha:</span>
+                <strong style={{ color: effectiveCash >= (summary?.totalRealizedPayroll ?? 0) ? "#10B981" : "#EF4444" }}>
+                  {brl(effectiveCash - (summary?.totalRealizedPayroll ?? 0))}
+                </strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>Colaboradores com Pagamento:</span>
                 <strong style={{ color: "#fff" }}>{performance.filter((p) => p.financials.totalPayable > 0).length} pessoas</strong>
+              </div>
+            </div>
+          </div>
+        </Drawer>
+      )}
+
+      {/* ─── Modal: Detalhamento de Contas Bancárias & Liquidez ────────────── */}
+      {showCashBreakdown && (
+        <Drawer
+          title="Detalhamento de Caixa vs. Provisão Máxima"
+          icon={<Wallet size={18} />}
+          onClose={() => setShowCashBreakdown(false)}
+          width={460}
+          footer={
+            <button
+              type="button"
+              onClick={() => setShowCashBreakdown(false)}
+              style={drawerBtn.ghost}
+            >
+              Fechar
+            </button>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <p style={{ fontSize: 13, color: "#a1a1aa", margin: 0, lineHeight: 1.5 }}>
+              Comparativo consolidado entre o saldo disponível nas contas ativas e o teto máximo de custos da equipe se todos baterem suas metas.
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 14px" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#F59E0B", textTransform: "uppercase" }}>Teto da Folha</span>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#FBBF24", marginTop: 4 }}>
+                  {brl(summary?.totalMaxProjectedPayroll)}
+                </div>
+                <span style={{ fontSize: 10, color: "#a1a1aa", marginTop: 2, display: "block" }}>
+                  Fixos + Comissões + Bônus
+                </span>
+              </div>
+
+              <div style={{ background: isCashHealthy ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", border: `1px solid ${isCashHealthy ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`, borderRadius: 10, padding: "12px 14px" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: isCashHealthy ? "#10B981" : "#EF4444", textTransform: "uppercase" }}>Caixa Consolidado</span>
+                <div style={{ fontSize: 18, fontWeight: 800, color: isCashHealthy ? "#10B981" : "#EF4444", marginTop: 4 }}>
+                  {brl(effectiveCash)}
+                </div>
+                <span style={{ fontSize: 10, color: "#a1a1aa", marginTop: 2, display: "block" }}>
+                  {isCashHealthy ? `Sobra: ${brl(cashAfterMax)}` : `Déficit: ${brl(Math.abs(cashAfterMax))}`}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{ fontSize: 12, fontWeight: 700, color: "#888", textTransform: "uppercase", marginBottom: 8, letterSpacing: "0.5px" }}>
+                Saldos por Conta Ativa
+              </h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {summary?.accountsBreakdown && summary.accountsBreakdown.length > 0 ? (
+                  summary.accountsBreakdown.map((acc) => (
+                    <div
+                      key={acc.id}
+                      style={{
+                        background: "rgba(0,0,0,0.3)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                        borderRadius: 8,
+                        padding: "10px 14px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: acc.color || "#7C5AC2",
+                          }}
+                        />
+                        <div>
+                          <strong style={{ fontSize: 13, color: "#fff" }}>{acc.name}</strong>
+                          <span style={{ fontSize: 10, color: "#71717a", marginLeft: 6, textTransform: "uppercase" }}>
+                            {acc.type === "checking" ? "Conta Corrente" : acc.type === "investment" ? "Investimento" : acc.type === "cash" ? "Caixa Físico" : acc.type}
+                          </span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: acc.currentBalance >= 0 ? "#fff" : "#EF4444" }}>
+                        {brl(acc.currentBalance)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p style={{ fontSize: 12, color: "#71717a", margin: 0 }}>
+                    Nenhuma conta bancária ativa cadastrada.
+                  </p>
+                )}
               </div>
             </div>
           </div>

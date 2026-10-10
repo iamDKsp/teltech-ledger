@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle } from "lucide-react";
+import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle, Webhook } from "lucide-react";
 import { API } from "../lib/api";
 import { WhatsAppSettingsPanel } from "../components/WhatsAppSettingsPanel";
+import { WebhookSettingsPanel } from "../components/WebhookSettingsPanel";
 
 export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
-  const [activeTab, setActiveTab] = useState<"geral" | "reunioes" | "whatsapp">("geral");
+  const [activeTab, setActiveTab] = useState<"geral" | "reunioes" | "whatsapp" | "integracoes">("geral");
   const [meetings, setMeetings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,11 +143,16 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
           <MessageCircle size={18} />
           WhatsApp
         </button>
+        <button onClick={() => setActiveTab("integracoes")}
+          className={`flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2.5 text-left transition-colors ${activeTab === "integracoes" ? "bg-primary/15 font-semibold text-primary" : "text-muted-foreground hover:bg-muted"}`}>
+          <Webhook size={18} /> Integrações
+        </button>
       </div>
 
       {/* Conteúdo Principal */}
       <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
         {activeTab === "whatsapp" && <WhatsAppSettingsPanel />}
+        {activeTab === "integracoes" && <WebhookSettingsPanel workspaceId={workspace?.id} />}
         {activeTab === "geral" && (
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>Geral</h1>

@@ -2167,6 +2167,8 @@ function CockpitKpiCard({
   icon: Icon,
   color = "#8B5CF6",
   alert = false,
+  onAction,
+  actionLabel,
 }: {
   title: string;
   value: string;
@@ -2175,6 +2177,8 @@ function CockpitKpiCard({
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   color?: string;
   alert?: boolean;
+  onAction?: () => void;
+  actionLabel?: string;
 }) {
   const isMobile = useIsMobile();
   return (
@@ -2245,8 +2249,44 @@ function CockpitKpiCard({
       </div>
 
       {subtitle && (
-        <div style={{ fontSize: 12, color: alert ? "#EF4444" : "#71717a", fontWeight: 500, marginTop: 4 }}>
-          {subtitle}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: alert ? "#EF4444" : "#71717a", fontWeight: 500 }}>
+            {subtitle}
+          </span>
+          {onAction && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAction();
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 6,
+                padding: "2px 8px",
+                color: "#d4d4d8",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#fff";
+                e.currentTarget.style.background = "rgba(255,255,255,0.14)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "#d4d4d8";
+                e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+              }}
+            >
+              <SlidersHorizontal style={{ width: 11, height: 11 }} />
+              {actionLabel || "Ajustar"}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2299,6 +2339,7 @@ export function FinanceiroPage() {
   const [sendingBillingId, setSendingBillingId] = useState<string | null>(null);
   const [rejectingTxId, setRejectingTxId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [showReserveModal, setShowReserveModal] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
@@ -2321,9 +2362,9 @@ export function FinanceiroPage() {
 
   // ─── Fetch All Data ──────────────────────────────────────────────────────────
 
-  const loadAllData = useCallback(async () => {
+  const loadAllData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const m = selectedMonth;
       const y = selectedYear;
 
@@ -2360,12 +2401,18 @@ export function FinanceiroPage() {
     } catch (err) {
       console.error("Erro ao carregar dados financeiros:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
     loadAllData();
+  }, [loadAllData]);
+
+  useEffect(() => {
+    const refresh = () => void loadAllData(true);
+    window.addEventListener("teltech:finance-synced", refresh);
+    return () => window.removeEventListener("teltech:finance-synced", refresh);
   }, [loadAllData]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
@@ -2898,6 +2945,7 @@ export function FinanceiroPage() {
                 onSendWhatsApp={handleSendWhatsAppPix}
                 onMarkPaid={handleMarkPaid}
                 onResetAll={loadAllData}
+                onOpenReserveSettings={() => setShowReserveModal(true)}
               />
             )}
 
@@ -2969,7 +3017,10 @@ export function FinanceiroPage() {
             )}
 
             {activeTab === "team" && (
-              <TeamModule onGoToTransactions={() => setActiveTab("transactions")} />
+              <TeamModule
+                onGoToTransactions={() => setActiveTab("transactions")}
+                currentCash={dashboard?.totalCash}
+              />
             )}
 
             {activeTab === "dre" && (
@@ -3106,6 +3157,26 @@ export function FinanceiroPage() {
         />
       )}
 
+      {showReserveModal && dashboard && (
+        <ReserveSettingsModal
+          currentTarget={dashboard.emergencyReserveTarget}
+          onClose={() => setShowReserveModal(false)}
+          onSaved={(newTargetCents) => {
+            setShowReserveModal(false);
+            setDashboard((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    emergencyReserveTarget: newTargetCents,
+                    isBelowReserve: prev.totalCash < newTargetCents,
+                  }
+                : prev
+            );
+            loadAllData();
+          }}
+        />
+      )}
+
       {rejectingTxId && (
         <Drawer
           title="Reprovação de Despesa (Alçada)"
@@ -3182,6 +3253,7 @@ function CockpitView({
   onSendWhatsApp,
   onMarkPaid,
   onResetAll,
+  onOpenReserveSettings,
 }: {
   dashboard: DashboardData | null;
   clients: Client[];
@@ -3192,6 +3264,7 @@ function CockpitView({
   onSendWhatsApp: (client: Client, tx?: Transaction) => void;
   onMarkPaid: (tx: Transaction) => void;
   onResetAll?: () => void;
+  onOpenReserveSettings?: () => void;
 }) {
   const isMobile = useIsMobile();
   if (!dashboard) return null;
@@ -3284,6 +3357,8 @@ function CockpitView({
           icon={Wallet}
           color={dashboard.isBelowReserve ? "#EF4444" : "#10B981"}
           alert={dashboard.isBelowReserve}
+          onAction={onOpenReserveSettings}
+          actionLabel="Ajustar"
         />
 
         {/* 2. Resultado Líquido do Mês */}
@@ -6797,3 +6872,147 @@ function ClientModal({
     </Drawer>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODAL: CONFIGURAÇÃO DA RESERVA DE EMERGÊNCIA
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ReserveSettingsModal({
+  currentTarget,
+  onClose,
+  onSaved,
+}: {
+  currentTarget: number;
+  onClose: () => void;
+  onSaved: (newTargetCents: number) => void;
+}) {
+  const [val, setVal] = useState(
+    (currentTarget / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  );
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanNum = parseFloat(val.replace(/\./g, "").replace(",", "."));
+    if (isNaN(cleanNum) || cleanNum < 0) {
+      toast.error("Informe um valor válido para a meta de reserva.");
+      return;
+    }
+    const targetCents = Math.round(cleanNum * 100);
+    try {
+      setSaving(true);
+      await API.put("/finance/settings", {
+        emergencyReserveTarget: targetCents,
+      });
+      toast.success("Meta de reserva atualizada com sucesso!");
+      onSaved(targetCents);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Erro ao salvar meta de reserva.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Drawer
+      title="Meta da Reserva de Emergência"
+      icon={<Wallet size={18} />}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      width={420}
+      footer={
+        <>
+          <button type="button" onClick={onClose} style={drawerBtn.ghost}>
+            Cancelar
+          </button>
+          <button type="submit" disabled={saving} style={drawerBtn.primary(saving)}>
+            {saving ? "Salvando..." : "Salvar Meta"}
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <p style={{ fontSize: 13, color: "#a1a1aa", margin: 0, lineHeight: 1.5 }}>
+          Defina o patamar de segurança de caixa da Teltech. O indicador <strong>Reserva Alerta</strong> só será disparado quando o caixa consolidado cair abaixo desta meta.
+        </p>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 6 }}>
+            Meta da Reserva (R$) *
+          </label>
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: 11, color: "#71717a", fontSize: 14, fontWeight: 600 }}>
+              R$
+            </span>
+            <input
+              type="text"
+              required
+              autoFocus
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              placeholder="0,00"
+              style={{
+                width: "100%",
+                background: "#111113",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 8,
+                padding: "10px 12px 10px 38px",
+                color: "#fff",
+                fontSize: 15,
+                fontWeight: 700,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#71717a", marginBottom: 8 }}>
+            Atalhos rápidos:
+          </label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { label: "R$ 0 (Sem reserva)", value: 0 },
+              { label: "R$ 2.000", value: 2000 },
+              { label: "R$ 5.000", value: 5000 },
+              { label: "R$ 10.000", value: 10000 },
+              { label: "R$ 20.000", value: 20000 },
+            ].map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() =>
+                  setVal(preset.value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                }
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 6,
+                  padding: "4px 8px",
+                  color: "#d4d4d8",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+                  e.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                  e.currentTarget.style.color = "#d4d4d8";
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+

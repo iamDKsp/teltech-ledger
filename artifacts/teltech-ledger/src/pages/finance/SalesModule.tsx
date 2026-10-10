@@ -38,6 +38,7 @@ export interface SaleItemView {
   startDate: string | null;
   endDate: string | null;
   fixedAmount: number | null;
+  billingSource?: "ledger" | "external";
   currentMonthly: number;
   modules: SaleModuleView[];
   paid: number;
@@ -939,6 +940,7 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
   const st = SALE_STATUS[sale.status] ?? SALE_STATUS.active;
   const entryItems = sale.items.filter((i) => i.kind === "project");
   const subItems = sale.items.filter((i) => i.kind === "subscription");
+  const isExternal = sale.items.some((i) => i.billingSource === "external");
 
   return (
     <Drawer
@@ -953,7 +955,7 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
       onClose={onClose}
       width={620}
       footer={
-        sale.status !== "cancelled" ? (
+        sale.status !== "cancelled" && !isExternal ? (
           <>
             {sale.status === "active" ? (
               <button type="button" disabled={busy} onClick={() => changeStatus("paused")} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", color: "#F59E0B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
@@ -983,7 +985,11 @@ export function SaleManageModal({ sale, onClose, onChanged }: { sale: SaleView; 
         ))}
 
         {subItems.map((i) => (
-          <SubscriptionManager key={`${i.id}-${i.modules.length}-${i.status}`} item={i} catalog={catalog} onChanged={onChanged} />
+          i.billingSource === "external" ? <div key={i.id} className="glass space-y-2 rounded-xl border border-border p-4">
+            <p className="font-semibold text-primary">{i.label} · {brl(i.currentMonthly)}/mês</p>
+            <p className="text-sm text-muted-foreground">Mensalidade sincronizada. Faça alterações de valor e status no sistema de origem.</p>
+            <p className="text-xs text-muted-foreground">Pago {brl(i.paid)} · Em aberto {brl(i.pending)}</p>
+          </div> : <SubscriptionManager key={`${i.id}-${i.modules.length}-${i.status}`} item={i} catalog={catalog} onChanged={onChanged} />
         ))}
 
     </Drawer>

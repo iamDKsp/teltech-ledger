@@ -1,0 +1,332 @@
+PROMPT PARA A IA DESENVOLVEDORA DO SISTEMA DE ORIGEM
+Integração com Teltech Leadger — contrato v1
+
+Você é a IA responsável por desenvolver nosso outro sistema. Implemente nele o
+ENVIO de eventos para o webhook de entrada que já foi implementado no Leadger.
+O objetivo é centralizar no Leadger os clientes, suas bases/contas contratadas,
+mensalidades e parcelas, refletindo cadastros, alterações de valor e pagamentos.
+
+Não comece inventando um novo contrato de API: use exatamente o contrato abaixo.
+Primeiro inspecione seu projeto e identifique clientes, bases, contratos,
+faturas/parcelas, confirmação de pagamento e estorno. Implemente a integração no
+backend do seu sistema, com fila persistente e testes.
+
+1. RESPONSABILIDADES E RESULTADO ESPERADO
+
+Nosso lado (Leadger) recebe POST, valida assinatura e dados, localiza ou cria o
+cliente, cria/atualiza sua venda/contrato de mensalidade e suas faturas. Tudo
+confirma em uma transação de banco; só HTTP 200 com ok=true confirma a entrega.
+Cliente, base e fatura têm IDs externos permanentes e versões independentes.
+As transações financeiras atualizam status, valor, vencimento e, quando existe
+conta bancária vinculada, saldo. Correções e estornos também ajustam o saldo.
+Há auditoria e proteção contra eventos duplicados ou fora de ordem.
+
+Seu lado deve emitir eventos após o cadastro/alteração ser confirmado no banco.
+Cadastros e faturas continuam sendo administrados no seu sistema. Ele é a fonte
+dos dados integrados; o Leadger centraliza sua visão financeira. A integração é
+unidirecional: o Leadger não envia alterações de volta por este webhook.
+
+Uma base externa representa a conta/assinatura de um cliente no seu sistema.
+No Leadger ela vira um contrato comercial com item de mensalidade. Não crie uma
+conta bancária por cliente: contas bancárias são o caixa/banco da Teltech e são
+configuradas apenas no receptor. Um cliente pode ter mais de uma base.
+
+2. CONFIGURAÇÃO QUE PRECISAMOS RECEBER DO RESPONSÁVEL PELO LEADGER
+
+LEADGER_WEBHOOK_URL=https://DOMINIO-REAL/api/webhooks/inbound/SOURCE
+LEADGER_WEBHOOK_SOURCE=SOURCE
+LEADGER_WEBHOOK_SECRET=SEGREDO-COMPARTILHADO
+
+SOURCE é o identificador configurado no Leadger, por exemplo sistema-amigo.
+Não existe domínio nem segredo real neste arquivo; solicite os três valores ao
+responsável antes de ativar o envio. Guarde segredo em variável de ambiente ou
+secret manager do backend. Nunca no frontend, logs, Git ou nesta documentação.
+O mesmo segredo deve ser usado nos dois servidores. Cada integração tem seu
+próprio segredo e destino de workspace/produto; o emissor não escolhe UUIDs
+internos do Leadger e não pode mandar workspaceId/projectId/accountId no JSON.
+
+3. AUTENTICAÇÃO E TRANSPORTE
+
+Método: POST. Content-Type: application/json. Corpo UTF-8, até 256 KiB, sem gzip.
+Headers obrigatórios:
+  X-Leadger-Timestamp: Unix timestamp em SEGUNDOS, gerado na tentativa de envio.
+  X-Leadger-Signature: sha256=<hexadecimal minúsculo de 64 caracteres>
+
+Assinatura = HMAC-SHA256 com o segredo como TEXTO UTF-8, sobre a concatenação:
+  timestamp + "." + source + "." + bytes exatos do corpo JSON
+
+O timestamp deve estar a no máximo 5 minutos do relógio do Leadger, inclusive
+para datas futuras. Sincronize os relógios dos servidores. Em cada retry, gere
+timestamp e assinatura NOVOS, mas mantenha eventId e corpo original IDÊNTICOS.
+Mesmo que o segredo pareça hexadecimal, não o decodifique em bytes hexadecimais.
+Serialize uma vez, assine esse texto e envie esse mesmo texto com fetch/HTTP.
+
+Exemplo Node.js (apenas a tentativa HTTP; implemente a fila persistente também):
+
+import { createHmac } from "node:crypto";
+
+async function enviarEvento(corpoOriginalDaFila) {
+  const url = process.env.LEADGER_WEBHOOK_URL;
+  const source = process.env.LEADGER_WEBHOOK_SOURCE;
+  const secret = process.env.LEADGER_WEBHOOK_SECRET;
+  if (!url || !source || !secret) throw new Error("Configure a integração");
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const assinatura = createHmac("sha256", secret)
+    .update(`${timestamp}.${source}.`)
+    .update(Buffer.from(corpoOriginalDaFila, "utf8"))
+    .digest("hex");
+  const resposta = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Leadger-Timestamp": timestamp,
+      "X-Leadger-Signature": `sha256=${assinatura}`
+    },
+    body: corpoOriginalDaFila,
+    signal: AbortSignal.timeout(20000)
+  });
+  const resultado = await resposta.json();
+  if (resposta.status !== 200 || resultado.ok !== true) {
+    // Classifique por status/código e registre a tentativa na fila.
+    // Não descarte um evento que ainda não foi confirmado.
+    throw new Error(`Entrega não confirmada: ${resposta.status} ${resultado.error}`);
+  }
+  return resultado;
+}
+
+4. IDS, VERSÕES, UNIDADES E SNAPSHOTS
+
+schemaVersion é o número 1. eventId é único por evento e permanece em retries.
+occurredAt é a data original do evento, em ISO 8601 com timezone. Não altere
+occurredAt em retries; o header de timestamp é independente dessa data.
+eventId e externalId: 1 a 120 caracteres, somente A-Z, a-z, 0-9, _, ., :, -.
+version: inteiro de 1 até 2147483647, crescente a cada alteração da entidade.
+Versões de cliente/base/fatura são separadas. Mudança só da fatura incrementa a
+versão da fatura; não precisa incrementar cliente ou base se seus dados não
+mudaram. Preserve versões e IDs após restart/deploy/importação.
+
+Valores são INTEIROS em centavos BRL: R$149,90 = 14990. Nunca floats, strings
+monetárias, separador decimal ou R$ no JSON. Limite: 2147483647 centavos.
+Datas de vencimento/início/vigência/término: YYYY-MM-DD, calendário válido.
+paidAt e occurredAt: ISO 8601 com Z ou offset, ex. 2026-10-10T15:00:00Z.
+referenceMonth: competência YYYY-MM, que pode diferir do mês do vencimento.
+O protocolo transporta snapshots completos, não patches nem operações de soma.
+Campos opcionais omitidos viram null/default. Na primeira vinculação de um
+cliente manual, dados de contato/anotações ausentes são preservados. Depois do
+primeiro vínculo, envie todos os dados que devem ser mantidos; null limpa campos.
+
+5. EVITAR DUPLICAÇÃO DOS CLIENTES E CONTRATOS ATUAIS
+
+Já existem clientes cadastrados manualmente nos DOIS sistemas. Antes do envio
+inicial, levante os IDs no seu sistema e compartilhe uma lista com nome,
+CPF/CNPJ, e-mail, ID do cliente, ID da base e respectivas faturas existentes.
+Preencha documento/e-mail corretamente: o Leadger procura clientes do mesmo
+workspace por CPF/CNPJ normalizado e depois por e-mail sem diferença de caixa.
+Um match único e consistente reutiliza o cliente existente e registra o vínculo.
+Não identifica cliente só por nome ou telefone. Se esses dados sugerirem um
+cadastro existente sem identificação segura, o evento é bloqueado com 409.
+Se houver CPF/CNPJ/e-mail duplicados ou conflitantes, também retorna 409.
+
+O administrador pode associar os IDs externos aos cadastros existentes na tela
+Configurações > Integrações > Vincular cliente já cadastrado. Se já houver um
+contrato de mensalidade no Leadger, ele deve vincular também o ID da base ao
+contrato atual. O webhook não cria outro contrato sobre um contrato manual sem
+essa associação. Contratos do modelo legado exigem migração/reconciliação antes
+de integrar; o receptor devolve legacy_contract_requires_migration nesse caso.
+
+Faturas existentes num contrato vinculado são procuradas pela competência. Só
+uma fatura consistente em valor, vencimento e status pode ser reutilizada. Uma
+fatura já paga não é creditada uma segunda vez. Divergência no primeiro vínculo
+retorna 409 e exige reconciliar os dois sistemas. Mais de uma fatura na mesma
+competência exige resolução manual antes da integração.
+
+Não contorne um erro criando outro externalId/eventId. externalId é identidade
+permanente. Corrija a causa ou aguarde o vínculo manual, depois reenvie o evento.
+Cliente removido internamente com vínculo externo preservado não é recriado
+automaticamente: linked_record_deleted exige reconciliação.
+
+6. EVENTO base.upsert — NOVA BASE OU ATUALIZAÇÃO DA MENSALIDADE
+
+Este é o principal evento. Contém cliente + base/contrato + faturas iniciais.
+Para uma base ainda não vinculada, envie ao menos uma fatura em data.invoices.
+Cliente, contrato e faturas são gravados juntos. Máximo de 60 faturas no evento;
+mande as demais depois com invoice.upsert. Nas atualizações de uma base já
+vinculada, invoices pode ser [] ou omitido.
+
+Exemplo:
+{
+  "schemaVersion": 1,
+  "eventId": "evt-base-456-v1",
+  "eventType": "base.upsert",
+  "occurredAt": "2026-10-10T15:00:00Z",
+  "data": {
+    "client": {
+      "externalId": "cli-123",
+      "version": 1,
+      "name": "Empresa Exemplo",
+      "document": "12.345.678/0001-99",
+      "email": "financeiro@empresa-exemplo.com.br",
+      "phone": "+5514999999999",
+      "status": "active",
+      "notes": null
+    },
+    "base": {
+      "externalId": "base-456",
+      "version": 1,
+      "name": "Base Empresa Exemplo",
+      "monthlyAmount": 14990,
+      "billingDay": 10,
+      "startDate": "2026-10-10",
+      "endDate": null,
+      "effectiveDate": "2026-10-10",
+      "status": "active"
+    },
+    "invoices": [
+      {
+        "externalId": "fat-456-2026-10",
+        "version": 1,
+        "description": "Empresa Exemplo — Mensalidade 10/2026",
+        "amount": 14990,
+        "dueDate": "2026-10-10",
+        "referenceMonth": "2026-10",
+        "status": "pending",
+        "paidAt": null,
+        "paymentMethod": null
+      }
+    ]
+  }
+}
+
+Cliente: status active/inactive; nome obrigatório (até 200 caracteres).
+document/email/phone/notes podem ser null; email não-null deve ser válido.
+Base: nome obrigatório (até 200), mensalidade em centavos, billingDay 1..31,
+startDate/effectiveDate obrigatórios, endDate opcional null, status
+active/paused/cancelled. effectiveDate não pode ser anterior a startDate.
+
+Quando mudar monthlyAmount, incremente base.version e mande base.upsert. O valor
+do contrato é atualizado imediatamente; as faturas pendentes com vencimento em
+ou depois de effectiveDate são recalculadas se o novo valor é positivo. Faturas
+pagas são preservadas. Para uma fatura com desconto, valor individual diferente
+ou correção específica, mande invoice.upsert com versão mais recente. Não use
+effectiveDate como agendamento de atualização futura do valor exibido; envie a
+mudança quando ela entrar em vigor.
+
+Mudar billingDay/startDate/endDate atualiza o contrato; para mudar vencimentos
+de faturas existentes envie snapshots novos dessas faturas. Pausar/cancelar a
+base não cancela automaticamente faturas abertas: emita invoice.upsert para
+cada fatura que precisar mudar. O status do cliente é independente do da base.
+
+7. EVENTO invoice.upsert — FATURA NOVA, VALOR ALTERADO, PAGAMENTO OU ESTORNO
+
+Envie base.upsert primeiro e aguarde sua confirmação. Depois, para cada fatura
+nova ou alteração, envie:
+{
+  "schemaVersion": 1,
+  "eventId": "evt-fat-456-2026-10-v2",
+  "eventType": "invoice.upsert",
+  "occurredAt": "2026-10-10T16:00:00Z",
+  "data": {
+    "baseExternalId": "base-456",
+    "invoice": {
+      "externalId": "fat-456-2026-10",
+      "version": 2,
+      "description": "Empresa Exemplo — Mensalidade 10/2026",
+      "amount": 14990,
+      "dueDate": "2026-10-10",
+      "referenceMonth": "2026-10",
+      "status": "paid",
+      "paidAt": "2026-10-10T16:00:00Z",
+      "paymentMethod": "pix"
+    }
+  }
+}
+
+Fatura: descrição obrigatória até 300 caracteres, amount > 0, versão inteira.
+status: pending/paid/cancelled. Não envie overdue: atraso é calculado no Leadger.
+paid exige paidAt; pending/cancelled exigem paidAt=null/omitido.
+paymentMethod: pix/boleto/credit_card/bank_transfer/cash ou null.
+Estorno: versão maior, status pending ou cancelled, paidAt=null; saldo é revertido.
+Correção do valor já pago: versão maior e valor total correto, preservando paidAt.
+Este contrato v1 não representa pagamentos parciais, juros separados, múltiplas
+moedas, credenciais de login nem exclusão física. Não mande esses dados.
+
+Para mensalidades integradas, o Leadger NÃO gera faturas futuras sozinho.
+Implemente envio de cada nova competência gerada no seu sistema. Pode antecipar
+as próximas faturas para alimentar a previsão financeira. Use os mesmos IDs
+quando marcar pagamento, alterar vencimento, cancelar ou corrigir valor.
+
+8. EVENTO client.upsert — DADOS DO CLIENTE SEM ALTERAR A MENSALIDADE
+
+Use para alterar somente o cadastro do cliente:
+{
+  "schemaVersion": 1,
+  "eventId": "evt-cli-123-v2",
+  "eventType": "client.upsert",
+  "occurredAt": "2026-10-11T15:00:00Z",
+  "data": {
+    "externalId": "cli-123",
+    "version": 2,
+    "name": "Empresa Exemplo Atualizada",
+    "document": "12.345.678/0001-99",
+    "email": "financeiro@empresa-exemplo.com.br",
+    "phone": "+5514999999999",
+    "status": "active",
+    "notes": null
+  }
+}
+
+Não envie whatsappOptIn. O webhook não concede consentimento de WhatsApp. Uma
+troca de telefone remove o opt-in existente; a autorização precisa ser coletada
+novamente no fluxo do Leadger. Recibos seguem as configurações atuais do Leadger.
+
+9. RESPOSTAS E FILA DE REENVIO
+
+HTTP 200 + ok:true: entrega confirmada. outcome pode ser applied, unchanged ou
+stale (snapshot antigo foi ignorado). duplicate:true indica evento já confirmado.
+Um retry duplicado retorna o resultado original sem repetir o efeito financeiro.
+Em base.upsert, resultado também identifica clientId, saleItemId e as faturas.
+
+400: JSON/UTF-8 inválido — corrigir produtor.
+401: assinatura/relógio/segredo errado — corrigir configuração.
+404: source incorreto — corrigir URL/configuração.
+409: colisão ou conciliação pendente — parar retries cegos e mostrar pendência.
+  base_not_synced: entregar a base primeiro e depois tentar a fatura novamente.
+  event_id_conflict: mesmo eventId com corpo diferente.
+  version_conflict: mesma version com dados diferentes.
+  client_match_ambiguous/client_identity_conflict/existing_client_requires_link:
+    resolução/vinculação do cliente existente.
+  existing_contract_requires_link: vincular contrato existente antes de enviar.
+  legacy_contract_requires_migration: reconciliar modelo antigo de contrato.
+  invoice_match_ambiguous/existing_invoice_conflict/invoice_already_linked:
+    resolver faturas existentes; não gerar outro ID para contornar o erro.
+  linked_record_deleted: registro interno removido, vínculo precisa ser corrigido.
+413: corpo >256 KiB — dividir o lote em eventos individuais.
+415: tipo ou compressão inválida — mandar application/json sem compressão.
+422: campos inválidos ou falta de fatura inicial — corrigir conforme issues/message.
+429: limite 120 eventos/minuto por integração/instância — respeitar Retry-After.
+503, outros 5xx, timeout ou erro de rede: reenvio com backoff exponencial e jitter.
+
+Grave a outbox na mesma transação do cadastro/alteração da entidade no seu banco.
+Salve o texto JSON original, eventId, versões, tentativas, próxima tentativa e
+último status/código. Worker independente entrega depois do commit. Sugestão de
+backoff: 10s, 30s, 1min, 5min, 15min, 1h com jitter e respeitando Retry-After.
+Após várias falhas, mantenha o evento em uma fila de pendências e alerte o
+operador; não descarte dados. Em rede com timeout pode já ter ocorrido commit
+no Leadger, por isso repita o mesmo evento/corpo em vez de inventar outro ID.
+
+10. TESTES E ACEITE DA IMPLEMENTAÇÃO DO EMISSOR
+
+Valide cadastro de cliente+base+mensalidade+primeira fatura, cliente manual
+reutilizado, contrato manual vinculado, fatura paga existente sem crédito
+duplicado, reajuste de abertas sem alterar pagas, pagamento, correção e estorno.
+Teste retries após timeout, entrega duplicada concorrente, reinício do worker,
+versão antiga, mesma versão com payload diferente, assinatura errada e 429/503.
+Teste ambiguidade de CPF/CNPJ/e-mail e bloqueio por nome sem identidade segura.
+
+Não faça carga retroativa de todos os clientes diretamente em produção.
+Primeiro concilie os cadastros/contratos/faturas atuais com o administrador do
+Leadger e teste um cliente escolhido em ambiente de homologação. Depois faça a
+carga inicial paginada, respeitando limites, e ative os eventos de novas mudanças.
+
+Ao concluir, explique os arquivos alterados, onde configurar URL/source/secret,
+como iniciar/verificar o worker, como recuperar pendências e quais testes passaram.

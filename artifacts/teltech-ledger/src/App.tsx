@@ -7,6 +7,7 @@ import { Loader } from "./components/Loader";
 import { Router } from "wouter";
 import { Toaster } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
+import { WebhookSync } from "./components/WebhookSync";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,7 @@ function AppInner() {
           style={{ width: "100%", height: "100%" }}
         >
           <TeltechLedger />
+          <WebhookSync />
         </motion.div>
       )}
     </AnimatePresence>

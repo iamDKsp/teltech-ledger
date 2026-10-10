@@ -101,7 +101,7 @@ export async function generateSubscriptionCharges(
   ctx: SaleContext,
   now: Date = new Date(),
 ): Promise<number> {
-  if (item.kind !== "subscription" || item.status !== "active" || !item.startDate) return 0;
+  if (item.kind !== "subscription" || item.status !== "active" || !item.startDate || item.billingSource === "external") return 0;
 
   const dueList = listSubscriptionDueDates({
     startDate: new Date(item.startDate),
@@ -185,6 +185,7 @@ export async function recalcPendingCharges(ex: Executor, item: SaleItem, fromDat
 export async function syncAllSubscriptions(workspaceId?: string): Promise<number> {
   const conditions = [
     eq(saleItemsTable.kind, "subscription"),
+    eq(saleItemsTable.billingSource, "ledger"),
     eq(saleItemsTable.status, "active"),
     isNotNull(saleItemsTable.startDate),
     eq(clientSalesTable.status, "active"),
