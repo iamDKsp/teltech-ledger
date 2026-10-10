@@ -224,6 +224,53 @@ export async function ensureSchemaUpgrades() {
       CREATE INDEX IF NOT EXISTS idx_fin_tx_team_member ON financial_transactions(team_member_id);
     `);
 
+    // 5. WhatsApp media columns upgrade
+    await pool.query(`
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime_type TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_media_type ON whatsapp_messages (media_type);
+    `);
+
+    // 6. Inbound Webhooks & Client Photos upgrades
+    await pool.query(`
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS photo_url text;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS photo_version integer NOT NULL DEFAULT 0;
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS photo_source text;
+      ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS billing_source text NOT NULL DEFAULT 'ledger';
+
+      CREATE TABLE IF NOT EXISTS inbound_webhook_entities (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        source text NOT NULL,
+        kind text NOT NULL,
+        external_id text NOT NULL,
+        internal_id uuid NOT NULL,
+        parent_external_id text,
+        version integer NOT NULL,
+        payload_hash text NOT NULL,
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS inbound_webhook_entity_identity_uq
+        ON inbound_webhook_entities(workspace_id, source, kind, external_id);
+
+      CREATE TABLE IF NOT EXISTS inbound_webhook_events (
+        id serial PRIMARY KEY,
+        workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        source text NOT NULL,
+        event_id text NOT NULL,
+        event_type text NOT NULL,
+        payload_hash text NOT NULL,
+        result jsonb NOT NULL,
+        processed_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS inbound_webhook_event_identity_uq
+        ON inbound_webhook_events(workspace_id, source, event_id);
+    `);
+
     console.log("  ✅ [Migrations] Schema upgrades aplicados com sucesso.");
   } catch (err) {
     console.error("  ❌ [Migrations] Falha ao verificar/aplicar schema upgrades:", err);

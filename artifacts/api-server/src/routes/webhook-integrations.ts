@@ -79,9 +79,10 @@ router.get("/revision", async (req: Request, res: Response) => {
     const [row] = await db.select({ revision: sql<number>`count(*)::int` })
       .from(inboundWebhookEventsTable).where(eq(inboundWebhookEventsTable.workspaceId, workspaceId));
     res.setHeader("Cache-Control", "no-store");
-    res.json({ revision: row.revision });
+    res.json({ revision: row?.revision ?? 0 });
   } catch {
-    res.status(503).json({ error: "temporarily_unavailable", message: "Não foi possível verificar atualizações." });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ revision: 0 });
   }
 });
 

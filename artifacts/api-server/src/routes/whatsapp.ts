@@ -4,6 +4,7 @@ import path from "node:path";
 import multer from "multer";
 import {
   db,
+  pool,
   clientsTable,
   financialTransactionsTable,
   usersTable,
@@ -48,8 +49,8 @@ const mediaUpload = multer({
   limits: { fileSize: 64 * 1024 * 1024 }, // 64MB max
 });
 
-// Auto-ensure WhatsApp media columns exist in PostgreSQL
-void db.execute(sql`
+// Auto-ensure WhatsApp media columns exist in PostgreSQL using raw pool query
+void pool.query(`
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime_type TEXT;
@@ -57,7 +58,7 @@ void db.execute(sql`
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
   CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_media_type ON whatsapp_messages (media_type);
-`).catch((err) => logger.warn({ err }, "WhatsApp media columns migration check warning"));
+`).catch((err) => logger.warn({ err: err?.message }, "WhatsApp media columns migration check warning"));
 const ADMIN_ROLES = ["owner", "admin", "ceo", "cto", "cmo", "member"];
 router.use(requireAuth, requireWorkspace, requireRole(ADMIN_ROLES));
 
@@ -875,9 +876,49 @@ router.get("/monitoring/conversations", async (req, res) => {
     const selfPhoneCanon = sessionStatus.phone ? (canonicalBrazilianPhone(sessionStatus.phone) || normalizeWhatsAppPhone(sessionStatus.phone)) : null;
 
     // Deduplicate messages in memory before grouping
-    const rawMessages = await db.select().from(whatsappMessagesTable)
-      .where(eq(whatsappMessagesTable.workspaceId, wsId))
-      .orderBy(desc(whatsappMessagesTable.createdAt));
+    let rawMessages: any[] = [];
+    try {
+      rawMessages = await db.select().from(whatsappMessagesTable)
+        .where(eq(whatsappMessagesTable.workspaceId, wsId))
+        .orderBy(desc(whatsappMessagesTable.createdAt));
+    } catch (queryErr: any) {
+      logger.warn({ queryErr: queryErr?.message }, "Full whatsappMessagesTable query failed, ensuring columns and retrying");
+      try {
+        await pool.query(`
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime_type TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+        `);
+        rawMessages = await db.select().from(whatsappMessagesTable)
+          .where(eq(whatsappMessagesTable.workspaceId, wsId))
+          .orderBy(desc(whatsappMessagesTable.createdAt));
+      } catch (retryErr) {
+        logger.error({ retryErr }, "Fallback to query without media columns");
+        rawMessages = await db.select({
+          id: whatsappMessagesTable.id,
+          workspaceId: whatsappMessagesTable.workspaceId,
+          clientId: whatsappMessagesTable.clientId,
+          transactionId: whatsappMessagesTable.transactionId,
+          recipient: whatsappMessagesTable.recipient,
+          senderPhone: whatsappMessagesTable.senderPhone,
+          senderName: whatsappMessagesTable.senderName,
+          body: whatsappMessagesTable.body,
+          kind: whatsappMessagesTable.kind,
+          direction: whatsappMessagesTable.direction,
+          status: whatsappMessagesTable.status,
+          dedupeKey: whatsappMessagesTable.dedupeKey,
+          waMessageId: whatsappMessagesTable.waMessageId,
+          isRead: whatsappMessagesTable.isRead,
+          sentAt: whatsappMessagesTable.sentAt,
+          createdAt: whatsappMessagesTable.createdAt,
+        }).from(whatsappMessagesTable)
+          .where(eq(whatsappMessagesTable.workspaceId, wsId))
+          .orderBy(desc(whatsappMessagesTable.createdAt));
+      }
+    }
 
     const seenMsgKeys = new Set<string>();
     const allMessages: typeof rawMessages = [];
@@ -1233,19 +1274,108 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
       return;
     }
 
-    const messages = await db.select({
-      message: whatsappMessagesTable,
-      txAmount: financialTransactionsTable.amount,
-      txDueDate: financialTransactionsTable.dueDate,
-      txDescription: financialTransactionsTable.description,
-      txStatus: financialTransactionsTable.status,
-    }).from(whatsappMessagesTable)
-      .leftJoin(financialTransactionsTable, eq(whatsappMessagesTable.transactionId, financialTransactionsTable.id))
-      .where(and(
-        eq(whatsappMessagesTable.workspaceId, wsId),
-        or(...conditions)
-      ))
-      .orderBy(asc(whatsappMessagesTable.createdAt));
+    let messages: any[] = [];
+    try {
+      messages = await db.select({
+        message: whatsappMessagesTable,
+        txAmount: financialTransactionsTable.amount,
+        txDueDate: financialTransactionsTable.dueDate,
+        txDescription: financialTransactionsTable.description,
+        txStatus: financialTransactionsTable.status,
+      }).from(whatsappMessagesTable)
+        .leftJoin(financialTransactionsTable, eq(whatsappMessagesTable.transactionId, financialTransactionsTable.id))
+        .where(and(
+          eq(whatsappMessagesTable.workspaceId, wsId),
+          or(...conditions)
+        ))
+        .orderBy(asc(whatsappMessagesTable.createdAt));
+    } catch (queryErr: any) {
+      logger.warn({ queryErr: queryErr?.message }, "Failed to query messages with full table, ensuring columns");
+      try {
+        await pool.query(`
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_mime_type TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+        `);
+        messages = await db.select({
+          message: whatsappMessagesTable,
+          txAmount: financialTransactionsTable.amount,
+          txDueDate: financialTransactionsTable.dueDate,
+          txDescription: financialTransactionsTable.description,
+          txStatus: financialTransactionsTable.status,
+        }).from(whatsappMessagesTable)
+          .leftJoin(financialTransactionsTable, eq(whatsappMessagesTable.transactionId, financialTransactionsTable.id))
+          .where(and(
+            eq(whatsappMessagesTable.workspaceId, wsId),
+            or(...conditions)
+          ))
+          .orderBy(asc(whatsappMessagesTable.createdAt));
+      } catch (retryErr) {
+        logger.error({ retryErr }, "Fallback for messages query without full table select");
+        const fallbackMsgs = await db.select({
+          id: whatsappMessagesTable.id,
+          workspaceId: whatsappMessagesTable.workspaceId,
+          clientId: whatsappMessagesTable.clientId,
+          transactionId: whatsappMessagesTable.transactionId,
+          recipient: whatsappMessagesTable.recipient,
+          senderPhone: whatsappMessagesTable.senderPhone,
+          senderName: whatsappMessagesTable.senderName,
+          body: whatsappMessagesTable.body,
+          kind: whatsappMessagesTable.kind,
+          direction: whatsappMessagesTable.direction,
+          status: whatsappMessagesTable.status,
+          dedupeKey: whatsappMessagesTable.dedupeKey,
+          waMessageId: whatsappMessagesTable.waMessageId,
+          isRead: whatsappMessagesTable.isRead,
+          sentAt: whatsappMessagesTable.sentAt,
+          createdAt: whatsappMessagesTable.createdAt,
+          txAmount: financialTransactionsTable.amount,
+          txDueDate: financialTransactionsTable.dueDate,
+          txDescription: financialTransactionsTable.description,
+          txStatus: financialTransactionsTable.status,
+        }).from(whatsappMessagesTable)
+          .leftJoin(financialTransactionsTable, eq(whatsappMessagesTable.transactionId, financialTransactionsTable.id))
+          .where(and(
+            eq(whatsappMessagesTable.workspaceId, wsId),
+            or(...conditions)
+          ))
+          .orderBy(asc(whatsappMessagesTable.createdAt));
+
+        messages = fallbackMsgs.map(row => ({
+          message: {
+            id: row.id,
+            workspaceId: row.workspaceId,
+            clientId: row.clientId,
+            transactionId: row.transactionId,
+            recipient: row.recipient,
+            senderPhone: row.senderPhone,
+            senderName: row.senderName,
+            body: row.body,
+            kind: row.kind,
+            direction: row.direction,
+            status: row.status,
+            dedupeKey: row.dedupeKey,
+            waMessageId: row.waMessageId,
+            isRead: row.isRead,
+            sentAt: row.sentAt,
+            createdAt: row.createdAt,
+            mediaType: null,
+            mediaUrl: null,
+            mediaMimeType: null,
+            mediaFilename: null,
+            mediaSize: null,
+            mediaDuration: null,
+          },
+          txAmount: row.txAmount,
+          txDueDate: row.txDueDate,
+          txDescription: row.txDescription,
+          txStatus: row.txStatus,
+        }));
+      }
+    }
 
     const unreadIds = messages
       .filter(({ message }) => message.direction === "inbound" && !message.isRead)
