@@ -330,3 +330,14 @@
   box-shadow: 0 20px 60px -10px rgba(0, 0, 0, 0.8);
   animation: fui-pop-in 160ms ease-out both;
 }
+
+@keyframes fui-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.fui-shake {
+  animation: fui-shake 0.35s ease-in-out both !important;
+}
+

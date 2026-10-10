@@ -2405,6 +2405,229 @@ function CockpitKpiCard({
   );
 }
 
+function TaxForecastCockpitCard({
+  dashboard,
+  pendingApprovalsCount,
+}: {
+  dashboard: DashboardData;
+  pendingApprovalsCount: number;
+}) {
+  const isMobile = useIsMobile();
+  const [selectedRate, setSelectedRate] = useState<6 | 12>(6);
+
+  // Bases em centavos
+  const faturado = dashboard.monthInflow || 0; // Já recebido/liquidado no mês
+  const aFaturar = dashboard.monthInflowPending || 0; // Previsto a faturar / a receber no mês
+  const totalFaturamento = faturado + aFaturar; // Total faturamento previsto do mês
+
+  // Impostos a 6%
+  const tax6_faturado = Math.round(faturado * 0.06);
+  const tax6_aFaturar = Math.round(aFaturar * 0.06);
+  const tax6_total = Math.round(totalFaturamento * 0.06);
+
+  // Impostos a 12%
+  const tax12_faturado = Math.round(faturado * 0.12);
+  const tax12_aFaturar = Math.round(aFaturar * 0.12);
+  const tax12_total = Math.round(totalFaturamento * 0.12);
+
+  const heroTax = selectedRate === 6 ? tax6_total : tax12_total;
+  const rateColor = selectedRate === 6 ? "#F59E0B" : "#EC4899";
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: isMobile ? 0 : 260,
+        background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
+        border: "1px solid rgba(245,158,11,0.22)",
+        borderRadius: 14,
+        padding: isMobile ? "14px 16px" : "18px 20px",
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "0 8px 30px rgba(0,0,0,0.35)",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: -24,
+          right: -24,
+          width: 90,
+          height: 90,
+          borderRadius: "50%",
+          background: `${rateColor}18`,
+          filter: "blur(22px)",
+          pointerEvents: "none",
+          transition: "background 0.3s ease",
+        }}
+      />
+
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 700, color: "#a1a1aa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Previsão de Impostos (DAS)
+          </span>
+
+          {/* Seletor 6% e 12% */}
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              background: "rgba(255,255,255,0.06)",
+              borderRadius: 8,
+              padding: 2,
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedRate(6)}
+              title="Exibir cálculo de imposto a 6% (Simples Nacional)"
+              style={{
+                padding: "2px 8px",
+                borderRadius: 6,
+                border: "none",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: selectedRate === 6 ? "#F59E0B" : "transparent",
+                color: selectedRate === 6 ? "#000" : "#a1a1aa",
+                transition: "all 0.15s ease",
+              }}
+            >
+              6%
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedRate(12)}
+              title="Exibir cálculo de imposto a 12% (Faixa superior / Lucro Presumido)"
+              style={{
+                padding: "2px 8px",
+                borderRadius: 6,
+                border: "none",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: selectedRate === 12 ? "#EC4899" : "transparent",
+                color: selectedRate === 12 ? "#fff" : "#a1a1aa",
+                transition: "all 0.15s ease",
+              }}
+            >
+              12%
+            </button>
+          </div>
+        </div>
+
+        {/* Hero Number */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{ fontSize: isMobile ? 22 : 26, fontWeight: 800, color: "#fafafa", letterSpacing: "-0.02em" }}>
+            {formatBRL(heroTax)}
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "2px 7px",
+              borderRadius: 20,
+              color: rateColor,
+              background: `${rateColor}20`,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Imposto Total ({selectedRate}%)
+          </span>
+        </div>
+      </div>
+
+      {/* Demonstrativo Faturado x A Faturar (6% e 12%) */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+          background: "rgba(0,0,0,0.3)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: 8,
+          padding: "8px 10px",
+        }}
+      >
+        {/* Linha 1: Faturado */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+          <span style={{ color: "#a1a1aa" }}>
+            Faturado: <strong style={{ color: "#10B981" }}>{formatBRL(faturado)}</strong>
+          </span>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 10.5, fontWeight: 700 }}>
+            <span style={{ color: selectedRate === 6 ? "#F59E0B" : "#888" }} title="Imposto 6% sobre faturado">
+              6%: {formatBRL(tax6_faturado)}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.18)" }}>·</span>
+            <span style={{ color: selectedRate === 12 ? "#EC4899" : "#888" }} title="Imposto 12% sobre faturado">
+              12%: {formatBRL(tax12_faturado)}
+            </span>
+          </div>
+        </div>
+
+        {/* Linha 2: A Faturar */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+          <span style={{ color: "#a1a1aa" }}>
+            A Faturar: <strong style={{ color: "#3B82F6" }}>{formatBRL(aFaturar)}</strong>
+          </span>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 10.5, fontWeight: 700 }}>
+            <span style={{ color: selectedRate === 6 ? "#F59E0B" : "#888" }} title="Imposto 6% sobre a faturar">
+              6%: {formatBRL(tax6_aFaturar)}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.18)" }}>·</span>
+            <span style={{ color: selectedRate === 12 ? "#EC4899" : "#888" }} title="Imposto 12% sobre a faturar">
+              12%: {formatBRL(tax12_aFaturar)}
+            </span>
+          </div>
+        </div>
+
+        {/* Linha 3: Total Impostos */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: 10.5,
+            paddingTop: 4,
+            marginTop: 1,
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <span style={{ color: "#71717a", fontWeight: 600 }}>Total Previsto ({formatBRL(totalFaturamento)})</span>
+          <span style={{ color: "#e4e4e7", fontWeight: 700 }}>
+            <span style={{ color: "#F59E0B" }}>{formatBRL(tax6_total)} (6%)</span>
+            <span style={{ color: "#52525b", margin: "0 4px" }}>vs</span>
+            <span style={{ color: "#EC4899" }}>{formatBRL(tax12_total)} (12%)</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Linha Contas a Pagar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#71717a", flexWrap: "wrap", gap: 4 }}>
+        <span>Contas a pagar: <strong style={{ color: "#d4d4d8" }}>{formatBRL(dashboard.monthOutflowPending)}</strong></span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "1px 6px",
+            borderRadius: 12,
+            color: pendingApprovalsCount > 0 ? "#8B5CF6" : "#71717a",
+            background: pendingApprovalsCount > 0 ? "rgba(139,92,246,0.15)" : "rgba(255,255,255,0.05)",
+          }}
+        >
+          {pendingApprovalsCount > 0 ? `${pendingApprovalsCount} em Alçada` : "Aprovadas"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN FINANCE MODULE PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3038,7 +3261,7 @@ export function FinanceiroPage() {
       </div>
 
       {/* ─── Content Body ─────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", width: "100%" }}>
         {loading && !dashboard ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, color: "#a1a1aa", fontSize: 14 }}>
             <RefreshCw className="animate-spin" style={{ width: 20, height: 20, color: "#8B5CF6" }} />
@@ -3391,7 +3614,7 @@ function CockpitView({
     if (!ok) return;
 
     try {
-      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE", password: "1234" });
       toast.success("Base financeira resetada com sucesso!");
       if (onResetAll) onResetAll();
     } catch (err: any) {
@@ -3539,7 +3762,7 @@ function CockpitView({
   };
 
   return (
-    <div style={{ padding: isMobile ? "12px 14px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: isMobile ? "12px 14px" : "24px", display: "flex", flexDirection: "column", gap: isMobile ? 16 : 24, width: "100%", boxSizing: "border-box" }}>
       {/* ─── Top Bar: Cockpit Title & Quick Admin Action ─────────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3625,18 +3848,10 @@ function CockpitView({
           alert={dashboard.overdueAmount > 0}
         />
 
-        {/* 4. Previsão a Pagar */}
-        <CockpitKpiCard
-          title="Previsão a Pagar no Mês"
-          value={formatBRL(dashboard.monthOutflowPending)}
-          subtitle={`Provisão tributária DAS (6%): ${formatBRL(dashboard.taxProvision)}`}
-          badge={{
-            label: pendingApprovalsCount > 0 ? `${pendingApprovalsCount} em Alçada` : "Aprovadas",
-            color: pendingApprovalsCount > 0 ? "#8B5CF6" : "#A1A1AA",
-            bg: pendingApprovalsCount > 0 ? "rgba(139,92,246,0.15)" : "rgba(255,255,255,0.06)",
-          }}
-          icon={ArrowUpRight}
-          color="#F59E0B"
+        {/* 4. Previsão de Impostos (DAS) e A Pagar */}
+        <TaxForecastCockpitCard
+          dashboard={dashboard}
+          pendingApprovalsCount={pendingApprovalsCount}
         />
       </div>
 
@@ -5365,7 +5580,7 @@ function TransactionsLedgerView({
   const balanceFiltered = totalInflowFiltered - totalOutflowFiltered;
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 12 : 18, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 12 : 18, width: "100%", boxSizing: "border-box" }}>
       {/* ─── Top Filter Metrics Ribbon ────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(200px, 1fr))", gap: isMobile ? 8 : 12 }}>
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: isMobile ? "8px 12px" : "12px 16px" }}>
@@ -5884,7 +6099,7 @@ function ClientsView({
 
     try {
       setResetting(true);
-      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE", password: "1234" });
       toast.success("Módulo financeiro zerado com sucesso!");
       onResetAll?.();
     } catch (err: any) {
@@ -5908,7 +6123,7 @@ function ClientsView({
   });
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
@@ -6289,7 +6504,7 @@ function AccountsView({
   const totalBalance = accounts.reduce((s, a) => s + a.currentBalance, 0);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 14 : 20, width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
@@ -6452,7 +6667,7 @@ function DREView({
   if (!dre) return null;
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, width: "100%", boxSizing: "border-box" }}>
       <div>
         <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
           DRE Gerencial & Rentabilidade de Projetos
@@ -6586,7 +6801,7 @@ function BudgetsView({
   const totalSpent = budgets.reduce((s, b) => s + (b.spent || 0), 0);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 20, width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
@@ -6731,7 +6946,7 @@ function ApprovalsGovernanceView({
 
     try {
       setResetting(true);
-      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE" });
+      await API.post("/finance/reset-all", { confirm: "RESET_FINANCE", password: "1234" });
       toast.success("Módulo financeiro zerado com sucesso!");
       onResetAll?.();
     } catch (err: any) {
@@ -6742,7 +6957,7 @@ function ApprovalsGovernanceView({
   };
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, width: "100%", boxSizing: "border-box" }}>
       <div>
         <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 18, fontWeight: 800, color: "#fff" }}>
           Governança Corporativa & Matriz de Alçadas
@@ -6935,7 +7150,7 @@ function PartnersView({
   const isMobile = useIsMobile();
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: isMobile ? "12px 14px" : "24px", gap: isMobile ? 16 : 24, width: "100%", boxSizing: "border-box" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

@@ -101,6 +101,7 @@ export function MembersPage() {
   const [formRole, setFormRole] = useState("ceo");
   const [formMustChange, setFormMustChange] = useState(false);
   const [formCurrentPassword, setFormCurrentPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [formLoading, setFormLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -135,8 +136,8 @@ export function MembersPage() {
 
   const openPassword = (m: Member) => { setSelected(m); setFormCurrentPassword(""); setFormPassword(""); setError(null); setModal("password"); };
   const openAvatar = (m: Member) => { setSelected(m); setError(null); setModal("avatar"); };
-  const openDelete = (m: Member) => { setSelected(m); setError(null); setModal("delete"); };
-  const closeModal = () => { setModal(null); setSelected(null); setError(null); setFormCurrentPassword(""); setFormPassword(""); };
+  const openDelete = (m: Member) => { setSelected(m); setError(null); setDeletePassword(""); setModal("delete"); };
+  const closeModal = () => { setModal(null); setSelected(null); setError(null); setFormCurrentPassword(""); setFormPassword(""); setDeletePassword(""); };
 
   const handleCreate = async () => {
     setFormLoading(true); setError(null);
@@ -208,6 +209,10 @@ export function MembersPage() {
 
   const handleDelete = async () => {
     if (!selected) return;
+    if (deletePassword.trim() !== "1234") {
+      setError("Senha incorreta! Digite 1234 para autorizar a exclusão.");
+      return;
+    }
     setFormLoading(true); setError(null);
     try {
       const res = await fetch(`${API}/api/members/${selected.id}`, { method: "DELETE", headers: headers() });
@@ -556,6 +561,38 @@ export function MembersPage() {
             <p style={{ fontSize: 13, color: "#f87171", background: "rgba(239,68,68,0.08)", padding: "10px 16px", borderRadius: 8, border: "1px solid rgba(239,68,68,0.2)" }}>
               Esta ação é irreversível. Todas as tarefas atribuídas a este membro serão desvinculadas.
             </p>
+            <div style={{ margin: "16px 0 4px", textAlign: "left" }}>
+              <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#ccc", marginBottom: 6 }}>
+                Digite a senha para autorizar (Senha: 1234):
+              </label>
+              <input
+                type="password"
+                autoFocus
+                placeholder="Digite a senha (1234)"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  setError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleDelete();
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  background: "#18181b",
+                  border: `1px solid ${error ? "#ef4444" : "rgba(255,255,255,0.15)"}`,
+                  color: "#fafafa",
+                  fontSize: 13,
+                  outline: "none",
+                }}
+              />
+            </div>
             <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 20 }}>
               <button onClick={closeModal} style={btnSecondary}>Cancelar</button>
               <button onClick={handleDelete} disabled={formLoading} style={btnDanger}>{formLoading ? "Excluindo..." : "Excluir Membro"}</button>

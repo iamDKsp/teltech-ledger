@@ -2,6 +2,7 @@ import { useState } from "react";
 import { BellRing, Coins, HandCoins, Link2, Pencil, Phone, Plus, Send, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "@/lib/api";
+import { confirmDialog } from "@/components/finance-ui";
 import { cn } from "@/lib/utils";
 import type { WhatsAppContact, WhatsAppSettings, WorkspaceMemberOption } from "./types";
 import { Badge, Btn, Card, Field, formatPhone, SelectInput, TextInput, Tip, ToggleRow } from "./ui";
@@ -115,7 +116,13 @@ export function PartnerContacts({
   };
 
   const remove = async (contact: WhatsAppContact) => {
-    if (!window.confirm(`Remover ${contact.name}? Ele deixará de receber avisos.`)) return;
+    const ok = await confirmDialog({
+      title: "Remover Sócio",
+      message: `Remover ${contact.name}? Ele deixará de receber avisos.`,
+      confirmLabel: "Remover",
+      danger: true,
+    });
+    if (!ok) return;
     setBusyId(contact.id);
     try {
       await API.delete(`/whatsapp/contacts/${contact.id}`);

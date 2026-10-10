@@ -8,6 +8,7 @@ import { Router } from "wouter";
 import { Toaster } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { WebhookSync } from "./components/WebhookSync";
+import { FinanceUiRoot } from "./components/finance-ui";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,8 +64,10 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Router>
-          <AppInner />
-          <Toaster theme="dark" toastOptions={{ style: { background: '#1a1a1a', border: '1px solid #242424', color: '#e0e0e0' } }} />
+          <FinanceUiRoot>
+            <AppInner />
+            <Toaster theme="dark" toastOptions={{ style: { background: '#1a1a1a', border: '1px solid #242424', color: '#e0e0e0' } }} />
+          </FinanceUiRoot>
         </Router>
       </AuthProvider>
     </QueryClientProvider>

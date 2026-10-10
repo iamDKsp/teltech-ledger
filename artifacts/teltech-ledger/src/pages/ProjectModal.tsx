@@ -3,6 +3,7 @@ import { useAuth } from "../lib/auth-context";
 import { useIsMobile } from "../hooks/use-mobile";
 import { X, Trash2 } from "lucide-react";
 import { API } from "../lib/api";
+import { confirmDialog } from "../components/finance-ui";
 import { getProjectChanges } from "../lib/project-changes";
 import { motion } from "framer-motion";
 import { backdropVariants, modalVariants, bottomSheetVariants } from "../lib/motion";
@@ -36,6 +37,7 @@ export function ProjectModal({ project, onClose, onSaved }: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteProjectPassword, setDeleteProjectPassword] = useState("");
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const handleDragStart = (idx: number) => {
@@ -176,6 +178,13 @@ export function ProjectModal({ project, onClose, onSaved }: {
 
   const deleteColumn = async (colId: string) => {
     if (!project) return;
+    const ok = await confirmDialog({
+      title: "Excluir etapa",
+      message: "Tem certeza que deseja excluir esta etapa do projeto?",
+      confirmLabel: "Excluir",
+      danger: true,
+    });
+    if (!ok) return;
     setLoading(true); setError(null);
     try {
       await API.delete(`/projects/${project.id}/columns/${colId}`);
@@ -324,11 +333,41 @@ export function ProjectModal({ project, onClose, onSaved }: {
           )}
           {isEdit && confirmDelete && (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "#f87171" }}>Confirmar?</span>
-              <button onClick={handleDelete} disabled={loading}
-                style={{ padding: "6px 12px", borderRadius: 6, background: "#ef4444", border: "none", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Sim</button>
-              <button onClick={() => setConfirmDelete(false)}
-                style={{ padding: "6px 12px", borderRadius: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#aaa", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Não</button>
+              <input
+                type="password"
+                placeholder="Senha (1234)"
+                value={deleteProjectPassword}
+                onChange={(e) => setDeleteProjectPassword(e.target.value)}
+                style={{
+                  width: 105,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: "#18181b",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  color: "#fff",
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={() => {
+                  if (deleteProjectPassword.trim() !== "1234") {
+                    setError("Senha incorreta! Digite 1234 para autorizar a exclusão.");
+                    return;
+                  }
+                  handleDelete();
+                }}
+                disabled={loading}
+                style={{ padding: "6px 12px", borderRadius: 6, background: "#ef4444", border: "none", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}
+              >
+                Confirmar
+              </button>
+              <button
+                onClick={() => { setConfirmDelete(false); setDeleteProjectPassword(""); }}
+                style={{ padding: "6px 12px", borderRadius: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#aaa", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Cancelar
+              </button>
             </div>
           )}
           <div style={{ display: "flex", gap: 8 }}>

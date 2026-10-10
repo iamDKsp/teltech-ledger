@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { X, ChevronDown, Check, ChevronLeft, ChevronRight, CalendarDays, Search } from "lucide-react";
+import { X, ChevronDown, Check, ChevronLeft, ChevronRight, CalendarDays, Search, Lock } from "lucide-react";
 import "./finance-ui.css";
 
 /**
@@ -633,20 +633,32 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   danger?: boolean;
   variant?: string;
+  requirePassword?: boolean;
 }
 
 type ConfirmRequest = ConfirmOptions & { resolve: (ok: boolean) => void };
 
 let confirmListener: ((req: ConfirmRequest) => void) | null = null;
 
-/** Versão assíncrona e estilizada do `window.confirm`. */
+/** Versão assíncrona e estilizada do `window.confirm`. Se for destrutivo (danger) ou exigir senha, exige a senha "1234". */
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
-  if (!confirmListener) return Promise.resolve(window.confirm(options.message));
+  const isProtected = options.danger || options.requirePassword;
+  if (!confirmListener) {
+    if (isProtected) {
+      const entered = window.prompt(`${options.message}\n\n[Confirmação de Segurança]\nDigite a senha (1234) para autorizar a exclusão:`);
+      return Promise.resolve(entered === "1234");
+    }
+    return Promise.resolve(window.confirm(options.message));
+  }
   return new Promise((resolve) => confirmListener!({ ...options, resolve }));
 }
 
 function ConfirmHost() {
   const [req, setReq] = React.useState<ConfirmRequest | null>(null);
+  const [password, setPassword] = React.useState("");
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [shake, setShake] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     confirmListener = setReq;
@@ -657,12 +669,22 @@ function ConfirmHost() {
 
   React.useEffect(() => {
     if (!req) return;
+    setPassword("");
+    setErrorMsg(null);
+    setShake(false);
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 60);
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") answer(false);
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [req]);
 
   const answer = (ok: boolean) => {
     req?.resolve(ok);
@@ -670,27 +692,129 @@ function ConfirmHost() {
   };
 
   if (!req) return null;
+  const isPasswordProtected = Boolean(req.danger || req.requirePassword);
   const color = req.danger ? "#EF4444" : "#8B5CF6";
+
+  const handleConfirm = () => {
+    if (isPasswordProtected) {
+      if (password.trim() !== "1234") {
+        setErrorMsg("Senha incorreta! Digite 1234 para autorizar.");
+        setShake(true);
+        window.setTimeout(() => setShake(false), 400);
+        return;
+      }
+    }
+    answer(true);
+  };
+
   return createPortal(
     <div className="fui-confirm-wrap" onMouseDown={(e) => e.target === e.currentTarget && answer(false)}>
-      <div className="fui-confirm" role="alertdialog" aria-modal="true">
-        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#fafafa" }}>{req.title ?? "Confirmar"}</h4>
-        <p style={{ margin: 0, fontSize: 13, color: "#aaa", lineHeight: 1.5, whiteSpace: "pre-line" }}>{req.message}</p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+      <div className={`fui-confirm ${shake ? "fui-shake" : ""}`} role="alertdialog" aria-modal="true">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isPasswordProtected && (
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: "rgba(239,68,68,0.15)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#EF4444",
+                flexShrink: 0,
+              }}
+            >
+              <Lock size={16} />
+            </div>
+          )}
+          <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#fafafa" }}>
+            {req.title ?? (isPasswordProtected ? "Confirmar Exclusão com Senha" : "Confirmar")}
+          </h4>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 13, color: "#aaa", lineHeight: 1.5, whiteSpace: "pre-line" }}>
+          {req.message}
+        </p>
+
+        {isPasswordProtected && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+            <label style={{ fontSize: 11.5, fontWeight: 600, color: "#d4d4d8", display: "flex", justifyContent: "space-between" }}>
+              <span>Senha de confirmação:</span>
+              <span style={{ color: "#71717a", fontWeight: 400 }}>(Senha: 1234)</span>
+            </label>
+            <input
+              ref={inputRef}
+              type="password"
+              placeholder="Digite a senha (1234)"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (errorMsg) setErrorMsg(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleConfirm();
+                }
+              }}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "9px 12px",
+                borderRadius: 8,
+                background: "#18181b",
+                border: `1px solid ${errorMsg ? "#EF4444" : "rgba(255,255,255,0.16)"}`,
+                color: "#fafafa",
+                fontSize: 13,
+                outline: "none",
+                transition: "border-color 0.2s ease",
+              }}
+            />
+            {errorMsg && (
+              <span style={{ fontSize: 11, color: "#EF4444", fontWeight: 600 }}>
+                {errorMsg}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
           <button
             type="button"
             onClick={() => answer(false)}
-            style={{ padding: "8px 14px", borderRadius: 8, background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "#ccc", fontSize: 12, cursor: "pointer" }}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.15)",
+              color: "#ccc",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
           >
             {req.cancelLabel ?? "Cancelar"}
           </button>
           <button
             type="button"
-            autoFocus
-            onClick={() => answer(true)}
-            style={{ padding: "8px 16px", borderRadius: 8, background: color, border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+            onClick={handleConfirm}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              background: color,
+              border: "none",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
           >
-            {req.confirmLabel ?? "Confirmar"}
+            {isPasswordProtected && <Lock size={13} />}
+            {req.confirmLabel ?? req.confirmText ?? "Confirmar"}
           </button>
         </div>
       </div>

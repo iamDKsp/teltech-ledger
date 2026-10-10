@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Video, Plus, Clock, Link as LinkIcon, Trash, MessageCircle, Webhook } from "lucide-react";
 import { API } from "../lib/api";
+import { confirmDialog } from "../components/finance-ui";
 import { WhatsAppSettingsPanel } from "../components/WhatsAppSettingsPanel";
 import { WebhookSettingsPanel } from "../components/WebhookSettingsPanel";
 
@@ -82,7 +83,13 @@ export function ConfiguracoesPage({ workspace }: { workspace?: any }) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza que deseja excluir esta reunião?")) return;
+    const ok = await confirmDialog({
+      title: "Excluir Reunião",
+      message: "Tem certeza que deseja excluir esta reunião?",
+      confirmLabel: "Excluir",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await API.delete(`/meetings/${id}`);

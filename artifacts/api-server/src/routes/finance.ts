@@ -2227,9 +2227,13 @@ router.post("/reset-all", requireAuth, async (req: Request, res: Response) => {
       return;
     }
 
-    const { confirm } = req.body || {};
+    const { confirm, password } = req.body || {};
     if (confirm !== "RESET_FINANCE") {
       res.status(400).json({ error: "Confirmação inválida. Envie { confirm: 'RESET_FINANCE' } para autorizar o reset." });
+      return;
+    }
+    if (password && password !== "1234") {
+      res.status(403).json({ error: "Senha de segurança incorreta. A senha é 1234." });
       return;
     }
 

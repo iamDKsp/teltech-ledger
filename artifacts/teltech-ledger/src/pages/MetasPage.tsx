@@ -144,6 +144,7 @@ export const MetasPage: React.FC = () => {
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
 
   // Form fields
   const [title, setTitle] = useState('');
@@ -196,6 +197,7 @@ export const MetasPage: React.FC = () => {
     setSelectedObjective(null);
     setSelectedGoal(null);
     setFormError(null);
+    setDeletePassword('');
   };
 
   const openCreateObjective = () => {
@@ -231,6 +233,7 @@ export const MetasPage: React.FC = () => {
   const openDelete = (goal: Goal) => {
     setSelectedGoal(goal);
     setFormError(null);
+    setDeletePassword('');
     setModalType('delete');
   };
 
@@ -309,6 +312,10 @@ export const MetasPage: React.FC = () => {
 
   const handleDelete = async () => {
     if (!selectedGoal) return;
+    if (deletePassword.trim() !== '1234') {
+      setFormError('Senha incorreta! Digite 1234 para autorizar a exclusão.');
+      return;
+    }
     setFormLoading(true);
     setFormError(null);
     try {
@@ -729,6 +736,38 @@ export const MetasPage: React.FC = () => {
               Tem certeza que deseja excluir <strong>{selectedGoal.title}</strong>?
               {selectedGoal.type === 'objective' && ' Todos os resultados-chave associados também serão excluídos.'}
             </p>
+            <div style={{ marginTop: 4 }}>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#ccc', marginBottom: 6 }}>
+                Digite a senha para autorizar a exclusão (Senha: 1234):
+              </label>
+              <input
+                type="password"
+                autoFocus
+                placeholder="Digite a senha (1234)"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  if (formError) setFormError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleDelete();
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '9px 12px',
+                  borderRadius: 8,
+                  background: '#18181b',
+                  border: `1px solid ${formError ? '#ef4444' : 'rgba(255,255,255,0.15)'}`,
+                  color: '#fafafa',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
               <button type="button" onClick={closeModal} style={btnSecondary}>Cancelar</button>
               <button

@@ -1115,6 +1115,8 @@ function Board() {
   const [justDropped, setJustDropped] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<{ task: Task; colId: string } | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [deleteTaskPassword, setDeleteTaskPassword] = useState("");
+  const [deleteTaskError, setDeleteTaskError] = useState<string | null>(null);
   const colRefs = useRef<Map<string, HTMLElement>>(new Map());
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const dragRef = useRef<DragState | null>(null);
@@ -1471,16 +1473,70 @@ function Board() {
                   <h3 style={{ margin:0, fontSize:16, color:"#f0f0f0", fontWeight:600 }}>Excluir Tarefa</h3>
                 </div>
               </div>
-              <p style={{ margin:"0 0 24px 0", fontSize:13, color:"#aaa", lineHeight:1.5 }}>
+              <p style={{ margin:"0 0 16px 0", fontSize:13, color:"#aaa", lineHeight:1.5 }}>
                 Tem certeza que deseja excluir permanentemente esta tarefa? Essa ação não pode ser desfeita e todos os dados serão perdidos.
               </p>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#ccc", marginBottom: 6 }}>
+                  Digite a senha para autorizar (Senha: 1234):
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  placeholder="Digite a senha (1234)"
+                  value={deleteTaskPassword}
+                  onChange={(e) => {
+                    setDeleteTaskPassword(e.target.value);
+                    if (deleteTaskError) setDeleteTaskError(null);
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (deleteTaskPassword.trim() !== "1234") {
+                        setDeleteTaskError("Senha incorreta! Digite 1234 para autorizar.");
+                        return;
+                      }
+                      if (!activeProject || !taskToDelete) return;
+                      try {
+                        await fetch(`${API}/api/projects/${activeProject.id}/tasks/${taskToDelete.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+                        setTaskToDelete(null);
+                        setDeleteTaskPassword("");
+                        setDeleteTaskError(null);
+                        loadBoard();
+                      } catch (err) { console.error(err); }
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    background: "#18181b",
+                    border: `1px solid ${deleteTaskError ? "#ef4444" : "rgba(255,255,255,0.15)"}`,
+                    color: "#fafafa",
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
+                {deleteTaskError && (
+                  <span style={{ display: "block", fontSize: 11, color: "#ef4444", fontWeight: 600, marginTop: 4 }}>
+                    {deleteTaskError}
+                  </span>
+                )}
+              </div>
               <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
-                <button onClick={() => setTaskToDelete(null)} style={{ padding:"8px 16px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#ccc", fontSize:13, cursor:"pointer", fontWeight:500 }}>Cancelar</button>
+                <button onClick={() => { setTaskToDelete(null); setDeleteTaskPassword(""); setDeleteTaskError(null); }} style={{ padding:"8px 16px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#ccc", fontSize:13, cursor:"pointer", fontWeight:500 }}>Cancelar</button>
                 <button onClick={async () => {
-                    if (!activeProject) return;
+                    if (deleteTaskPassword.trim() !== "1234") {
+                      setDeleteTaskError("Senha incorreta! Digite 1234 para autorizar.");
+                      return;
+                    }
+                    if (!activeProject || !taskToDelete) return;
                     try {
                       await fetch(`${API}/api/projects/${activeProject.id}/tasks/${taskToDelete.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
                       setTaskToDelete(null);
+                      setDeleteTaskPassword("");
+                      setDeleteTaskError(null);
                       loadBoard();
                     } catch (e) { console.error(e); }
                 }} style={{ padding:"8px 16px", borderRadius:6, background:"#ef4444", border:"none", color:"#fff", fontSize:13, cursor:"pointer", fontWeight:600 }}>Sim, Excluir</button>

@@ -292,7 +292,7 @@ export function TeamModule({
   const commitmentPercent = effectiveCash > 0 ? Math.min(100, Math.round((maxPayroll / effectiveCash) * 100)) : (maxPayroll > 0 ? 100 : 0);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px 20px", gap: 20, maxWidth: 1600, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px 20px", gap: 20, width: "100%", boxSizing: "border-box" }}>
       {/* ─── Header & Controles de Período ─────────────────────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
         <div>
