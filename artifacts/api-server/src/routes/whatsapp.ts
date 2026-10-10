@@ -76,6 +76,9 @@ const settingsInput = z.object({
   pixMerchantCity: z.string().trim().max(15).nullable().optional(),
   pixDeliveryMode: z.enum(["text", "native"]).optional(),
   withdrawalAlertsEnabled: z.boolean().optional(),
+  expenseAlertsEnabled: z.boolean().optional(),
+  movementAlertsEnabled: z.boolean().optional(),
+  clientMessagePushEnabled: z.boolean().optional(),
   paymentAlertsEnabled: z.boolean().optional(),
   receiptEnabled: z.boolean().optional(),
   optOutHintEnabled: z.boolean().optional(),
@@ -100,6 +103,9 @@ const defaultSettings = {
   pixMerchantCity: "",
   pixDeliveryMode: "text" as "text" | "native",
   withdrawalAlertsEnabled: false,
+  expenseAlertsEnabled: true,
+  movementAlertsEnabled: true,
+  clientMessagePushEnabled: true,
   paymentAlertsEnabled: false,
   receiptEnabled: true,
   optOutHintEnabled: true,
@@ -125,6 +131,9 @@ function publicSettings(row?: SettingsRow) {
     pixMerchantCity: row?.pixMerchantCity ?? defaultSettings.pixMerchantCity,
     pixDeliveryMode: (row?.pixDeliveryMode ?? defaultSettings.pixDeliveryMode) as "text" | "native",
     withdrawalAlertsEnabled: row?.withdrawalAlertsEnabled ?? defaultSettings.withdrawalAlertsEnabled,
+    expenseAlertsEnabled: row?.expenseAlertsEnabled ?? defaultSettings.expenseAlertsEnabled,
+    movementAlertsEnabled: row?.movementAlertsEnabled ?? defaultSettings.movementAlertsEnabled,
+    clientMessagePushEnabled: row?.clientMessagePushEnabled ?? defaultSettings.clientMessagePushEnabled,
     paymentAlertsEnabled: row?.paymentAlertsEnabled ?? defaultSettings.paymentAlertsEnabled,
     receiptEnabled: row?.receiptEnabled ?? defaultSettings.receiptEnabled,
     optOutHintEnabled: row?.optOutHintEnabled ?? defaultSettings.optOutHintEnabled,
@@ -383,6 +392,8 @@ const contactInput = z.object({
   active: z.boolean().optional(),
   notifyWithdrawals: z.boolean().optional(),
   notifyPayments: z.boolean().optional(),
+  notifyExpenses: z.boolean().optional(),
+  notifyMovements: z.boolean().optional(),
 }).strict();
 
 function publicContact(row: typeof whatsappContactsTable.$inferSelect) {
@@ -397,6 +408,8 @@ function publicContact(row: typeof whatsappContactsTable.$inferSelect) {
     active: row.active,
     notifyWithdrawals: row.notifyWithdrawals,
     notifyPayments: row.notifyPayments,
+    notifyExpenses: row.notifyExpenses,
+    notifyMovements: row.notifyMovements,
   };
 }
 
@@ -462,6 +475,8 @@ router.post("/contacts", async (req, res) => {
       active: parsed.data.active ?? true,
       notifyWithdrawals: parsed.data.notifyWithdrawals ?? true,
       notifyPayments: parsed.data.notifyPayments ?? false,
+      notifyExpenses: parsed.data.notifyExpenses ?? true,
+      notifyMovements: parsed.data.notifyMovements ?? true,
     }).onConflictDoNothing().returning();
     if (!created) {
       res.status(409).json({ error: "Já existe um contato com este número" });

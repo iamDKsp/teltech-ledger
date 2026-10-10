@@ -2,6 +2,7 @@ import {
   db,
   clientsTable,
   financialAccountsTable,
+  financialCategoriesTable,
   financialTransactionsTable,
   usersTable,
   workspaceMembersTable,
@@ -11,7 +12,7 @@ import {
   type FinancialTransaction,
   type WhatsappSettings,
 } from "@workspace/db";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import {
   normalizeWhatsAppPhone,
@@ -22,6 +23,9 @@ import {
 } from "./whatsapp-session";
 import {
   composeBilling,
+  composeExpensePaid,
+  composeExpenseRegistered,
+  composeIncomeRegistered,
   composePaymentAlert,
   composeReceipt,
   composeWithdrawal,
@@ -53,7 +57,7 @@ async function loadSettings(exec: any, workspaceId: string): Promise<WhatsappSet
   return settings;
 }
 
-type Topic = "withdrawals" | "payments";
+type Topic = "withdrawals" | "payments" | "expenses" | "movements";
 
 /**
  * Internal people who should hear about a topic. Reads whatsapp_contacts; the
@@ -67,18 +71,42 @@ export async function internalRecipients(
 ): Promise<InternalRecipient[]> {
   const contacts: (typeof whatsappContactsTable.$inferSelect)[] = await exec.select().from(whatsappContactsTable)
     .where(eq(whatsappContactsTable.workspaceId, workspaceId));
+
   if (contacts.length === 0) {
-    if (topic !== "withdrawals" || !settings?.internalAlertPhone) return [];
-    const legacy = settings.internalAlertPhone.split(/[,;\n\r\t]+/)
-      .map((value: string) => normalizeWhatsAppPhone(value.trim()))
-      .filter((phone: string | null): phone is string => Boolean(phone));
-    return Array.from(new Set(legacy)).map((phone) => ({ phone, name: "equipe", nickname: null, userId: null }));
+    if (settings?.internalAlertPhone) {
+      const legacy = settings.internalAlertPhone.split(/[,;\n\r\t]+/)
+        .map((value: string) => normalizeWhatsAppPhone(value.trim()))
+        .filter((phone: string | null): phone is string => Boolean(phone));
+      return Array.from(new Set(legacy)).map((phone) => ({ phone, name: "equipe", nickname: null, userId: null }));
+    }
+    // Fallback: look up workspace members who are partners / owners / admins with phone numbers
+    try {
+      const partnerMembers = await exec.select({ name: usersTable.name, phone: usersTable.phone, id: usersTable.id })
+        .from(workspaceMembersTable)
+        .innerJoin(usersTable, eq(workspaceMembersTable.userId, usersTable.id))
+        .where(and(
+          eq(workspaceMembersTable.workspaceId, workspaceId),
+          inArray(workspaceMembersTable.role, ["owner", "admin", "ceo", "cto"]),
+        ));
+      return partnerMembers
+        .map((m: any) => ({ phone: normalizeWhatsAppPhone(m.phone), name: m.name, nickname: null, userId: m.id }))
+        .filter((m: any): m is InternalRecipient => Boolean(m.phone));
+    } catch {
+      return [];
+    }
   }
+
   const seen = new Set<string>();
   const recipients: InternalRecipient[] = [];
   for (const contact of contacts) {
     if (!contact.active) continue;
-    if (topic === "withdrawals" ? !contact.notifyWithdrawals : !contact.notifyPayments) continue;
+    let shouldNotify = false;
+    if (topic === "withdrawals") shouldNotify = contact.notifyWithdrawals ?? true;
+    else if (topic === "payments") shouldNotify = contact.notifyPayments ?? true;
+    else if (topic === "expenses") shouldNotify = contact.notifyExpenses ?? true;
+    else if (topic === "movements") shouldNotify = contact.notifyMovements ?? true;
+    if (!shouldNotify) continue;
+
     const phone = normalizeWhatsAppPhone(contact.phone);
     if (!phone || seen.has(phone)) continue;
     seen.add(phone);
@@ -251,6 +279,162 @@ export async function enqueuePaymentReceipt(
     recipient,
     body: composeReceipt(transaction, client, settings).text,
   }).onConflictDoNothing();
+}
+
+/**
+ * Disparado ao registrar ou liquidar qualquer despesa (outflow).
+ * Se status === "paid", avisa sobre o pagamento / baixa da despesa.
+ * Se status === "pending" e isInitialRegistration === true, avisa sobre a despesa registrada a pagar.
+ */
+export async function enqueueExpenseAlert(
+  tx: any,
+  workspaceId: string,
+  transaction: FinancialTransaction,
+  actorUserId: string | null,
+  isInitialRegistration = false,
+): Promise<void> {
+  if (transaction.type !== "outflow") return;
+  const settings = await loadSettings(tx, workspaceId);
+  if (settings && settings.expenseAlertsEnabled === false) return;
+
+  const recipients = await internalRecipients(tx, workspaceId, settings, "expenses");
+  if (!recipients.length) return;
+
+  const [category] = transaction.categoryId
+    ? await tx.select({ name: financialCategoriesTable.name })
+        .from(financialCategoriesTable)
+        .where(and(eq(financialCategoriesTable.id, transaction.categoryId), eq(financialCategoriesTable.workspaceId, workspaceId)))
+        .limit(1)
+    : [];
+
+  const [account] = transaction.accountId
+    ? await tx.select({ name: financialAccountsTable.name, currentBalance: financialAccountsTable.currentBalance })
+        .from(financialAccountsTable)
+        .where(and(eq(financialAccountsTable.id, transaction.accountId), eq(financialAccountsTable.workspaceId, workspaceId)))
+        .limit(1)
+    : [];
+
+  const [actor] = actorUserId
+    ? await tx.select({ name: usersTable.name })
+        .from(workspaceMembersTable)
+        .innerJoin(usersTable, eq(workspaceMembersTable.userId, usersTable.id))
+        .where(and(eq(workspaceMembersTable.workspaceId, workspaceId), eq(workspaceMembersTable.userId, actorUserId)))
+        .limit(1)
+    : [];
+
+  const isPaid = transaction.status === "paid";
+  if (!isPaid && !isInitialRegistration) return;
+
+  const kind = isPaid ? "expense_paid" : "expense_registered";
+
+  for (const recipient of recipients) {
+    const composed = isPaid
+      ? composeExpensePaid(transaction, {
+          recipient,
+          categoryName: category?.name ?? null,
+          account: account ?? null,
+          actorName: actor?.name ?? null,
+        }, settings)
+      : composeExpenseRegistered(transaction, {
+          recipient,
+          categoryName: category?.name ?? null,
+          account: account ?? null,
+          actorName: actor?.name ?? null,
+        }, settings);
+
+    const dedupeKey = isPaid
+      ? `${workspaceId}:expense_paid:${transaction.id}:${recipient.phone}`
+      : `${workspaceId}:expense_reg:${transaction.id}:${recipient.phone}`;
+
+    await tx.insert(whatsappMessagesTable).values({
+      workspaceId,
+      transactionId: transaction.id,
+      clientId: null,
+      dedupeKey,
+      kind,
+      recipient: recipient.phone,
+      body: composed.text,
+    }).onConflictDoNothing();
+  }
+}
+
+/**
+ * Disparado em movimentações financeiras gerais (ex: receitas avulsas, entradas registradas ou liquidadas).
+ */
+export async function enqueueMovementAlert(
+  tx: any,
+  workspaceId: string,
+  transaction: FinancialTransaction,
+  actorUserId: string | null,
+  action: "registered" | "paid",
+): Promise<void> {
+  const settings = await loadSettings(tx, workspaceId);
+  if (settings && settings.movementAlertsEnabled === false) return;
+
+  const recipients = await internalRecipients(tx, workspaceId, settings, "movements");
+  if (!recipients.length) return;
+
+  const [account] = transaction.accountId
+    ? await tx.select({ name: financialAccountsTable.name, currentBalance: financialAccountsTable.currentBalance })
+        .from(financialAccountsTable)
+        .where(and(eq(financialAccountsTable.id, transaction.accountId), eq(financialAccountsTable.workspaceId, workspaceId)))
+        .limit(1)
+    : [];
+
+  const [actor] = actorUserId
+    ? await tx.select({ name: usersTable.name })
+        .from(workspaceMembersTable)
+        .innerJoin(usersTable, eq(workspaceMembersTable.userId, usersTable.id))
+        .where(and(eq(workspaceMembersTable.workspaceId, workspaceId), eq(workspaceMembersTable.userId, actorUserId)))
+        .limit(1)
+    : [];
+
+  let clientName: string | null = null;
+  if (transaction.clientId) {
+    const [client] = await tx.select({ name: clientsTable.name }).from(clientsTable)
+      .where(and(eq(clientsTable.id, transaction.clientId), eq(clientsTable.workspaceId, workspaceId)))
+      .limit(1);
+    clientName = client?.name ?? null;
+  }
+
+  for (const recipient of recipients) {
+    if (transaction.type === "inflow") {
+      if (action === "registered" && transaction.status === "pending") {
+        const composed = composeIncomeRegistered(transaction, {
+          recipient,
+          clientName,
+          account: account ?? null,
+          actorName: actor?.name ?? null,
+        }, settings);
+
+        await tx.insert(whatsappMessagesTable).values({
+          workspaceId,
+          transactionId: transaction.id,
+          clientId: transaction.clientId ?? null,
+          dedupeKey: `${workspaceId}:income_reg:${transaction.id}:${recipient.phone}`,
+          kind: "income_registered",
+          recipient: recipient.phone,
+          body: composed.text,
+        }).onConflictDoNothing();
+      } else if (action === "paid" || transaction.status === "paid") {
+        const composed = composePaymentAlert(transaction, {
+          recipient,
+          clientName: clientName ?? "Receita Avulsa",
+          account: account ?? null,
+        }, settings);
+
+        await tx.insert(whatsappMessagesTable).values({
+          workspaceId,
+          transactionId: transaction.id,
+          clientId: transaction.clientId ?? null,
+          dedupeKey: `${workspaceId}:inflow_paid:${transaction.id}:${recipient.phone}`,
+          kind: "payment_alert",
+          recipient: recipient.phone,
+          body: composed.text,
+        }).onConflictDoNothing();
+      }
+    }
+  }
 }
 
 async function enqueueDailyBilling(): Promise<void> {

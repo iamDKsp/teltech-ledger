@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
+  Bell,
+  BellRing,
   MessageSquare,
   Bot,
   Send,
@@ -51,6 +53,14 @@ import {
 import { toast } from "sonner";
 import { API } from "../lib/api";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  checkPushSupport,
+  getCurrentPushSubscription,
+  subscribeToPushNotifications,
+  testPushNotification,
+  unsubscribeFromPushNotifications,
+  type PushSupportStatus,
+} from "../lib/push-notifications";
 
 interface ConversationItem {
   id: string;
@@ -1001,6 +1011,12 @@ export function MonitoramentoPage() {
   const [isTogglingOptIn, setIsTogglingOptIn] = useState(false);
   const [showInvoiceSelector, setShowInvoiceSelector] = useState(false);
 
+  // Push Notification States
+  const [pushStatus, setPushStatus] = useState<PushSupportStatus | null>(null);
+  const [isPushSubscribed, setIsPushSubscribed] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [showIosPushModal, setShowIosPushModal] = useState(false);
+
   // Media Lightbox & Attachment States
   const [lightboxImage, setLightboxImage] = useState<{ src: string; caption?: string | null } | null>(null);
   const [selectedAttachment, setSelectedAttachment] = useState<{
@@ -1276,6 +1292,71 @@ export function MonitoramentoPage() {
     }
   };
 
+  // Inicialização e checagem de suporte a Web Push
+  useEffect(() => {
+    const status = checkPushSupport();
+    setPushStatus(status);
+    getCurrentPushSubscription()
+      .then((sub) => {
+        setIsPushSubscribed(Boolean(sub));
+      })
+      .catch((err) => console.error("Falha ao checar inscrição push:", err));
+  }, []);
+
+  const handleTogglePush = async () => {
+    if (pushLoading) return;
+    const status = checkPushSupport();
+    setPushStatus(status);
+
+    if (status.isIOS && !status.isStandalone) {
+      setShowIosPushModal(true);
+      return;
+    }
+
+    setPushLoading(true);
+    try {
+      if (isPushSubscribed) {
+        const res = await unsubscribeFromPushNotifications();
+        if (res.ok) {
+          setIsPushSubscribed(false);
+          toast.success("Notificações push desativadas neste dispositivo.");
+        } else {
+          toast.error(res.reason || "Erro ao desativar notificações.");
+        }
+      } else {
+        const res = await subscribeToPushNotifications();
+        if (res.ok) {
+          setIsPushSubscribed(true);
+          toast.success("Notificações no celular ativadas com sucesso!");
+        } else {
+          if (status.isIOS && !status.isStandalone) {
+            setShowIosPushModal(true);
+          } else {
+            toast.error(res.reason || "Não foi possível ativar as notificações.");
+          }
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao processar notificações push");
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleTestPush = async () => {
+    try {
+      toast.info("Enviando notificação de teste...");
+      const res = await testPushNotification();
+      if (res.ok && (res.sent ?? 0) > 0) {
+        toast.success("Notificação enviada! Verifique seu dispositivo.");
+      } else {
+        toast.warning("Nenhum dispositivo ativo inscrito para receber o push.");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao enviar teste push");
+    }
+  };
+
   // Dynamic filter counts and filtering
   const filterCounts = useMemo(() => {
     return {
@@ -1386,6 +1467,64 @@ export function MonitoramentoPage() {
                   WhatsApp Desconectado • Conectar
                 </button>
               )}
+
+              {/* Push Notifications Toggle */}
+              <button
+                onClick={handleTogglePush}
+                disabled={pushLoading}
+                title={
+                  isPushSubscribed
+                    ? "Notificações push ativas neste aparelho. Clique para desativar."
+                    : "Clique para ativar notificações push no celular"
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "3px 10px",
+                  borderRadius: 20,
+                  background: isPushSubscribed
+                    ? "hsl(265 85% 62% / 0.18)"
+                    : "rgba(255, 255, 255, 0.06)",
+                  border: isPushSubscribed
+                    ? "1px solid hsl(265 85% 62% / 0.5)"
+                    : "1px solid rgba(255, 255, 255, 0.15)",
+                  color: isPushSubscribed ? "#c4a3ff" : "#aaa",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {isPushSubscribed ? <BellRing size={12} color="#c4a3ff" /> : <Bell size={12} />}
+                {pushLoading
+                  ? "Configurando..."
+                  : isPushSubscribed
+                  ? "Push Celular Ativo"
+                  : "Ativar Push Celular"}
+              </button>
+
+              {isPushSubscribed && (
+                <button
+                  onClick={handleTestPush}
+                  title="Enviar notificação de teste push agora"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "3px 8px",
+                    borderRadius: 16,
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    color: "#bbb",
+                    fontSize: 10,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Testar
+                </button>
+              )}
             </div>
             <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
               Visualização unificada de todas as cobranças disparadas por Nexus e respostas em tempo real dos clientes.
@@ -1469,6 +1608,46 @@ export function MonitoramentoPage() {
           </div>
         </div>
       </div>
+
+      {/* ─── iOS Banner (quando acessado via Safari no iPhone e não PWA) ─── */}
+      {pushStatus?.isIOS && !pushStatus?.isStandalone && (
+        <div
+          style={{
+            padding: "9px 24px",
+            background: "linear-gradient(90deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.15))",
+            borderBottom: "1px solid hsl(265 85% 62% / 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 12,
+            color: "#eaeaf0",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <BellRing size={16} style={{ color: "hsl(265 85% 68%)", flexShrink: 0 }} />
+            <span>
+              <strong>Dica para iPhone:</strong> Para receber notificações push mesmo com a tela bloqueada, adicione o Teltech à <strong>Tela de Início</strong> pelo Safari.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowIosPushModal(true)}
+            style={{
+              padding: "4px 12px",
+              borderRadius: 8,
+              background: "hsl(265 85% 62%)",
+              border: "none",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Como instalar no iPhone
+          </button>
+        </div>
+      )}
 
       {/* ─── Main Two/Three-Column Layout ─── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -3080,6 +3259,222 @@ export function MonitoramentoPage() {
                   {lightboxImage.caption}
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Modal Guia iPhone Web Push ─── */}
+      <AnimatePresence>
+        {showIosPushModal && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+            }}
+            onClick={() => setShowIosPushModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 480,
+                background: "#16161b",
+                border: "1px solid #2e2e38",
+                borderRadius: 16,
+                padding: 24,
+                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 10,
+                      background: "hsl(265 85% 62% / 0.2)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "hsl(265 85% 65%)",
+                    }}
+                  >
+                    <BellRing size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>
+                      Notificações no iPhone
+                    </h3>
+                    <p style={{ margin: 0, fontSize: 12, color: "#888" }}>
+                      Requisito da Apple para Web Push nativo no iOS 16.4+
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowIosPushModal(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#888",
+                    cursor: "pointer",
+                    padding: 4,
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6 }}>
+                A Apple só permite que aplicativos web enviem notificações push reais (que tocam e vibram com tela bloqueada) quando adicionados à Tela de Início.
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  background: "#101014",
+                  border: "1px solid #22222a",
+                  borderRadius: 12,
+                  padding: 16,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      background: "hsl(265 85% 62%)",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    1
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: 13 }}>Abra no Safari</div>
+                    <div style={{ fontSize: 12, color: "#999" }}>
+                      Certifique-se de estar acessando pelo navegador <strong>Safari</strong> do iPhone.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      background: "hsl(265 85% 62%)",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    2
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: 13 }}>Toque em Compartilhar</div>
+                    <div style={{ fontSize: 12, color: "#999" }}>
+                      Na barra inferior do Safari, toque no ícone de <strong>Compartilhar</strong> (quadrado com seta para cima).
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      background: "hsl(265 85% 62%)",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    3
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: 13 }}>Adicionar à Tela de Início</div>
+                    <div style={{ fontSize: 12, color: "#999" }}>
+                      Role a lista e toque em <strong>"Adicionar à Tela de Início"</strong>.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      background: "hsl(152 65% 45%)",
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    4
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: 13 }}>Abra o App e Ative</div>
+                    <div style={{ fontSize: 12, color: "#999" }}>
+                      Abra o Teltech pelo ícone criado na tela inicial e toque em <strong>"Ativar Push Celular"</strong>.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => setShowIosPushModal(false)}
+                  style={{
+                    padding: "8px 18px",
+                    borderRadius: 10,
+                    background: "hsl(265 85% 62%)",
+                    border: "none",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Entendi
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

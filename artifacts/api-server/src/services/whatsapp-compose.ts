@@ -270,6 +270,79 @@ export function composePaymentAlert(
   return { templateKind: "payment_alert", text: renderTemplate(resolveTemplate("payment_alert", settings?.templates), vars) };
 }
 
+export function composeExpenseRegistered(
+  transaction: FinancialTransaction,
+  context: {
+    recipient: InternalRecipient;
+    categoryName: string | null;
+    account: { name: string } | null;
+    actorName: string | null;
+  },
+  settings: SettingsLike,
+  now = new Date(),
+): ComposedMessage {
+  const vars = {
+    ...baseVariables(settings, now),
+    contato: callName(context.recipient),
+    descricao: describeInstallment(transaction),
+    valor: money(transaction.amount),
+    vencimento: readableDate(dueDay(transaction.dueDate)),
+    categoria: context.categoryName ?? "Geral",
+    conta: context.account?.name ?? "",
+    registrado_por: context.actorName ?? "",
+  };
+  return { templateKind: "expense_registered", text: renderTemplate(resolveTemplate("expense_registered", settings?.templates), vars) };
+}
+
+export function composeExpensePaid(
+  transaction: FinancialTransaction,
+  context: {
+    recipient: InternalRecipient;
+    categoryName: string | null;
+    account: { name: string; currentBalance: number } | null;
+    actorName: string | null;
+  },
+  settings: SettingsLike,
+  now = new Date(),
+): ComposedMessage {
+  const vars = {
+    ...baseVariables(settings, now),
+    contato: callName(context.recipient),
+    descricao: describeInstallment(transaction),
+    valor: money(transaction.amount),
+    data_pagamento: readableDate(saoPauloNow(transaction.paidAt ?? now).date),
+    categoria: context.categoryName ?? "Geral",
+    conta: context.account?.name ?? "",
+    saldo: context.account ? money(context.account.currentBalance) : "",
+    liquidado_por: context.actorName ?? "",
+  };
+  return { templateKind: "expense_paid", text: renderTemplate(resolveTemplate("expense_paid", settings?.templates), vars) };
+}
+
+export function composeIncomeRegistered(
+  transaction: FinancialTransaction,
+  context: {
+    recipient: InternalRecipient;
+    clientName: string | null;
+    account: { name: string } | null;
+    actorName: string | null;
+  },
+  settings: SettingsLike,
+  now = new Date(),
+): ComposedMessage {
+  const vars = {
+    ...baseVariables(settings, now),
+    contato: callName(context.recipient),
+    cliente: context.clientName ?? "Avulso",
+    descricao: describeInstallment(transaction),
+    valor: money(transaction.amount),
+    vencimento: readableDate(dueDay(transaction.dueDate)),
+    conta: context.account?.name ?? "",
+    registrado_por: context.actorName ?? "",
+  };
+  return { templateKind: "income_registered", text: renderTemplate(resolveTemplate("income_registered", settings?.templates), vars) };
+}
+
 /** Texto que fica salvo no histórico: a versão em texto, rodapé e código Pix. */
 export function storedBody(message: ComposedMessage): string {
   const parts = [message.pix && message.pixMode === "native" ? (message.fallbackText ?? message.text) : message.text];

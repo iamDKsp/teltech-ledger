@@ -12,7 +12,15 @@ import {
   resolveTemplate,
   unknownVariables,
 } from "../services/whatsapp-templates";
-import { composeBilling, composePreview, composeWithdrawal, storedBody } from "../services/whatsapp-compose";
+import {
+  composeBilling,
+  composeExpensePaid,
+  composeExpenseRegistered,
+  composeIncomeRegistered,
+  composePreview,
+  composeWithdrawal,
+  storedBody,
+} from "../services/whatsapp-compose";
 
 test("detectPixKeyType reconhece cada tipo de chave", () => {
   assert.equal(detectPixKeyType("financeiro@teltech.com"), "email");
@@ -134,3 +142,70 @@ test("composeBilling escolhe o texto pelo prazo na cobrança manual", () => {
   assert.equal(upcoming.templateKind, "billing_before");
   assert.match(upcoming.text, /vence \*em 3 dias\*/);
 });
+
+test("composeExpenseRegistered e composeExpensePaid avisam os sócios sobre despesas registradas e baixadas", () => {
+  const now = new Date("2026-10-10T14:00:00Z");
+  const tx = {
+    amount: 35_000, // R$ 350,00
+    description: "Servidor Cloud AWS",
+    dueDate: new Date("2026-10-20T00:00:00Z"),
+    paidAt: new Date("2026-10-10T14:00:00Z"),
+  } as never;
+
+  const recipient = { phone: "5514999999999", name: "Lucas Almeida", nickname: "Lu", userId: "u1" };
+
+  // 1. Registro de despesa pendente
+  const registered = composeExpenseRegistered(tx, {
+    recipient,
+    categoryName: "Infraestrutura & Cloud",
+    account: { name: "Conta Principal Itaú" },
+    actorName: "Tarcísio",
+  }, settings, now);
+
+  assert.equal(registered.templateKind, "expense_registered");
+  assert.match(registered.text, /, Lu! Aqui é o \*Nexus\* 🤖/);
+  assert.match(registered.text, /Uma nova despesa foi registrada/);
+  assert.match(registered.text, /Servidor Cloud AWS/);
+  assert.match(registered.text, /R\$\s*350,00/);
+  assert.match(registered.text, /Infraestrutura & Cloud/);
+  assert.match(registered.text, /Registrado por: Tarcísio/);
+
+  // 2. Despesa paga / baixa efetuada
+  const paid = composeExpensePaid(tx, {
+    recipient,
+    categoryName: "Infraestrutura & Cloud",
+    account: { name: "Conta Principal Itaú", currentBalance: 1_750_000 },
+    actorName: "Tarcísio",
+  }, settings, now);
+
+  assert.equal(paid.templateKind, "expense_paid");
+  assert.match(paid.text, /Pagamento de despesa registrado no caixa/);
+  assert.match(paid.text, /Servidor Cloud AWS/);
+  assert.match(paid.text, /R\$\s*350,00/);
+  assert.match(paid.text, /Saldo após pagamento: R\$\s*17\.500,00/);
+  assert.match(paid.text, /Liquidado por: Tarcísio/);
+});
+
+test("composeIncomeRegistered avisa os sócios sobre novas receitas", () => {
+  const now = new Date("2026-10-10T14:00:00Z");
+  const tx = {
+    amount: 500_000, // R$ 5.000,00
+    description: "Consultoria Mensal",
+    dueDate: new Date("2026-10-25T00:00:00Z"),
+  } as never;
+
+  const recipient = { phone: "5514999999999", name: "Lucas Almeida", nickname: null, userId: "u1" };
+  const income = composeIncomeRegistered(tx, {
+    recipient,
+    clientName: "Empresa Parceira Ltda",
+    account: { name: "Conta Inter" },
+    actorName: "Tarcísio",
+  }, settings, now);
+
+  assert.equal(income.templateKind, "income_registered");
+  assert.match(income.text, /Uma nova receita foi registrada a receber/);
+  assert.match(income.text, /Empresa Parceira Ltda/);
+  assert.match(income.text, /R\$\s*5\.000,00/);
+  assert.match(income.text, /Registrado por: Tarcísio/);
+});
+

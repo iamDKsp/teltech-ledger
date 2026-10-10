@@ -25,6 +25,9 @@ export interface WhatsAppSettings {
   pixMerchantCity: string;
   pixDeliveryMode: PixDeliveryMode;
   withdrawalAlertsEnabled: boolean;
+  expenseAlertsEnabled: boolean;
+  movementAlertsEnabled: boolean;
+  clientMessagePushEnabled: boolean;
   paymentAlertsEnabled: boolean;
   receiptEnabled: boolean;
   optOutHintEnabled: boolean;
@@ -48,6 +51,9 @@ export const emptySettings: WhatsAppSettings = {
   pixMerchantCity: "",
   pixDeliveryMode: "text",
   withdrawalAlertsEnabled: false,
+  expenseAlertsEnabled: true,
+  movementAlertsEnabled: true,
+  clientMessagePushEnabled: true,
   paymentAlertsEnabled: false,
   receiptEnabled: true,
   optOutHintEnabled: true,
@@ -82,6 +88,8 @@ export interface WhatsAppContact {
   active: boolean;
   notifyWithdrawals: boolean;
   notifyPayments: boolean;
+  notifyExpenses: boolean;
+  notifyMovements: boolean;
 }
 
 export interface WorkspaceMemberOption {

@@ -806,6 +806,11 @@ export const whatsappSettingsTable = pgTable("whatsapp_settings", {
   // existing workspaces keep working until their numbers are migrated.
   internalAlertPhone: text("internal_alert_phone"),
   withdrawalAlertsEnabled: boolean("withdrawal_alerts_enabled").notNull().default(false),
+  expenseAlertsEnabled: boolean("expense_alerts_enabled").notNull().default(true),
+  movementAlertsEnabled: boolean("movement_alerts_enabled").notNull().default(true),
+  clientMessagePushEnabled: boolean("client_message_push_enabled").notNull().default(true),
+  vapidPublicKey: text("vapid_public_key"),
+  vapidPrivateKey: text("vapid_private_key"),
   // Pix delivery
   pixKeyType: text("pix_key_type").notNull().default("auto"), // 'auto' | 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
   pixMerchantName: text("pix_merchant_name"),
@@ -836,6 +841,8 @@ export const whatsappContactsTable = pgTable("whatsapp_contacts", {
   active: boolean("active").notNull().default(true),
   notifyWithdrawals: boolean("notify_withdrawals").notNull().default(true),
   notifyPayments: boolean("notify_payments").notNull().default(false),
+  notifyExpenses: boolean("notify_expenses").notNull().default(true),
+  notifyMovements: boolean("notify_movements").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
@@ -844,6 +851,20 @@ export const whatsappContactsTable = pgTable("whatsapp_contacts", {
 
 export type WhatsappContact = typeof whatsappContactsTable.$inferSelect;
 export type WhatsappSettings = typeof whatsappSettingsTable.$inferSelect;
+
+export const pushSubscriptionsTable = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => usersTable.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type PushSubscriptionRow = typeof pushSubscriptionsTable.$inferSelect;
 
 export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   id: uuid("id").primaryKey().defaultRandom(),

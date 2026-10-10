@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BellRing, Coins, HandCoins, Link2, Pencil, Phone, Plus, Send, Trash2, UserRound, Users, X } from "lucide-react";
+import { BellRing, Coins, HandCoins, Link2, Pencil, Phone, Plus, Receipt, Send, Smartphone, Trash2, UserRound, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "@/lib/api";
 import { confirmDialog } from "@/components/finance-ui";
@@ -16,9 +16,19 @@ interface FormState {
   userId: string;
   notifyWithdrawals: boolean;
   notifyPayments: boolean;
+  notifyExpenses: boolean;
 }
 
-const emptyForm: FormState = { name: "", nickname: "", roleLabel: "", phone: "", userId: "", notifyWithdrawals: true, notifyPayments: false };
+const emptyForm: FormState = {
+  name: "",
+  nickname: "",
+  roleLabel: "",
+  phone: "",
+  userId: "",
+  notifyWithdrawals: true,
+  notifyPayments: true,
+  notifyExpenses: true,
+};
 
 const roleNames: Record<string, string> = { owner: "Dono", admin: "Admin", ceo: "CEO", cto: "CTO", cmo: "CMO", member: "Membro", viewer: "Leitor" };
 
@@ -59,6 +69,7 @@ export function PartnerContacts({
         userId: contact.userId ?? "",
         notifyWithdrawals: contact.notifyWithdrawals,
         notifyPayments: contact.notifyPayments,
+        notifyExpenses: contact.notifyExpenses ?? true,
       });
     } else {
       setEditing("new");
@@ -87,6 +98,7 @@ export function PartnerContacts({
       userId: form.userId || null,
       notifyWithdrawals: form.notifyWithdrawals,
       notifyPayments: form.notifyPayments,
+      notifyExpenses: form.notifyExpenses,
     };
     try {
       const result =
@@ -103,7 +115,7 @@ export function PartnerContacts({
     }
   };
 
-  const update = async (contact: WhatsAppContact, patch: Partial<Pick<WhatsAppContact, "active" | "notifyWithdrawals" | "notifyPayments">>) => {
+  const update = async (contact: WhatsAppContact, patch: Partial<Pick<WhatsAppContact, "active" | "notifyWithdrawals" | "notifyPayments" | "notifyExpenses">>) => {
     setBusyId(contact.id);
     try {
       const result = await API.put<{ contact: WhatsAppContact }>(`/whatsapp/contacts/${contact.id}`, patch);
@@ -168,6 +180,22 @@ export function PartnerContacts({
       >
         <div className="grid gap-3 lg:grid-cols-2">
           <ToggleRow
+            icon={<Receipt size={18} />}
+            title="Despesas da empresa"
+            description="Avisa os sócios sobre qualquer despesa registrada ou paga no caixa."
+            help="Inclui valor, descrição, vencimento/baixa, conta e quem registrou."
+            checked={settings.expenseAlertsEnabled}
+            onChange={(value) => onSettings({ expenseAlertsEnabled: value })}
+          />
+          <ToggleRow
+            icon={<Coins size={18} />}
+            title="Pagamentos & receitas"
+            description="Avisa quando pagamentos de clientes ou receitas são confirmados."
+            help="Ex.: “Olá Lucas, o pagamento do cliente X foi confirmado.”"
+            checked={settings.paymentAlertsEnabled}
+            onChange={(value) => onSettings({ paymentAlertsEnabled: value })}
+          />
+          <ToggleRow
             icon={<HandCoins size={18} />}
             title="Retiradas de sócios"
             description="Avisa quando uma retirada ou pró-labore é liquidado no caixa."
@@ -176,12 +204,12 @@ export function PartnerContacts({
             onChange={(value) => onSettings({ withdrawalAlertsEnabled: value })}
           />
           <ToggleRow
-            icon={<Coins size={18} />}
-            title="Pagamentos de clientes"
-            description="Avisa quando o pagamento de uma parcela é confirmado."
-            help="Ex.: “Olá Lucas, aqui é o Nexus. O pagamento do cliente X foi confirmado.”"
-            checked={settings.paymentAlertsEnabled}
-            onChange={(value) => onSettings({ paymentAlertsEnabled: value })}
+            icon={<Smartphone size={18} />}
+            title="Notificações push no celular"
+            description="Envia notificação imediata no celular (inclusive iPhone) quando clientes mandam mensagem."
+            help="Funciona nativamente com a tela bloqueada ou app em segundo plano."
+            checked={settings.clientMessagePushEnabled}
+            onChange={(value) => onSettings({ clientMessagePushEnabled: value })}
           />
         </div>
       </Card>
@@ -245,9 +273,10 @@ export function PartnerContacts({
                 </SelectInput>
               </Field>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <ToggleRow title="Avisar despesas" checked={form.notifyExpenses} onChange={(value) => patchForm({ notifyExpenses: value })} />
               <ToggleRow title="Avisar retiradas" checked={form.notifyWithdrawals} onChange={(value) => patchForm({ notifyWithdrawals: value })} />
-              <ToggleRow title="Avisar pagamentos de clientes" checked={form.notifyPayments} onChange={(value) => patchForm({ notifyPayments: value })} />
+              <ToggleRow title="Avisar receitas" checked={form.notifyPayments} onChange={(value) => patchForm({ notifyPayments: value })} />
             </div>
             {error && (
               <p role="alert" className="animate-shake mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
@@ -300,16 +329,22 @@ export function PartnerContacts({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-xs">
+                    <Tip content="Receber avisos no WhatsApp quando despesas forem registradas ou pagas.">
+                      <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+                        <Switch checked={contact.notifyExpenses ?? true} disabled={busy} onCheckedChange={(value) => void update(contact, { notifyExpenses: value })} aria-label={`Avisar despesas para ${contact.name}`} />
+                        Despesas
+                      </label>
+                    </Tip>
                     <Tip content="Receber aviso quando uma retirada de sócio for liquidada.">
                       <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
                         <Switch checked={contact.notifyWithdrawals} disabled={busy} onCheckedChange={(value) => void update(contact, { notifyWithdrawals: value })} aria-label={`Avisar retiradas para ${contact.name}`} />
                         Retiradas
                       </label>
                     </Tip>
-                    <Tip content="Receber aviso quando um cliente pagar uma parcela.">
+                    <Tip content="Receber aviso quando um cliente pagar uma parcela ou receita confirmada.">
                       <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
                         <Switch checked={contact.notifyPayments} disabled={busy} onCheckedChange={(value) => void update(contact, { notifyPayments: value })} aria-label={`Avisar pagamentos para ${contact.name}`} />
-                        Pagamentos
+                        Receitas
                       </label>
                     </Tip>
                     <Tip content={contact.active ? "Pausar: esta pessoa deixa de receber qualquer aviso." : "Reativar os avisos desta pessoa."}>

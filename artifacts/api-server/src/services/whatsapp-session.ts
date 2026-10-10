@@ -19,6 +19,7 @@ import {
   isWhatsAppEncryptionConfigured,
   useEncryptedDbAuthState,
 } from "./whatsapp-auth";
+import { sendPushNotificationToWorkspace } from "./push-notification";
 
 type SessionStatus = "connecting" | "qr" | "connected" | "disconnected" | "logged_out" | "error";
 type Session = {
@@ -566,6 +567,39 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           mediaType: mediaResult.mediaType,
           body: text.slice(0, 50),
         }, "WhatsApp incoming message recorded");
+
+        const cleanSender = canonicalSender || normalizedSender || jidClean;
+        let previewText = text?.trim() || "";
+        if (!previewText && mediaResult.mediaType) {
+          const mediaNames: Record<string, string> = {
+            audio: "Mensagem de áudio 🎙️",
+            image: "Foto enviada 📷",
+            video: "Vídeo enviado 🎥",
+            document: mediaResult.mediaFilename ? `Documento: ${mediaResult.mediaFilename} 📄` : "Documento / PDF 📄",
+          };
+          previewText = mediaNames[mediaResult.mediaType] || "Arquivo de mídia recebido";
+        }
+        if (previewText.length > 120) {
+          previewText = previewText.slice(0, 117) + "...";
+        }
+
+        // Enviar notificação push imediata para os celulares (iPhone/Android) e navegadores inscritos
+        void sendPushNotificationToWorkspace(workspaceId, {
+          title: `WhatsApp · ${resolvedSenderName}`,
+          body: previewText,
+          icon: "/apple-touch-icon.png",
+          badge: "/favicon-32x32.png",
+          tag: `wa-${cleanSender}`,
+          data: {
+            url: `/monitoramento?phone=${encodeURIComponent(cleanSender)}`,
+            senderPhone: cleanSender,
+            senderName: resolvedSenderName,
+            isPartner,
+            type: "whatsapp_incoming",
+          },
+        }).catch((pushErr) => {
+          logger.warn({ pushErr, workspaceId }, "Falha ao disparar push notification de mensagem recebida");
+        });
       }
     } catch (err) {
       logger.error({ err, workspaceId, jidClean }, "Failed to persist WhatsApp message from messages.upsert");

@@ -12,7 +12,10 @@ export type TemplateKind =
   | "billing_overdue"
   | "payment_receipt"
   | "withdrawal_alert"
-  | "payment_alert";
+  | "payment_alert"
+  | "expense_registered"
+  | "expense_paid"
+  | "income_registered";
 
 export type TemplateAudience = "client" | "partner";
 
@@ -80,6 +83,40 @@ const PAYMENT_ALERT_VARIABLES: TemplateVariable[] = [
   { key: "valor", label: "Valor recebido", example: "R$ 1.250,00" },
   { key: "data_pagamento", label: "Data do pagamento", example: "04/10/2026" },
   { key: "conta", label: "Conta que recebeu", example: "Conta principal" },
+];
+
+const EXPENSE_REGISTERED_VARIABLES: TemplateVariable[] = [
+  ...COMMON_VARIABLES,
+  { key: "contato", label: "Como chamamos quem recebe", example: "Lucas" },
+  { key: "descricao", label: "Descrição da despesa", example: "Assinatura Servidor Cloud" },
+  { key: "valor", label: "Valor da despesa", example: "R$ 350,00" },
+  { key: "vencimento", label: "Data de vencimento", example: "20/10/2026" },
+  { key: "categoria", label: "Categoria financeira", example: "Infraestrutura" },
+  { key: "conta", label: "Conta bancária prevista", example: "Conta Principal" },
+  { key: "registrado_por", label: "Quem registrou a despesa", example: "Tarcísio" },
+];
+
+const EXPENSE_PAID_VARIABLES: TemplateVariable[] = [
+  ...COMMON_VARIABLES,
+  { key: "contato", label: "Como chamamos quem recebe", example: "Lucas" },
+  { key: "descricao", label: "Descrição da despesa", example: "Assinatura Servidor Cloud" },
+  { key: "valor", label: "Valor pago", example: "R$ 350,00" },
+  { key: "data_pagamento", label: "Data do pagamento / baixa", example: "10/10/2026" },
+  { key: "categoria", label: "Categoria financeira", example: "Infraestrutura" },
+  { key: "conta", label: "Conta bancária debitada", example: "Conta Principal" },
+  { key: "saldo", label: "Saldo após o pagamento", example: "R$ 17.650,00" },
+  { key: "liquidado_por", label: "Quem liquidou / pagou", example: "Tarcísio" },
+];
+
+const INCOME_REGISTERED_VARIABLES: TemplateVariable[] = [
+  ...COMMON_VARIABLES,
+  { key: "contato", label: "Como chamamos quem recebe", example: "Lucas" },
+  { key: "cliente", label: "Nome do cliente ou pagador", example: "Acme Corp" },
+  { key: "descricao", label: "Descrição da receita", example: "Desenvolvimento de App" },
+  { key: "valor", label: "Valor previsto", example: "R$ 5.000,00" },
+  { key: "vencimento", label: "Data de vencimento", example: "25/10/2026" },
+  { key: "conta", label: "Conta bancária de destino", example: "Conta Principal" },
+  { key: "registrado_por", label: "Quem registrou", example: "Tarcísio" },
 ];
 
 const BILLING_CARD = `📄 {descricao}
@@ -189,6 +226,61 @@ Uma retirada de sócio foi registrada no caixa:
 💰 Valor: *{valor}*
 📅 Data: {data_pagamento}
 🏦 Conta: {conta}`,
+  },
+  expense_registered: {
+    kind: "expense_registered",
+    label: "Aviso de despesa registrada",
+    description: "Enviado aos sócios quando uma nova despesa é lançada no sistema.",
+    audience: "partner",
+    supportsPix: false,
+    variables: EXPENSE_REGISTERED_VARIABLES,
+    defaultBody: `{saudacao}, {contato}! Aqui é o *{assistente}* 🤖
+
+📋 Uma nova despesa foi registrada no sistema:
+
+📝 Descrição: *{descricao}*
+💰 Valor: *{valor}*
+📅 Vencimento: {vencimento}
+🏷️ Categoria: {categoria}
+🏦 Conta prevista: {conta}
+✍️ Registrado por: {registrado_por}`,
+  },
+  expense_paid: {
+    kind: "expense_paid",
+    label: "Aviso de despesa paga / baixa efetuada",
+    description: "Enviado aos sócios quando uma despesa é liquidada no caixa.",
+    audience: "partner",
+    supportsPix: false,
+    variables: EXPENSE_PAID_VARIABLES,
+    defaultBody: `{saudacao}, {contato}! Aqui é o *{assistente}* 🤖
+
+💸 Pagamento de despesa registrado no caixa:
+
+📝 Descrição: *{descricao}*
+💰 Valor pago: *{valor}*
+📅 Data: {data_pagamento}
+🏷️ Categoria: {categoria}
+🏦 Conta: {conta}
+💼 Saldo após pagamento: {saldo}
+✍️ Liquidado por: {liquidado_por}`,
+  },
+  income_registered: {
+    kind: "income_registered",
+    label: "Aviso de receita registrada",
+    description: "Enviado aos sócios quando um novo recebível ou receita é registrado.",
+    audience: "partner",
+    supportsPix: false,
+    variables: INCOME_REGISTERED_VARIABLES,
+    defaultBody: `{saudacao}, {contato}! Aqui é o *{assistente}* 🤖
+
+📈 Uma nova receita foi registrada a receber:
+
+📝 Descrição: *{descricao}*
+👤 Cliente/Origem: {cliente}
+💰 Valor: *{valor}*
+📅 Vencimento: {vencimento}
+🏦 Conta prevista: {conta}
+✍️ Registrado por: {registrado_por}`,
   },
 };
 

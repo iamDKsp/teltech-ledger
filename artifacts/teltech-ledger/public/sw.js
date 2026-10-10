@@ -97,3 +97,58 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+// ============================================================================
+// Web Push Notifications (Suporte nativo no iPhone / iOS PWA e Android / Web)
+// ============================================================================
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch (err) {
+    payload = {
+      title: 'Teltech Ledger · Nexus',
+      body: event.data.text() || 'Nova mensagem recebida',
+    };
+  }
+
+  const title = payload.title || 'Teltech Ledger';
+  const options = {
+    body: payload.body || 'Nova notificação no sistema',
+    icon: payload.icon || '/apple-touch-icon.png',
+    badge: payload.badge || '/favicon-32x32.png',
+    tag: payload.tag || 'teltech-notification',
+    data: payload.data || { url: '/monitoramento' },
+    renotify: true,
+    vibrate: [100, 50, 100],
+    requireInteraction: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/monitoramento';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // Se houver uma janela aberta do app, focar nela e navegar até a URL
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          if ('navigate' in client) {
+            client.navigate(targetUrl);
+          }
+          return client.focus();
+        }
+      }
+      // Se não houver janela aberta, abrir uma nova
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+

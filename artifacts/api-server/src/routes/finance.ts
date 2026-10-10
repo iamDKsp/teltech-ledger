@@ -21,9 +21,13 @@ import {
   tasksTable,
 } from "@workspace/db";
 import { eq, and, or, lt, desc, sql, inArray, isNotNull } from "drizzle-orm";
-import { requireAuth } from "../middlewares/auth";
-import type { AuthenticatedRequest } from "../middlewares/auth";
-import { enqueuePaymentReceipt, enqueueWithdrawalAlert } from "../services/whatsapp-automation";
+import { requireAuth, type AuthenticatedRequest } from "../middlewares/auth";
+import {
+  enqueueExpenseAlert,
+  enqueueMovementAlert,
+  enqueuePaymentReceipt,
+  enqueueWithdrawalAlert,
+} from "../services/whatsapp-automation";
 import { normalizeWhatsAppPhone } from "../services/whatsapp-session";
 import { syncAllSubscriptions } from "../services/sales-billing";
 import { randomUUID } from "node:crypto";
@@ -32,7 +36,7 @@ const router: IRouter = Router();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function getWorkspaceId(req: Request): Promise<string | null> {
+export async function getWorkspaceId(req: Request): Promise<string | null> {
   const userId = (req as AuthenticatedRequest).user?.userId;
   if (!userId) return null;
   const requestedWsId = req.headers["x-workspace-id"] as string | undefined;
@@ -52,7 +56,7 @@ async function getWorkspaceId(req: Request): Promise<string | null> {
   return member?.workspaceId ?? null;
 }
 
-async function getUserInfo(req: Request, wsId?: string | null): Promise<{ userId: string; role: string } | null> {
+export async function getUserInfo(req: Request, wsId?: string | null): Promise<{ userId: string; role: string } | null> {
   const userId = (req as AuthenticatedRequest).user?.userId;
   if (!userId) return null;
   if (wsId) {
@@ -1446,11 +1450,18 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
           }
 
           await logAudit(tx, workspaceId, txRecord.id, userInfo?.userId ?? null, "created", { batch: true, installment: i, total: n });
-          if (txRecord.type === "outflow" && txRecord.costType === "partner_withdrawal" && txRecord.status === "paid") {
-            await enqueueWithdrawalAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null);
-          }
-          if (txRecord.type === "inflow" && txRecord.status === "paid" && txRecord.clientId) {
-            await enqueuePaymentReceipt(tx, workspaceId, txRecord);
+          if (txRecord.type === "outflow") {
+            if (txRecord.costType === "partner_withdrawal" && txRecord.status === "paid") {
+              await enqueueWithdrawalAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null);
+            } else {
+              await enqueueExpenseAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null, true);
+            }
+          } else if (txRecord.type === "inflow") {
+            if (txRecord.status === "paid" && txRecord.clientId) {
+              await enqueuePaymentReceipt(tx, workspaceId, txRecord);
+            } else {
+              await enqueueMovementAlert(tx, workspaceId, txRecord, userInfo?.userId ?? null, txRecord.status === "paid" ? "paid" : "registered");
+            }
           }
         }
         return list;
@@ -1503,11 +1514,18 @@ router.post("/transactions", requireAuth, async (req: Request, res: Response) =>
       }
 
       await logAudit(tx, workspaceId, record.id, userInfo?.userId ?? null, "created", record);
-      if (record.type === "outflow" && record.costType === "partner_withdrawal" && record.status === "paid") {
-        await enqueueWithdrawalAlert(tx, workspaceId, record, userInfo?.userId ?? null);
-      }
-      if (record.type === "inflow" && record.status === "paid" && record.clientId) {
-        await enqueuePaymentReceipt(tx, workspaceId, record);
+      if (record.type === "outflow") {
+        if (record.costType === "partner_withdrawal" && record.status === "paid") {
+          await enqueueWithdrawalAlert(tx, workspaceId, record, userInfo?.userId ?? null);
+        } else {
+          await enqueueExpenseAlert(tx, workspaceId, record, userInfo?.userId ?? null, true);
+        }
+      } else if (record.type === "inflow") {
+        if (record.status === "paid" && record.clientId) {
+          await enqueuePaymentReceipt(tx, workspaceId, record);
+        } else {
+          await enqueueMovementAlert(tx, workspaceId, record, userInfo?.userId ?? null, record.status === "paid" ? "paid" : "registered");
+        }
       }
       return record;
     });
@@ -1619,13 +1637,20 @@ router.put("/transactions/:id", requireAuth, async (req: Request, res: Response)
         after: transaction,
       });
 
-      if (existing.status !== "paid" && transaction.status === "paid"
-          && transaction.type === "outflow" && transaction.costType === "partner_withdrawal") {
-        await enqueueWithdrawalAlert(tx, workspaceId, transaction, userInfo?.userId ?? null);
-      }
-      if (existing.status !== "paid" && transaction.status === "paid"
-          && transaction.type === "inflow" && transaction.clientId) {
-        await enqueuePaymentReceipt(tx, workspaceId, transaction);
+      if (existing.status !== "paid" && transaction.status === "paid") {
+        if (transaction.type === "outflow") {
+          if (transaction.costType === "partner_withdrawal") {
+            await enqueueWithdrawalAlert(tx, workspaceId, transaction, userInfo?.userId ?? null);
+          } else {
+            await enqueueExpenseAlert(tx, workspaceId, transaction, userInfo?.userId ?? null, false);
+          }
+        } else if (transaction.type === "inflow") {
+          if (transaction.clientId) {
+            await enqueuePaymentReceipt(tx, workspaceId, transaction);
+          } else {
+            await enqueueMovementAlert(tx, workspaceId, transaction, userInfo?.userId ?? null, "paid");
+          }
+        }
       }
 
       return transaction;
