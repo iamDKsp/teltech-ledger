@@ -65,6 +65,7 @@ import {
   type SaleView,
 } from "./finance/SalesModule";
 import { TeamModule } from "./finance/TeamModule";
+import { StrategicGoalsModule, CockpitStrategicGoalsCard } from "./finance/StrategicGoalsModule";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -3212,7 +3213,7 @@ export function FinanceiroPage() {
           { key: "accounts",     label: "Contas & Conciliação",  shortLabel: "Contas",    icon: Building2 },
           { key: "team",         label: "Equipe & Metas",        shortLabel: "Equipe",    icon: Trophy },
           { key: "dre",          label: "DRE & Rentabilidade",   shortLabel: "DRE",       icon: Scale },
-          { key: "budgets",      label: "Orçamentos & Metas",    shortLabel: "Metas",     icon: Target },
+          { key: "budgets",      label: "Metas & Projeção (6M)", shortLabel: "Metas (6M)", icon: Target },
           { key: "approvals",    label: "Governança & Alçadas",  shortLabel: "Alçadas",   icon: ShieldCheck, badge: pendingApprovals.length, alert: pendingApprovals.length > 0 },
           { key: "partners",     label: "Sócios & Reembolsos",   shortLabel: "Sócios",    icon: CreditCard },
         ].map((tab) => {
@@ -3363,9 +3364,8 @@ export function FinanceiroPage() {
             )}
 
             {activeTab === "budgets" && (
-              <BudgetsView
-                budgets={dashboard?.budgetProgress ?? budgets}
-                onNewBudget={() => setShowBudgetModal(true)}
+              <StrategicGoalsModule
+                onGoToClients={() => setActiveTab("clients")}
               />
             )}
 
@@ -4049,79 +4049,10 @@ function CockpitView({
             </div>
           </div>
 
-          {/* Orçamentos Departamentais */}
-          <div
-            style={{
-              background: "linear-gradient(135deg, rgba(26,26,30,0.95), rgba(20,20,24,0.95))",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 14,
-              padding: "22px 24px",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#fff" }}>
-                  Orçamentos por Área (Teto de Gastos)
-                </h3>
-                <p style={{ margin: "3px 0 0", fontSize: 12, color: "#a1a1aa" }}>
-                  Consumo em tempo real em relação ao limite estipulado
-                </p>
-              </div>
-              <button
-                onClick={() => onGoToTab("budgets")}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#8B5CF6",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                Gerenciar Tetos <ChevronRight style={{ width: 14, height: 14 }} />
-              </button>
-            </div>
-
-            {dashboard.budgetProgress && dashboard.budgetProgress.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {dashboard.budgetProgress.map((b) => {
-                  const isOver = b.percentage >= 90;
-                  return (
-                    <div key={b.id} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                        <span style={{ fontWeight: 600, color: "#fff", textTransform: "capitalize" }}>
-                          {b.department}
-                        </span>
-                        <span style={{ color: isOver ? "#EF4444" : "#10B981", fontWeight: 700 }}>
-                          {formatBRL(b.spent)} de {formatBRL(b.amount)} ({b.percentage}%)
-                        </span>
-                      </div>
-                      <div style={{ width: "100%", height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
-                        <div
-                          style={{
-                            width: `${Math.min(b.percentage, 100)}%`,
-                            height: "100%",
-                            background: isOver ? "#EF4444" : b.percentage > 70 ? "#F59E0B" : "#10B981",
-                            borderRadius: 3,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <EmptyState
-                icon={Target}
-                title="Nenhum orçamento cadastrado"
-                description="Defina tetos de gastos mensais para Infraestrutura, Marketing e Operações."
-                primaryAction={{ label: "Criar Primeiro Orçamento", onClick: () => onGoToTab("budgets") }}
-              />
-            )}
-          </div>
+          {/* Metas Estratégicas & Projeção 6 Meses por Produto (PDV & Shark) */}
+          <CockpitStrategicGoalsCard
+            onGoToPlanner={() => onGoToTab("budgets")}
+          />
         </div>
 
         {/* RIGHT COLUMN (1/3) — Central de Pendências Críticas ("O que eu faço agora?") */}
