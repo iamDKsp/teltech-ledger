@@ -2263,7 +2263,12 @@ function MobileDrawer({
           <div style={{ fontSize: 10, fontWeight: 700, color: "#555", letterSpacing: "0.08em", padding: "8px 10px 4px" }}>MENU</div>
           {navLinks.map((item) => {
             const Icon = item.icon;
-            const isActive = activeModule === item.label;
+            const isActive =
+              activeModule === item.label ||
+              (activeModule === "Monitoramento" && item.path === "/monitoramento") ||
+              (activeModule === "Painel" && item.path === "/painel") ||
+              (activeModule === "Metas" && item.path === "/metas") ||
+              (activeModule === "Membros" && item.path === "/membros");
             return (
               <div
                 key={item.label}
@@ -2727,7 +2732,7 @@ const STYLES = `
 
 function MainContent() {
   // ⚠️ ALL hooks must be called unconditionally at the top — Rules of Hooks
-  const { sidebarModule, activeTab, activeProject, projects } = useContext(AppContext);
+  const { sidebarModule, activeTab, activeProject, projects, setMobileDrawerOpen } = useContext(AppContext);
   const currentWorkspaceId = activeProject?.workspaceId || projects[0]?.workspaceId;
 
   const contentKey = sidebarModule === "project" ? `project-${activeProject?.id}-${activeTab}` : sidebarModule;
@@ -2737,7 +2742,7 @@ function MainContent() {
     if (sidebarModule === "Minhas Tarefas") return <MinhasTarefasPage />;
     if (sidebarModule === "Membros") return <MembersPage />;
     if (sidebarModule === "Financeiro") return <FinanceiroPage />;
-    if (sidebarModule === "Monitoramento") return <MonitoramentoPage />;
+    if (sidebarModule === "Monitoramento") return <MonitoramentoPage onOpenMobileMenu={() => setMobileDrawerOpen?.(true)} />;
     if (sidebarModule === "Metas") return <MetasPage />;
     if (sidebarModule === "Painel") return <PainelPage />;
     if (sidebarModule === "Configurações") {
@@ -2892,7 +2897,7 @@ export function TeltechLedger() {
           minHeight: 0,
           position: "relative"
         }}>
-          <Header/>
+          {!(isMobile && sidebarModule === "Monitoramento") && <Header/>}
           <div style={{
             flex: 1,
             display: "flex",

@@ -40,48 +40,98 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
       : [];
     const projectIds = activeProjects.map(p => p.id);
 
-    // All user tasks (assigned to user)
-    const allUserTasks = await db.select({
-      taskId: tasksTable.id,
-      taskTitle: tasksTable.title,
-      taskPriority: tasksTable.priority,
-      taskDueDate: tasksTable.dueDate,
-      taskUpdatedAt: tasksTable.updatedAt,
-      columnTitle: columnsTable.title,
-      projectColor: projectsTable.color,
-      projectName: projectsTable.name,
-    })
-    .from(tasksTable)
-    .innerJoin(taskAssigneesTable, eq(taskAssigneesTable.taskId, tasksTable.id))
-    .innerJoin(columnsTable, eq(columnsTable.id, tasksTable.columnId))
-    .innerJoin(projectsTable, eq(projectsTable.id, tasksTable.projectId))
-    .where(eq(taskAssigneesTable.userId, userId));
+    // All tasks across user's active workspace projects
+    const allUserTasks = projectIds.length > 0
+      ? await db.select({
+          taskId: tasksTable.id,
+          taskTitle: tasksTable.title,
+          taskPriority: tasksTable.priority,
+          taskDueDate: tasksTable.dueDate,
+          taskCreatedAt: tasksTable.createdAt,
+          taskUpdatedAt: tasksTable.updatedAt,
+          columnTitle: columnsTable.title,
+          projectId: projectsTable.id,
+          projectColor: projectsTable.color,
+          projectName: projectsTable.name,
+        })
+        .from(tasksTable)
+        .innerJoin(columnsTable, eq(columnsTable.id, tasksTable.columnId))
+        .innerJoin(projectsTable, eq(projectsTable.id, tasksTable.projectId))
+        .where(inArray(tasksTable.projectId, projectIds))
+      : [];
 
-    // Today's tasks
-    const todaysTasks = allUserTasks.filter(t =>
-      t.taskDueDate &&
-      new Date(t.taskDueDate) >= todayStart &&
-      new Date(t.taskDueDate) <= todayEnd
-    ).map(t => ({
-      id: t.taskId,
-      title: t.taskTitle,
-      priority: t.taskPriority,
-      dueDate: t.taskDueDate,
-      projectColor: t.projectColor,
-      projectName: t.projectName,
-    }));
+    const isCompletedColumn = (colTitle: string) => {
+      const lower = (colTitle || "").toLowerCase();
+      return lower.includes("conclu") || lower.includes("done") || lower.includes("finaliz");
+    };
+
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const toDateKey = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
+
+    const priorityWeight: Record<string, number> = {
+      urgent: 0,
+      high: 1,
+      normal: 2,
+      low: 3,
+    };
+
+    const pendingTasks = allUserTasks.filter(t => !isCompletedColumn(t.columnTitle));
+
+    // Tasks explicitly scheduled for today
+    const strictTodaysTasks = pendingTasks
+      .filter(t => t.taskDueDate && toDateKey(t.taskDueDate) === todayKey)
+      .sort((a, b) => (priorityWeight[a.taskPriority] ?? 2) - (priorityWeight[b.taskPriority] ?? 2));
+
+    // All pending tasks ordered from closest to expire (earliest dueDate) to farthest,
+    // with tasks without a dueDate placed at the end
+    const sortedPendingTasks = [...pendingTasks].sort((a, b) => {
+      if (a.taskDueDate && b.taskDueDate) {
+        const diff = new Date(a.taskDueDate).getTime() - new Date(b.taskDueDate).getTime();
+        if (diff !== 0) return diff;
+      }
+      if (a.taskDueDate && !b.taskDueDate) return -1;
+      if (!a.taskDueDate && b.taskDueDate) return 1;
+      const pDiff = (priorityWeight[a.taskPriority] ?? 2) - (priorityWeight[b.taskPriority] ?? 2);
+      if (pDiff !== 0) return pDiff;
+      return new Date(a.taskCreatedAt).getTime() - new Date(b.taskCreatedAt).getTime();
+    });
+
+    const mapDashboardTask = (t: typeof allUserTasks[number]) => {
+      const dueKey = t.taskDueDate ? toDateKey(t.taskDueDate) : null;
+      const urgencyGroup = !dueKey
+        ? ("no_date" as const)
+        : dueKey < todayKey
+          ? ("overdue" as const)
+          : dueKey === todayKey
+            ? ("today" as const)
+            : ("upcoming" as const);
+
+      return {
+        id: t.taskId,
+        title: t.taskTitle,
+        priority: t.taskPriority,
+        dueDate: t.taskDueDate,
+        columnTitle: t.columnTitle,
+        projectId: t.projectId,
+        projectColor: t.projectColor,
+        projectName: t.projectName,
+        urgencyGroup,
+      };
+    };
+
+    // If there are tasks scheduled for today, show them; otherwise show all pending tasks ordered from closest due date to farthest
+    const todaysTasks = (strictTodaysTasks.length > 0 ? strictTodaysTasks : sortedPendingTasks).map(mapDashboardTask);
+    const allPendingTasksMapped = sortedPendingTasks.map(mapDashboardTask);
 
     // Overdue tasks count
-    const overdueCount = allUserTasks.filter(t =>
-      t.taskDueDate &&
-      new Date(t.taskDueDate) < todayStart &&
-      !t.columnTitle.toLowerCase().includes("conclu")
+    const overdueCount = pendingTasks.filter(t =>
+      t.taskDueDate && toDateKey(t.taskDueDate) < todayKey
     ).length;
 
     // Completed today count
     const completedTodayCount = allUserTasks.filter(t =>
       t.taskUpdatedAt >= todayStart &&
-      t.columnTitle.toLowerCase().includes("conclu")
+      isCompletedColumn(t.columnTitle)
     ).length;
 
     // Recent Activity (last 10)
@@ -216,6 +266,9 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
         date: today,
       },
       todaysTasks,
+      allPendingTasks: allPendingTasksMapped,
+      todaysStrictCount: strictTodaysTasks.length,
+      showingFallbackTasks: strictTodaysTasks.length === 0 && sortedPendingTasks.length > 0,
       overdueTasksCount: overdueCount,
       completedTodayCount,
       totalActiveProjectsCount: projectIds.length,

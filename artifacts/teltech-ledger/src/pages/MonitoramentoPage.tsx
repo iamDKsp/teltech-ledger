@@ -49,6 +49,9 @@ import {
   FileSpreadsheet,
   FileArchive,
   Eye,
+  Menu,
+  MoreVertical,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../lib/api";
@@ -170,7 +173,9 @@ function formatTime(iso: string | null | undefined): string {
     const d = new Date(iso);
     const now = new Date();
     const isToday = d.toDateString() === now.toDateString();
-    const isYesterday = new Date(now.setDate(now.getDate() - 1)).toDateString() === d.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = yesterday.toDateString() === d.toDateString();
 
     const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
     if (isToday) return timeStr;
@@ -179,6 +184,57 @@ function formatTime(iso: string | null | undefined): string {
   } catch {
     return "";
   }
+}
+
+function formatListTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = yesterday.toDateString() === d.toDateString();
+
+    if (isToday) return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    if (isYesterday) return "Ontem";
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function formatDateDivider(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return "Hoje";
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return "Ontem";
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function cleanPreviewText(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const pixRegex = /(000201[0-9]{2}[0-9A-Za-z.+_\-]{30,})/;
+  let cleaned = raw
+    .replace(pixRegex, "")
+    .replace(/Pix Copia e Cola:?/gi, "")
+    .replace(/^[\p{Extended_Pictographic}\uFE0F]+\s*/gu, "")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned && pixRegex.test(raw)) {
+    return "Código Pix Copia e Cola";
+  }
+  return cleaned;
 }
 
 function formatPhoneDisplay(raw: string): string {
@@ -1060,7 +1116,7 @@ function ContactAvatar({
   );
 }
 
-export function MonitoramentoPage() {
+export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void } = {}) {
   const isMobile = useIsMobile();
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [stats, setStats] = useState<MonitoringStats | null>(null);
@@ -1086,6 +1142,13 @@ export function MonitoramentoPage() {
   const [isMarkingPaid, setIsMarkingPaid] = useState<string | null>(null);
   const [isTogglingOptIn, setIsTogglingOptIn] = useState(false);
   const [showInvoiceSelector, setShowInvoiceSelector] = useState(false);
+
+  // Mobile-specific UI States (WhatsApp Mobile layout)
+  const [showMobileStats, setShowMobileStats] = useState(false);
+  const [showMobileQuickReplies, setShowMobileQuickReplies] = useState(true);
+  const [mobileViewport, setMobileViewport] = useState<{ height: number; offsetTop: number } | null>(null);
+  const hasAutoSelectedRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Push Notification States
   const [pushStatus, setPushStatus] = useState<PushSupportStatus | null>(null);
@@ -1127,6 +1190,71 @@ export function MonitoramentoPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isPollingRef = useRef(false);
+
+  // Mobile Visual Viewport listener (adapta altura quando o teclado virtual do celular abre)
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined" || !window.visualViewport) {
+      setMobileViewport(null);
+      return;
+    }
+    const vv = window.visualViewport;
+    let prevHeight = vv.height;
+    const updateViewport = () => {
+      setMobileViewport({
+        height: vv.height,
+        offsetTop: vv.offsetTop,
+      });
+      if (vv.height < prevHeight - 80) {
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 80);
+      }
+      prevHeight = vv.height;
+    };
+    updateViewport();
+    vv.addEventListener("resize", updateViewport);
+    vv.addEventListener("scroll", updateViewport);
+    return () => {
+      vv.removeEventListener("resize", updateViewport);
+      vv.removeEventListener("scroll", updateViewport);
+    };
+  }, [isMobile]);
+
+  // Suporte ao botão "Voltar" físico do Android / gesto iOS no mobile
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined") return;
+    const handlePopState = () => {
+      if (lightboxImage) {
+        setLightboxImage(null);
+      } else if (showClientDrawer) {
+        setShowClientDrawer(false);
+      } else if (showInvoiceSelector) {
+        setShowInvoiceSelector(false);
+      } else if (selectedTarget) {
+        setSelectedTarget(null);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isMobile, lightboxImage, showClientDrawer, showInvoiceSelector, selectedTarget]);
+
+  const handleOpenConversation = useCallback(
+    (targetId: string) => {
+      if (isMobile && !selectedTarget && typeof window !== "undefined") {
+        window.history.pushState({ whatsappChat: targetId }, "");
+      }
+      setSelectedTarget(targetId);
+      setShowInvoiceSelector(false);
+      setShowClientDrawer(false);
+    },
+    [isMobile, selectedTarget]
+  );
+
+  const handleBackToList = useCallback(() => {
+    setShowInvoiceSelector(false);
+    setShowClientDrawer(false);
+    setSelectedTarget(null);
+  }, []);
 
   // Carregar dados de estatísticas
   const fetchStats = useCallback(async () => {
@@ -1210,15 +1338,17 @@ export function MonitoramentoPage() {
     return () => clearInterval(interval);
   }, [fetchStats, fetchConversations, selectedTarget, fetchMessages]);
 
-  // Selecionar primeira conversa se nenhuma estiver ativa
+  // Selecionar primeira conversa automaticamente APENAS no Desktop na carga inicial
   useEffect(() => {
-    if (!selectedTarget && conversations.length > 0) {
+    if (isMobile) return;
+    if (!selectedTarget && conversations.length > 0 && !hasAutoSelectedRef.current) {
       const firstWithMessages = conversations.find((c) => c.totalMessages > 0) || conversations[0];
       if (firstWithMessages) {
+        hasAutoSelectedRef.current = true;
         setSelectedTarget(firstWithMessages.id);
       }
     }
-  }, [conversations, selectedTarget]);
+  }, [conversations, selectedTarget, isMobile]);
 
   // Quando o target muda, busca mensagens
   useEffect(() => {
@@ -1262,6 +1392,7 @@ export function MonitoramentoPage() {
         await API.postForm(`/whatsapp/monitoring/conversations/${selectedTarget}/send-media`, formData);
         handleClearAttachment();
         setMessageInput("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
         toast.success("Mídia enviada via WhatsApp!");
       } else {
         const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/messages`, {
@@ -1271,6 +1402,7 @@ export function MonitoramentoPage() {
 
         if (res?.message) {
           setMessageInput("");
+          if (textareaRef.current) textareaRef.current.style.height = "auto";
           toast.success("Mensagem enviada via WhatsApp!");
         }
       }
@@ -1461,27 +1593,37 @@ export function MonitoramentoPage() {
     return list;
   }, [conversations, filter]);
 
+  const totalOpenAmount = useMemo(
+    () => openTransactions.reduce((acc, t) => acc + (t.status === "pending" ? t.amount : 0), 0),
+    [openTransactions]
+  );
+
+  const hasOverdueOpenTx = useMemo(
+    () => openTransactions.some((t) => new Date(t.dueDate) < new Date() && t.status === "pending"),
+    [openTransactions]
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "#111113", color: "#fafafa" }}>
-      {/* ─── Top Stats & Status Bar ─── */}
-      {(!isMobile || !selectedTarget) && (
+      {/* ─── Desktop Top Stats & Status Bar (PC Only) ─── */}
+      {!isMobile && (
         <div
           style={{
-            padding: isMobile ? "12px 16px" : "16px 24px",
+            padding: "16px 24px",
             background: "linear-gradient(180deg, #18181c 0%, #121215 100%)",
             borderBottom: "1px solid #27272e",
             display: "flex",
             flexWrap: "wrap",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: isMobile ? 12 : 16,
+            gap: 16,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div
               style={{
-                width: isMobile ? 38 : 44,
-                height: isMobile ? 38 : 44,
+                width: 44,
+                height: 44,
                 borderRadius: 12,
                 background: "linear-gradient(135deg, hsl(265 85% 62% / 0.3), hsl(152 65% 45% / 0.2))",
                 border: "1px solid hsl(265 85% 62% / 0.4)",
@@ -1493,11 +1635,11 @@ export function MonitoramentoPage() {
                 flexShrink: 0,
               }}
             >
-              <Bot size={isMobile ? 20 : 24} />
+              <Bot size={24} />
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <h1 style={{ fontSize: isMobile ? 15 : 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", color: "#fff" }}>
+                <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: "-0.02em", color: "#fff" }}>
                   Monitoramento Nexus
                 </h1>
 
@@ -1604,27 +1746,14 @@ export function MonitoramentoPage() {
                   </button>
                 )}
               </div>
-              {!isMobile && (
-                <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
-                  Visualização unificada de todas as cobranças disparadas por Nexus e respostas em tempo real dos clientes.
-                </p>
-              )}
+              <p style={{ fontSize: 12, color: "#8a8a93", margin: "2px 0 0 0" }}>
+                Visualização unificada de todas as cobranças disparadas por Nexus e respostas em tempo real dos clientes.
+              </p>
             </div>
           </div>
 
           {/* Mini KPI Cards - Interactive */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              flexWrap: isMobile ? "nowrap" : "wrap",
-              overflowX: isMobile ? "auto" : undefined,
-              width: isMobile ? "100%" : undefined,
-              paddingBottom: isMobile ? 4 : 0,
-              scrollbarWidth: "none",
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div
               style={{
                 padding: "8px 14px",
@@ -1709,27 +1838,28 @@ export function MonitoramentoPage() {
       {(!isMobile || !selectedTarget) && pushStatus?.isIOS && !pushStatus?.isStandalone && (
         <div
           style={{
-            padding: isMobile ? "8px 16px" : "9px 24px",
-            background: "linear-gradient(90deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.15))",
+            padding: isMobile ? "8px 14px" : "9px 24px",
+            paddingTop: isMobile ? "calc(env(safe-area-inset-top, 0px) + 8px)" : "9px",
+            background: "linear-gradient(90deg, rgba(139, 92, 246, 0.22), rgba(59, 130, 246, 0.15))",
             borderBottom: "1px solid hsl(265 85% 62% / 0.35)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             fontSize: isMobile ? 11 : 12,
             color: "#eaeaf0",
-            gap: 12,
+            gap: 10,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <BellRing size={16} style={{ color: "hsl(265 85% 68%)", flexShrink: 0 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <BellRing size={15} style={{ color: "hsl(265 85% 68%)", flexShrink: 0 }} />
             <span>
-              <strong>Dica para iPhone:</strong> Para receber notificações push com tela bloqueada, adicione à <strong>Tela de Início</strong> pelo Safari.
+              <strong>iPhone:</strong> Adicione à <strong>Tela de Início</strong> para ativar Push.
             </span>
           </div>
           <button
             onClick={() => setShowIosPushModal(true)}
             style={{
-              padding: "4px 12px",
+              padding: "4px 10px",
               borderRadius: 8,
               background: "hsl(265 85% 62%)",
               border: "none",
@@ -1741,44 +1871,340 @@ export function MonitoramentoPage() {
               flexShrink: 0,
             }}
           >
-            Instalar no iPhone
+            Como ativar
           </button>
         </div>
       )}
 
       {/* ─── Main Two/Three-Column Layout ─── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden", position: "relative" }}>
-        {/* ─── Left Pane: Conversations List ─── */}
+        {/* ─── Left Pane: Conversations List (WhatsApp Mobile Home on Mobile) ─── */}
         <div
           style={{
             width: isMobile ? "100%" : 380,
             minWidth: isMobile ? "100%" : 320,
             maxWidth: isMobile ? "100%" : 420,
             borderRight: isMobile ? "none" : "1px solid #27272e",
-            background: "#151518",
+            background: isMobile ? "#0f0f13" : "#151518",
             display: isMobile && selectedTarget ? "none" : "flex",
             flexDirection: "column",
             height: "100%",
             flexShrink: 0,
           }}
         >
-          {/* Search & Filter Bar */}
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid #222228", display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* ─── Mobile-Only WhatsApp Top App Bar ─── */}
+          {isMobile && (
+            <div
+              style={{
+                paddingTop: pushStatus?.isIOS && !pushStatus?.isStandalone ? 10 : "calc(env(safe-area-inset-top, 0px) + 10px)",
+                paddingLeft: 14,
+                paddingRight: 14,
+                paddingBottom: 8,
+                background: "#141419",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  {onOpenMobileMenu && (
+                    <button
+                      onClick={onOpenMobileMenu}
+                      title="Abrir menu"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        color: "#e4e4e7",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Menu size={19} />
+                    </button>
+                  )}
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.03em", color: "#fff" }}>
+                      WhatsApp
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "2px 7px",
+                        borderRadius: 6,
+                        background: "hsl(265 85% 62% / 0.2)",
+                        border: "1px solid hsl(265 85% 62% / 0.4)",
+                        color: "#c4a3ff",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      Nexus
+                    </span>
+                  </div>
+
+                  {/* Compact Connection Pill */}
+                  <button
+                    onClick={() => setShowReconnectModal(true)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "3px 8px",
+                      borderRadius: 14,
+                      background: stats?.status.connected ? "hsl(152 65% 45% / 0.14)" : "hsl(0 70% 58% / 0.18)",
+                      border: stats?.status.connected
+                        ? "1px solid hsl(152 65% 45% / 0.35)"
+                        : "1px solid hsl(0 70% 58% / 0.45)",
+                      color: stats?.status.connected ? "hsl(152 65% 58%)" : "hsl(0 70% 68%)",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: stats?.status.connected ? "hsl(152 65% 50%)" : "hsl(0 70% 58%)",
+                        boxShadow: stats?.status.connected ? "0 0 6px hsl(152 65% 50%)" : "none",
+                      }}
+                    />
+                    {stats?.status.connected ? "Online" : "Conectar"}
+                  </button>
+                </div>
+
+                {/* Right Action Icons (WhatsApp Mobile top-right bar) */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <button
+                    onClick={() => setShowMobileStats(!showMobileStats)}
+                    title="Resumo e Indicadores"
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      background: showMobileStats ? "hsl(265 85% 62% / 0.25)" : "rgba(255,255,255,0.05)",
+                      border: showMobileStats ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid rgba(255,255,255,0.08)",
+                      color: showMobileStats ? "#c4a3ff" : "#b4b4be",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      position: "relative",
+                    }}
+                  >
+                    <TrendingUp size={17} />
+                    {(stats?.overdueCount ?? 0) > 0 && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 5,
+                          right: 5,
+                          width: 7,
+                          height: 7,
+                          borderRadius: "50%",
+                          background: "hsl(0 70% 58%)",
+                        }}
+                      />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={handleTogglePush}
+                    disabled={pushLoading}
+                    title={isPushSubscribed ? "Push Ativo" : "Ativar Notificações Push"}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      background: isPushSubscribed ? "hsl(265 85% 62% / 0.2)" : "rgba(255,255,255,0.05)",
+                      border: isPushSubscribed ? "1px solid hsl(265 85% 62% / 0.45)" : "1px solid rgba(255,255,255,0.08)",
+                      color: isPushSubscribed ? "#c4a3ff" : "#b4b4be",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isPushSubscribed ? <BellRing size={17} /> : <Bell size={17} />}
+                  </button>
+
+                  <button
+                    onClick={() => setShowReconnectModal(true)}
+                    title="Status do Aparelho / QR Code"
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      color: "#b4b4be",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <QrCode size={17} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Collapsible Mobile KPI Cards Drawer */}
+              <AnimatePresence>
+                {showMobileStats && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ overflow: "hidden" }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 8,
+                        paddingTop: 4,
+                        paddingBottom: 6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: "10px 12px",
+                          background: "#1c1c24",
+                          border: "1px solid #2b2b36",
+                          borderRadius: 12,
+                        }}
+                      >
+                        <div style={{ fontSize: 10, color: "#8a8a93", fontWeight: 700, textTransform: "uppercase" }}>
+                          Contatados / Disparos
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginTop: 2 }}>
+                          {stats?.totalConversations ?? 0} • <span style={{ color: "#c4a3ff" }}>{stats?.totalSent ?? 0} msgs</span>
+                        </div>
+                      </div>
+
+                      <div
+                        onClick={() => {
+                          setFilter(filter === "replied" ? "all" : "replied");
+                          setShowMobileStats(false);
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          background: filter === "replied" ? "hsl(152 65% 45% / 0.15)" : "#1c1c24",
+                          border: filter === "replied" ? "1px solid hsl(152 65% 45% / 0.45)" : "1px solid #2b2b36",
+                          borderRadius: 12,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ fontSize: 10, color: "#8a8a93", fontWeight: 700, textTransform: "uppercase" }}>
+                          Responderam
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(152 65% 55%)", marginTop: 2 }}>
+                          {stats?.totalReceived ?? 0} ({stats?.responseRate ?? 0}%)
+                        </div>
+                      </div>
+
+                      <div
+                        onClick={() => {
+                          setFilter(filter === "overdue" ? "all" : "overdue");
+                          setShowMobileStats(false);
+                        }}
+                        style={{
+                          gridColumn: "span 2",
+                          padding: "10px 12px",
+                          background: filter === "overdue" ? "hsl(0 70% 58% / 0.15)" : "#1c1c24",
+                          border: filter === "overdue" ? "1px solid hsl(0 70% 58% / 0.5)" : "1px solid #2b2b36",
+                          borderRadius: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 10, color: "#8a8a93", fontWeight: 700, textTransform: "uppercase" }}>
+                            Inadimplência Monitorada
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 700,
+                              color: (stats?.totalOverdueCents ?? 0) > 0 ? "hsl(0 70% 65%)" : "hsl(152 65% 55%)",
+                              marginTop: 2,
+                            }}
+                          >
+                            {formatCents(stats?.totalOverdueCents ?? 0)}
+                          </div>
+                        </div>
+                        {isPushSubscribed && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTestPush();
+                            }}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              background: "hsl(265 85% 62% / 0.2)",
+                              border: "1px solid hsl(265 85% 62% / 0.4)",
+                              color: "#c4a3ff",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
+                          >
+                            <Bell size={12} /> Testar Push
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Search & Filter Bar (WhatsApp Mobile Pill Style on Mobile) */}
+          <div
+            style={{
+              padding: isMobile ? "4px 14px 10px" : "14px 16px",
+              background: isMobile ? "#141419" : undefined,
+              borderBottom: "1px solid #222228",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                background: "#1e1e24",
-                border: "1px solid #2f2f3a",
-                borderRadius: 8,
-                padding: "8px 12px",
+                background: isMobile ? "#1f1f27" : "#1e1e24",
+                border: isMobile ? "1px solid #2c2c38" : "1px solid #2f2f3a",
+                borderRadius: isMobile ? 22 : 8,
+                padding: isMobile ? "9px 14px" : "8px 12px",
               }}
             >
-              <Search size={16} color="#777" />
+              <Search size={16} color="#8a8a93" />
               <input
                 type="text"
-                placeholder="Buscar cliente, telefone ou texto..."
+                placeholder={isMobile ? "Pesquisar conversa ou telefone..." : "Buscar cliente, telefone ou texto..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{
@@ -1786,16 +2212,25 @@ export function MonitoramentoPage() {
                   border: "none",
                   outline: "none",
                   color: "#eee",
-                  fontSize: 13,
+                  fontSize: isMobile ? 15 : 13,
                   width: "100%",
                 }}
               />
               {search && (
                 <button
                   onClick={() => setSearch("")}
-                  style={{ background: "transparent", border: "none", color: "#777", cursor: "pointer", fontSize: 12 }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#8a8a93",
+                    cursor: "pointer",
+                    padding: "0 4px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -1811,12 +2246,12 @@ export function MonitoramentoPage() {
               }}
             >
               {[
-                { id: "all", label: `Todos (${filterCounts.all})` },
-                { id: "partners", label: `👤 Sócios (${filterCounts.partners})` },
-                { id: "clients", label: `👥 Clientes (${filterCounts.clients})` },
-                { id: "replied", label: `💬 Respostas (${filterCounts.replied})` },
-                { id: "waiting", label: `⏳ Aguardando (${filterCounts.waiting})` },
-                { id: "overdue", label: `⚠️ Em Atraso (${filterCounts.overdue})` },
+                { id: "all", label: isMobile ? `Tudo (${filterCounts.all})` : `Todos (${filterCounts.all})`, icon: null },
+                { id: "replied", label: `Respostas (${filterCounts.replied})`, icon: <MessageSquare size={12} /> },
+                { id: "overdue", label: isMobile ? `Em atraso (${filterCounts.overdue})` : `Em Atraso (${filterCounts.overdue})`, icon: <AlertTriangle size={12} /> },
+                { id: "clients", label: `Clientes (${filterCounts.clients})`, icon: <Users size={12} /> },
+                { id: "partners", label: `Sócios (${filterCounts.partners})`, icon: <UserCheck size={12} /> },
+                { id: "waiting", label: `Aguardando (${filterCounts.waiting})`, icon: <Clock size={12} /> },
               ].map((tab) => {
                 const active = filter === tab.id;
                 return (
@@ -1824,19 +2259,23 @@ export function MonitoramentoPage() {
                     key={tab.id}
                     onClick={() => setFilter(tab.id as any)}
                     style={{
-                      padding: "5px 11px",
-                      borderRadius: 16,
-                      fontSize: 11,
+                      padding: isMobile ? "6px 13px" : "5px 11px",
+                      borderRadius: 18,
+                      fontSize: isMobile ? 12 : 11,
                       fontWeight: active ? 700 : 500,
                       background: active ? "hsl(265 85% 62% / 0.25)" : "#202028",
-                      color: active ? "#c4a3ff" : "#888",
-                      border: active ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid #2c2c36",
+                      color: active ? "#d8c2ff" : "#9ca3af",
+                      border: active ? "1px solid hsl(265 85% 62% / 0.55)" : "1px solid #2c2c36",
                       cursor: "pointer",
                       whiteSpace: "nowrap",
                       flexShrink: 0,
                       transition: "all 0.15s ease",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
                     }}
                   >
+                    {tab.icon}
                     {tab.label}
                   </button>
                 );
@@ -1845,7 +2284,7 @@ export function MonitoramentoPage() {
           </div>
 
           {/* Conversations List Scroll Area */}
-          <div style={{ flex: 1, overflowY: "auto" }}>
+          <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
             {isLoadingConversations ? (
               <div style={{ padding: 32, textAlign: "center", color: "#666", fontSize: 13 }}>
                 <RefreshCw size={20} className="animate-spin" style={{ margin: "0 auto 8px" }} />
@@ -1869,7 +2308,198 @@ export function MonitoramentoPage() {
               filteredConversations.map((item) => {
                 const isSelected = selectedTarget === item.id;
                 const hasOverdue = item.financialInfo.overdueCount > 0;
+                const hasPending = item.financialInfo.pendingCount > 0;
 
+                if (isMobile) {
+                  // ─── Native WhatsApp Mobile Conversation Row ───
+                  const previewBody = item.lastMessage ? cleanPreviewText(item.lastMessage.body) : "";
+                  const mediaType = item.lastMessage?.mediaType;
+
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handleOpenConversation(item.id)}
+                      style={{
+                        padding: "11px 14px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 13,
+                        cursor: "pointer",
+                        position: "relative",
+                        background: "transparent",
+                        WebkitTapHighlightColor: "transparent",
+                      }}
+                    >
+                      <ContactAvatar
+                        name={item.clientName}
+                        photoUrl={item.photoUrl}
+                        isPartner={item.isPartner}
+                        isSelected={false}
+                        size={50}
+                        hasReplied={item.hasReplied}
+                      />
+
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          paddingBottom: 11,
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
+                        }}
+                      >
+                        {/* Top row: Name + Timestamp */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+                            <span
+                              style={{
+                                fontSize: 15.5,
+                                fontWeight: item.unreadCount > 0 ? 700 : 600,
+                                color: "#f4f4f6",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {item.clientName}
+                            </span>
+                            {item.isPartner && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: "1px 6px",
+                                  borderRadius: 6,
+                                  background: "hsl(265 85% 62% / 0.2)",
+                                  border: "1px solid hsl(265 85% 62% / 0.4)",
+                                  color: "#c4a3ff",
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {item.roleLabel || "Sócio"}
+                              </span>
+                            )}
+                          </div>
+
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              color: item.unreadCount > 0 ? "hsl(152 65% 55%)" : "#71717a",
+                              fontWeight: item.unreadCount > 0 ? 700 : 400,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {formatListTime(item.lastMessage?.sentAt)}
+                          </span>
+                        </div>
+
+                        {/* Bottom row: Last message preview + Financial/Unread badges */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              fontSize: 13.5,
+                              color: item.unreadCount > 0 ? "#e4e4e7" : "#8a8a93",
+                              fontWeight: item.unreadCount > 0 ? 500 : 400,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
+                          >
+                            {item.lastMessage ? (
+                              <>
+                                {item.lastMessage.direction === "outbound" && (
+                                  <CheckCheck
+                                    size={15}
+                                    color={item.lastMessage.status === "sent" ? "hsl(152 65% 55%)" : "#71717a"}
+                                    style={{ flexShrink: 0 }}
+                                  />
+                                )}
+                                {mediaType === "audio" && <Mic size={13} color="#a78bfa" style={{ flexShrink: 0 }} />}
+                                {mediaType === "image" && <ImageIcon size={13} color="#a78bfa" style={{ flexShrink: 0 }} />}
+                                {mediaType === "video" && <Film size={13} color="#a78bfa" style={{ flexShrink: 0 }} />}
+                                {mediaType === "document" && <FileText size={13} color="#a78bfa" style={{ flexShrink: 0 }} />}
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {previewBody ||
+                                    (mediaType === "audio"
+                                      ? "Mensagem de áudio"
+                                      : mediaType === "image"
+                                      ? "Foto"
+                                      : mediaType === "video"
+                                      ? "Vídeo"
+                                      : mediaType === "document"
+                                      ? "Documento"
+                                      : item.lastMessage.body)}
+                                </span>
+                              </>
+                            ) : (
+                              <span style={{ color: "#666", fontSize: 12.5 }}>
+                                {formatPhoneDisplay(item.phone)}
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                            {hasOverdue ? (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  padding: "2px 7px",
+                                  borderRadius: 10,
+                                  background: "hsl(0 70% 58% / 0.16)",
+                                  border: "1px solid hsl(0 70% 58% / 0.35)",
+                                  color: "hsl(0 70% 68%)",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {formatCents(item.financialInfo.totalOverdueCents)}
+                              </span>
+                            ) : hasPending ? (
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  padding: "2px 7px",
+                                  borderRadius: 10,
+                                  background: "hsl(265 85% 62% / 0.14)",
+                                  border: "1px solid hsl(265 85% 62% / 0.3)",
+                                  color: "#c4a3ff",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {formatCents(item.financialInfo.totalPendingCents)}
+                              </span>
+                            ) : null}
+
+                            {item.unreadCount > 0 && (
+                              <span
+                                style={{
+                                  minWidth: 20,
+                                  height: 20,
+                                  padding: "0 6px",
+                                  borderRadius: 10,
+                                  background: "hsl(152 65% 45%)",
+                                  color: "#fff",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                {item.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ─── Desktop Conversation Row ───
                 return (
                   <div
                     key={item.id}
@@ -1998,16 +2628,26 @@ export function MonitoramentoPage() {
                             <>
                               {item.lastMessage.direction === "outbound" ? (
                                 item.lastMessage.senderName?.toLowerCase().includes("operador") || item.lastMessage.kind === "manual_chat" ? (
-                                  <span style={{ color: "#38bdf8", flexShrink: 0 }}>📱 Você:</span>
+                                  <span style={{ color: "#38bdf8", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                    <Smartphone size={11} /> Você:
+                                  </span>
                                 ) : (
-                                  <span style={{ color: "#a78bfa", flexShrink: 0 }}>🤖 Nexus:</span>
+                                  <span style={{ color: "#a78bfa", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                    <Bot size={11} /> Nexus:
+                                  </span>
                                 )
                               ) : item.isPartner ? (
-                                <span style={{ color: "#c4a3ff", flexShrink: 0 }}>👤 Sócio:</span>
+                                <span style={{ color: "#c4a3ff", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <UserCheck size={11} /> Sócio:
+                                </span>
                               ) : (
-                                <span style={{ color: "hsl(152 65% 55%)", flexShrink: 0 }}>💬 Cliente:</span>
+                                <span style={{ color: "hsl(152 65% 55%)", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <MessageSquare size={11} /> Cliente:
+                                </span>
                               )}
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.lastMessage.body}</span>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {cleanPreviewText(item.lastMessage.body) || item.lastMessage.body}
+                              </span>
                             </>
                           ) : (
                             <span style={{ color: "#555", fontStyle: "italic" }}>
@@ -2024,17 +2664,32 @@ export function MonitoramentoPage() {
           </div>
         </div>
 
-        {/* ─── Center Pane: WhatsApp Chat Window ─── */}
+        {/* ─── Center Pane: WhatsApp Chat Window (Full-Screen on Mobile) ─── */}
         <div
-          style={{
-            flex: 1,
-            display: isMobile && !selectedTarget ? "none" : "flex",
-            flexDirection: "column",
-            height: "100%",
-            background: "#0d0d0f",
-            minWidth: 0,
-            width: isMobile ? "100%" : undefined,
-          }}
+          style={
+            isMobile
+              ? {
+                  display: selectedTarget ? "flex" : "none",
+                  flexDirection: "column",
+                  position: "fixed",
+                  left: 0,
+                  right: 0,
+                  top: mobileViewport ? `${mobileViewport.offsetTop}px` : 0,
+                  height: mobileViewport ? `${mobileViewport.height}px` : "100dvh",
+                  width: "100vw",
+                  background: "#0b0b0e",
+                  zIndex: 10000,
+                  overflow: "hidden",
+                }
+              : {
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "100%",
+                  background: "#0d0d0f",
+                  minWidth: 0,
+                }
+          }
         >
           {!selectedTarget ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: "#666" }}>
@@ -2061,35 +2716,35 @@ export function MonitoramentoPage() {
             </div>
           ) : (
             <>
-              {/* Chat Header */}
+              {/* ─── Chat Header (WhatsApp Mobile vs Desktop) ─── */}
               <div
                 style={{
-                  padding: isMobile ? "10px 14px" : "12px 20px",
-                  background: "#18181c",
+                  padding: isMobile ? "8px 10px" : "12px 20px",
+                  paddingTop: isMobile ? "calc(env(safe-area-inset-top, 0px) + 8px)" : "12px",
+                  background: isMobile ? "#16161d" : "#18181c",
                   borderBottom: "1px solid #27272e",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  gap: 10,
+                  gap: isMobile ? 6 : 10,
                   flexShrink: 0,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12, minWidth: 0, flex: 1 }}>
                   {isMobile && (
                     <button
-                      onClick={() => setSelectedTarget(null)}
-                      title="Voltar para a lista de conversas"
+                      onClick={handleBackToList}
+                      title="Voltar para conversas"
                       style={{
                         background: "transparent",
                         border: "none",
-                        color: "#c4a3ff",
+                        color: "#e4e4e7",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "6px",
-                        marginLeft: -6,
-                        borderRadius: "50%",
+                        padding: "6px 4px",
+                        borderRadius: 20,
                         flexShrink: 0,
                       }}
                     >
@@ -2097,76 +2752,113 @@ export function MonitoramentoPage() {
                     </button>
                   )}
 
-                  <ContactAvatar
-                    name={activeConversation?.clientName || "Contato"}
-                    photoUrl={activeConversation?.photoUrl}
-                    isPartner={activeConversation?.isPartner}
-                    size={isMobile ? 38 : 42}
-                  />
+                  {/* Tapping Avatar or Name on Mobile opens the 360° Contact Info screen (just like WhatsApp!) */}
+                  <div
+                    onClick={() => {
+                      if (isMobile) setShowClientDrawer(true);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: isMobile ? 10 : 12,
+                      minWidth: 0,
+                      flex: 1,
+                      cursor: isMobile ? "pointer" : "default",
+                    }}
+                  >
+                    <ContactAvatar
+                      name={activeConversation?.clientName || "Contato"}
+                      photoUrl={activeConversation?.photoUrl}
+                      isPartner={activeConversation?.isPartner}
+                      size={isMobile ? 38 : 42}
+                      hasReplied={activeConversation?.hasReplied}
+                    />
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <span
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "nowrap" : "wrap" }}>
+                        <span
+                          style={{
+                            fontSize: isMobile ? 15 : 15,
+                            fontWeight: 700,
+                            color: "#fff",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {activeConversation?.clientName || "Contato"}
+                        </span>
+
+                        {!isMobile && (
+                          activeConversation?.isPartner ? (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                padding: "2px 8px",
+                                borderRadius: 12,
+                                background: "hsl(265 85% 62% / 0.2)",
+                                border: "1px solid hsl(265 85% 62% / 0.4)",
+                                color: "#c4a3ff",
+                                fontWeight: 700,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                              }}
+                            >
+                              <UserCheck size={11} /> {activeConversation?.roleLabel || "Sócio da Teltech"}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleOptIn();
+                              }}
+                              disabled={isTogglingOptIn}
+                              title="Clique para alternar o consentimento de WhatsApp"
+                              style={{
+                                fontSize: 10,
+                                padding: "2px 8px",
+                                borderRadius: 12,
+                                background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.15)" : "#25252b",
+                                border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #33333d",
+                                color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
+                                fontWeight: 600,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                cursor: "pointer",
+                                transition: "all 0.15s ease",
+                              }}
+                            >
+                              <Shield size={11} /> {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
+                            </button>
+                          )
+                        )}
+                      </div>
+
+                      <div
                         style={{
-                          fontSize: isMobile ? 14 : 15,
-                          fontWeight: 700,
-                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          marginTop: 1,
+                          fontSize: 11,
+                          color: "#9ca3af",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
-                          maxWidth: isMobile ? 130 : 220,
                         }}
                       >
-                        {activeConversation?.clientName || "Contato"}
-                      </span>
-
-                      {activeConversation?.isPartner ? (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            padding: "2px 8px",
-                            borderRadius: 12,
-                            background: "hsl(265 85% 62% / 0.2)",
-                            border: "1px solid hsl(265 85% 62% / 0.4)",
-                            color: "#c4a3ff",
-                            fontWeight: 700,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                          }}
-                        >
-                          <UserCheck size={11} /> {activeConversation?.roleLabel || "Sócio da Teltech"}
-                        </span>
-                      ) : (
-                        /* Interactive Opt-in Toggle for clients */
-                        <button
-                          onClick={handleToggleOptIn}
-                          disabled={isTogglingOptIn}
-                          title="Clique para alternar o consentimento de WhatsApp"
-                          style={{
-                            fontSize: 10,
-                            padding: "2px 8px",
-                            borderRadius: 12,
-                            background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.15)" : "#25252b",
-                            border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #33333d",
-                            color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
-                            fontWeight: 600,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                            cursor: "pointer",
-                            transition: "all 0.15s ease",
-                          }}
-                        >
-                          <Shield size={11} /> {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
-                        </button>
-                      )}
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, fontSize: 11, color: "#888" }}>
-                      <span>{formatPhoneDisplay(activeConversation?.phone || "")}</span>
-                      {!isMobile && activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
-                      {!isMobile && activeConversation?.isPartner && <span>• Canal Direto Teltech</span>}
+                        <span>{formatPhoneDisplay(activeConversation?.phone || "")}</span>
+                        {isMobile ? (
+                          <span style={{ color: "#71717a" }}>• toque para dados</span>
+                        ) : (
+                          <>
+                            {activeConversation?.document && <span>• CPF/CNPJ: {activeConversation.document}</span>}
+                            {activeConversation?.isPartner && <span>• Canal Direto Teltech</span>}
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2178,30 +2870,26 @@ export function MonitoramentoPage() {
                       style={{
                         padding: "6px 12px",
                         borderRadius: 8,
-                        background: openTransactions.some((t) => new Date(t.dueDate) < new Date() && t.status === "pending")
-                          ? "hsl(0 70% 58% / 0.15)"
-                          : "hsl(265 85% 62% / 0.15)",
-                        border: openTransactions.some((t) => new Date(t.dueDate) < new Date() && t.status === "pending")
-                          ? "1px solid hsl(0 70% 58% / 0.35)"
-                          : "1px solid hsl(265 85% 62% / 0.35)",
+                        background: hasOverdueOpenTx ? "hsl(0 70% 58% / 0.15)" : "hsl(265 85% 62% / 0.15)",
+                        border: hasOverdueOpenTx ? "1px solid hsl(0 70% 58% / 0.35)" : "1px solid hsl(265 85% 62% / 0.35)",
                         display: "flex",
                         alignItems: "center",
                         gap: 8,
                       }}
                     >
-                      <DollarSign size={14} color={openTransactions.some((t) => new Date(t.dueDate) < new Date() && t.status === "pending") ? "#ff7b7b" : "#c4a3ff"} />
+                      <DollarSign size={14} color={hasOverdueOpenTx ? "#ff7b7b" : "#c4a3ff"} />
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#eee" }}>
                           {openTransactions.length} fatura(s) pendente(s)
                         </div>
                         <div style={{ fontSize: 10, color: "#aaa" }}>
-                          Total: {formatCents(openTransactions.reduce((acc, t) => acc + (t.status === "pending" ? t.amount : 0), 0))}
+                          Total: {formatCents(totalOpenAmount)}
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Cobrar via Nexus with Multi-Invoice Dropdown */}
+                  {/* Cobrar via Nexus Button */}
                   {openTransactions.length > 0 && (
                     <div style={{ position: "relative" }}>
                       <button
@@ -2212,27 +2900,31 @@ export function MonitoramentoPage() {
                           display: "flex",
                           alignItems: "center",
                           gap: 4,
-                          padding: isMobile ? "6px 10px" : "8px 12px",
-                          borderRadius: 8,
+                          padding: isMobile ? "7px 11px" : "8px 12px",
+                          borderRadius: isMobile ? 18 : 8,
                           background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
                           border: "none",
                           color: "#fff",
-                          fontSize: isMobile ? 11 : 12,
-                          fontWeight: 600,
+                          fontSize: isMobile ? 11.5 : 12,
+                          fontWeight: 700,
                           cursor: isTriggeringBilling ? "not-allowed" : "pointer",
-                          boxShadow: "0 0 16px hsl(265 85% 62% / 0.35)",
+                          boxShadow: "0 0 14px hsl(265 85% 62% / 0.35)",
                         }}
                       >
-                        <Zap size={14} />
+                        <Zap size={13} />
                         {isMobile
-                          ? (isTriggeringBilling ? "..." : "Cobrar")
-                          : (isTriggeringBilling ? "Disparando..." : `Cobrar via Nexus (${openTransactions.length})`)}
-                        <ChevronDown size={13} />
+                          ? isTriggeringBilling
+                            ? "..."
+                            : `Cobrar (${openTransactions.length})`
+                          : isTriggeringBilling
+                          ? "Disparando..."
+                          : `Cobrar via Nexus (${openTransactions.length})`}
+                        {!isMobile && <ChevronDown size={13} />}
                       </button>
 
-                      {/* Dropdown to pick which invoice to charge */}
+                      {/* Desktop Dropdown to pick which invoice to charge */}
                       <AnimatePresence>
-                        {showInvoiceSelector && (
+                        {!isMobile && showInvoiceSelector && (
                           <motion.div
                             initial={{ opacity: 0, y: 5 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -2242,7 +2934,7 @@ export function MonitoramentoPage() {
                               right: 0,
                               top: "100%",
                               marginTop: 6,
-                              width: isMobile ? 260 : 290,
+                              width: 290,
                               background: "#1c1c24",
                               border: "1px solid #323242",
                               borderRadius: 10,
@@ -2284,8 +2976,8 @@ export function MonitoramentoPage() {
                                       <span style={{ color: isOverdue ? "#ff7b7b" : "#888" }}>
                                         Venc: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
                                       </span>
-                                      <span style={{ color: "hsl(265 85% 62%)", fontWeight: 700 }}>
-                                        Disparar Pix ➔
+                                      <span style={{ color: "hsl(265 85% 62%)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                        Disparar Pix <ChevronRight size={12} />
                                       </span>
                                     </div>
                                   </div>
@@ -2305,48 +2997,87 @@ export function MonitoramentoPage() {
                     style={{
                       display: "flex",
                       alignItems: "center",
+                      justifyContent: "center",
                       gap: 4,
-                      background: showClientDrawer ? "hsl(265 85% 62% / 0.2)" : "#22222a",
+                      background: showClientDrawer ? "hsl(265 85% 62% / 0.2)" : isMobile ? "rgba(255,255,255,0.06)" : "#22222a",
                       border: showClientDrawer ? "1px solid hsl(265 85% 62% / 0.5)" : "1px solid #333342",
                       color: showClientDrawer ? "#c4a3ff" : "#ccc",
-                      padding: isMobile ? "6px 10px" : "8px 12px",
-                      borderRadius: 8,
-                      fontSize: isMobile ? 11 : 12,
+                      padding: isMobile ? 8 : "8px 12px",
+                      borderRadius: isMobile ? "50%" : 8,
+                      fontSize: 12,
                       fontWeight: 600,
                       cursor: "pointer",
                       transition: "all 0.15s ease",
                     }}
                   >
-                    <SlidersHorizontal size={14} />
-                    {isMobile ? "360°" : "Painel 360°"}
+                    {isMobile ? <MoreVertical size={18} /> : <><SlidersHorizontal size={14} /> Painel 360°</>}
                   </button>
 
-                  <button
-                    onClick={() => fetchMessages(selectedTarget)}
-                    title="Recarregar histórico de mensagens"
-                    style={{
-                      background: "#22222a",
-                      border: "1px solid #333342",
-                      color: "#aaa",
-                      padding: isMobile ? 6 : 8,
-                      borderRadius: 8,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <RefreshCw size={14} />
-                  </button>
+                  {!isMobile && (
+                    <button
+                      onClick={() => fetchMessages(selectedTarget)}
+                      title="Recarregar histórico de mensagens"
+                      style={{
+                        background: "#22222a",
+                        border: "1px solid #333342",
+                        color: "#aaa",
+                        padding: 8,
+                        borderRadius: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Chat Messages Timeline */}
+              {/* ─── Mobile Contextual Financial Strip (when client has open invoices) ─── */}
+              {isMobile && openTransactions.length > 0 && (
+                <div
+                  onClick={() => setShowClientDrawer(true)}
+                  style={{
+                    padding: "6px 12px",
+                    background: hasOverdueOpenTx
+                      ? "linear-gradient(90deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.06))"
+                      : "linear-gradient(90deg, rgba(139, 92, 246, 0.16), rgba(139, 92, 246, 0.06))",
+                    borderBottom: hasOverdueOpenTx
+                      ? "1px solid rgba(239, 68, 68, 0.28)"
+                      : "1px solid rgba(139, 92, 246, 0.28)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <DollarSign size={13} color={hasOverdueOpenTx ? "#f87171" : "#c4a3ff"} style={{ flexShrink: 0 }} />
+                    <span style={{ color: "#e4e4e7", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {openTransactions.length} fatura(s) em aberto:{" "}
+                      <strong style={{ color: hasOverdueOpenTx ? "#fca5a5" : "#d8b4fe" }}>
+                        {formatCents(totalOpenAmount)}
+                      </strong>
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 11, color: "#c4a3ff", fontWeight: 700, flexShrink: 0, display: "flex", alignItems: "center", gap: 2 }}>
+                    Ver faturas <ChevronRight size={13} />
+                  </span>
+                </div>
+              )}
+
+              {/* ─── Chat Messages Timeline ─── */}
               <div
                 style={{
                   flex: 1,
                   overflowY: "auto",
-                  padding: isMobile ? "12px 10px" : "20px 24px",
+                  WebkitOverflowScrolling: "touch",
+                  padding: isMobile ? "10px 10px 14px" : "20px 24px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: isMobile ? 10 : 14,
+                  gap: isMobile ? 8 : 14,
                   backgroundImage: `radial-gradient(#1c1c24 1px, transparent 1px)`,
                   backgroundSize: "20px 20px",
                 }}
@@ -2357,11 +3088,11 @@ export function MonitoramentoPage() {
                     Carregando mensagens da conversa...
                   </div>
                 ) : messages.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: 50, color: "#777", maxWidth: 400, margin: "auto" }}>
-                    <Bot size={44} style={{ margin: "0 auto 12px", opacity: 0.3, color: "#c4a3ff" }} />
+                  <div style={{ textAlign: "center", padding: 40, color: "#777", maxWidth: 360, margin: "auto" }}>
+                    <Bot size={42} style={{ margin: "0 auto 12px", opacity: 0.3, color: "#c4a3ff" }} />
                     <h3 style={{ fontSize: 15, fontWeight: 600, color: "#bbb", margin: "0 0 6px" }}>Nenhuma mensagem registrada</h3>
                     <p style={{ fontSize: 12, color: "#666", lineHeight: 1.5 }}>
-                      Nexus ainda não conversou com este cliente. Você pode disparar uma cobrança automática ou enviar uma mensagem direta abaixo.
+                      Nexus ainda não conversou com este contato. Você pode disparar uma cobrança automática ou enviar uma mensagem abaixo.
                     </p>
                   </div>
                 ) : (
@@ -2370,290 +3101,323 @@ export function MonitoramentoPage() {
                     const isClientReply = msg.direction === "inbound";
                     const badge = kindBadge(msg.kind);
 
+                    const currentDivider = formatDateDivider(msg.sentAt || msg.createdAt);
+                    const prevMsg = index > 0 ? messages[index - 1] : null;
+                    const prevDivider = prevMsg ? formatDateDivider(prevMsg.sentAt || prevMsg.createdAt) : "";
+                    const showDateDivider = currentDivider && currentDivider !== prevDivider;
+
+                    const isManualMessage =
+                      msg.kind === "manual_chat" || msg.kind === "client_reply" || msg.kind === "partner_reply";
+
                     return (
-                      <motion.div
-                        key={msg.id || index}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2 }}
-                        style={{
-                          display: "flex",
-                          justifyContent: isOutbound ? "flex-end" : "flex-start",
-                          width: "100%",
-                        }}
-                      >
-                        <div
+                      <div key={msg.id || index} style={{ display: "flex", flexDirection: "column", gap: isMobile ? 8 : 12 }}>
+                        {showDateDivider && (
+                          <div style={{ display: "flex", justifyContent: "center", margin: "4px 0" }}>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "#9ca3af",
+                                background: "#181820",
+                                border: "1px solid #272733",
+                                padding: "3px 12px",
+                                borderRadius: 12,
+                                boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                              }}
+                            >
+                              {currentDivider}
+                            </span>
+                          </div>
+                        )}
+
+                        <motion.div
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.16 }}
                           style={{
-                            maxWidth: isMobile ? "88%" : "75%",
-                            minWidth: isMobile ? 180 : 260,
-                            borderRadius: 14,
-                            padding: isMobile ? "10px 12px" : "12px 16px",
-                            background: isOutbound
-                              ? "linear-gradient(135deg, #241b36 0%, #1e172e 100%)"
-                              : "#1d1d24",
-                            border: isOutbound
-                              ? "1px solid hsl(265 85% 62% / 0.35)"
-                              : "1px solid #2e2e38",
-                            boxShadow: isOutbound
-                              ? "0 4px 20px -5px hsl(265 85% 62% / 0.15)"
-                              : "0 4px 16px -5px rgba(0,0,0,0.4)",
-                            borderTopRightRadius: isOutbound ? 2 : 14,
-                            borderTopLeftRadius: isClientReply ? 2 : 14,
+                            display: "flex",
+                            justifyContent: isOutbound ? "flex-end" : "flex-start",
+                            width: "100%",
                           }}
                         >
-                          {/* Bubble Header */}
                           <div
                             style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              marginBottom: 8,
-                              gap: 8,
+                              maxWidth: isMobile ? "86%" : "75%",
+                              minWidth: isMobile ? 110 : 260,
+                              borderRadius: 14,
+                              padding: isMobile ? "8px 11px 6px" : "12px 16px",
+                              background: isOutbound
+                                ? "linear-gradient(135deg, #261c3a 0%, #1e162f 100%)"
+                                : "#1d1d24",
+                              border: isOutbound
+                                ? "1px solid hsl(265 85% 62% / 0.35)"
+                                : "1px solid #2e2e38",
+                              boxShadow: isOutbound
+                                ? "0 4px 18px -5px hsl(265 85% 62% / 0.15)"
+                                : "0 4px 14px -5px rgba(0,0,0,0.4)",
+                              borderTopRightRadius: isOutbound ? 3 : 14,
+                              borderTopLeftRadius: isClientReply ? 3 : 14,
                             }}
                           >
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              {isOutbound ? (
-                                msg.senderName?.toLowerCase().includes("operador") || msg.kind === "manual_chat" ? (
+                            {/* Bubble Header */}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                marginBottom: isMobile ? 5 : 8,
+                                gap: 8,
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                {isOutbound ? (
+                                  msg.senderName?.toLowerCase().includes("operador") || msg.kind === "manual_chat" ? (
+                                    <>
+                                      <Smartphone size={12} color="#38bdf8" />
+                                      <span style={{ fontSize: 10.5, fontWeight: 700, color: "#7dd3fc" }}>
+                                        {msg.senderName || "Você"}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Bot size={12} color="#c4a3ff" />
+                                      <span style={{ fontSize: 10.5, fontWeight: 700, color: "#d6beff" }}>
+                                        {msg.senderName || "Nexus"}
+                                      </span>
+                                    </>
+                                  )
+                                ) : activeConversation?.isPartner || msg.kind === "partner_reply" ? (
                                   <>
-                                    <Smartphone size={14} color="#38bdf8" />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#7dd3fc" }}>
-                                      {msg.senderName || "Operador (Celular)"}
+                                    <UserCheck size={12} color="#a78bfa" />
+                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#c4a3ff" }}>
+                                      {msg.senderName || activeConversation?.clientName || "Sócio"}
                                     </span>
                                   </>
                                 ) : (
                                   <>
-                                    <Bot size={14} color="#c4a3ff" />
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#d6beff" }}>
-                                      {msg.senderName || "Nexus (Teltech)"}
+                                    <User size={12} color="hsl(152 65% 55%)" />
+                                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "hsl(152 65% 65%)" }}>
+                                      {msg.senderName || activeConversation?.clientName || "Cliente"}
                                     </span>
                                   </>
-                                )
-                              ) : (activeConversation?.isPartner || msg.kind === "partner_reply") ? (
-                                <>
-                                  <UserCheck size={14} color="#a78bfa" />
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#c4a3ff" }}>
-                                    {msg.senderName || activeConversation?.clientName || "Sócio"}
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <User size={14} color="hsl(152 65% 55%)" />
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "hsl(152 65% 65%)" }}>
-                                    {msg.senderName || activeConversation?.clientName || "Cliente"}
-                                  </span>
-                                </>
+                                )}
+                              </div>
+
+                              {(!isMobile || !isManualMessage) && (
+                                <span
+                                  style={{
+                                    fontSize: 9,
+                                    padding: "1.5px 6px",
+                                    borderRadius: 8,
+                                    background: `${badge.color}22`,
+                                    color: badge.color,
+                                    fontWeight: 700,
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.03em",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {badge.label}
+                                </span>
                               )}
                             </div>
 
-                            <span
-                              style={{
-                                fontSize: 9,
-                                padding: "2px 7px",
-                                borderRadius: 10,
-                                background: `${badge.color}22`,
-                                color: badge.color,
-                                fontWeight: 700,
-                                textTransform: "uppercase",
-                                letterSpacing: "0.03em",
-                              }}
-                            >
-                              {badge.label}
-                            </span>
-                          </div>
+                            {/* Message Body, Media Player (Audio, Video, Photo, PDF, Document) or WhatsApp Markup */}
+                            {(() => {
+                              const isAudio = msg.mediaType === "audio" || msg.body?.includes("[Mensagem de Áudio]") || msg.body?.includes("[Áudio]");
+                              const isVideo = msg.mediaType === "video" || msg.body?.includes("[Vídeo]");
+                              const isImage = msg.mediaType === "image" || msg.body?.includes("[Foto]") || msg.body?.includes("[Imagem");
+                              const isDoc = msg.mediaType === "document" || msg.body?.includes("[Documento") || msg.body?.includes("[PDF");
 
-                          {/* Message Body, Media Player (Audio, Video, Photo, PDF, Document) or WhatsApp Markup */}
-                          {(() => {
-                            const isAudio = msg.mediaType === "audio" || msg.body?.includes("[Mensagem de Áudio]") || msg.body?.includes("[Áudio]");
-                            const isVideo = msg.mediaType === "video" || msg.body?.includes("[Vídeo]");
-                            const isImage = msg.mediaType === "image" || msg.body?.includes("[Foto]") || msg.body?.includes("[Imagem");
-                            const isDoc = msg.mediaType === "document" || msg.body?.includes("[Documento") || msg.body?.includes("[PDF");
+                              if (isAudio) {
+                                return (
+                                  <WhatsAppAudioPlayer
+                                    src={msg.mediaUrl}
+                                    durationSec={msg.mediaDuration}
+                                    isOutbound={isOutbound}
+                                  />
+                                );
+                              }
 
-                            if (isAudio) {
-                              return (
-                                <WhatsAppAudioPlayer
-                                  src={msg.mediaUrl}
-                                  durationSec={msg.mediaDuration}
-                                  isOutbound={isOutbound}
-                                />
-                              );
-                            }
+                              if (isVideo) {
+                                const caption = msg.body && !msg.body.startsWith("[Vídeo]") ? msg.body : undefined;
+                                return (
+                                  <WhatsAppVideoPlayer
+                                    src={msg.mediaUrl}
+                                    caption={caption}
+                                    isOutbound={isOutbound}
+                                  />
+                                );
+                              }
 
-                            if (isVideo) {
-                              const caption = msg.body && !msg.body.startsWith("[Vídeo]") ? msg.body : undefined;
-                              return (
-                                <WhatsAppVideoPlayer
-                                  src={msg.mediaUrl}
-                                  caption={caption}
-                                  isOutbound={isOutbound}
-                                />
-                              );
-                            }
+                              if (isImage) {
+                                const caption = msg.body && !msg.body.startsWith("[Foto]") && !msg.body.startsWith("[Imagem") ? msg.body : undefined;
+                                return (
+                                  <WhatsAppImageViewer
+                                    src={msg.mediaUrl}
+                                    caption={caption}
+                                    isOutbound={isOutbound}
+                                    onOpenLightbox={(src, cap) => setLightboxImage({ src, caption: cap })}
+                                  />
+                                );
+                              }
 
-                            if (isImage) {
-                              const caption = msg.body && !msg.body.startsWith("[Foto]") && !msg.body.startsWith("[Imagem") ? msg.body : undefined;
-                              return (
-                                <WhatsAppImageViewer
-                                  src={msg.mediaUrl}
-                                  caption={caption}
-                                  isOutbound={isOutbound}
-                                  onOpenLightbox={(src, cap) => setLightboxImage({ src, caption: cap })}
-                                />
-                              );
-                            }
+                              if (isDoc) {
+                                const caption = msg.body && !msg.body.startsWith("[Documento") && !msg.body.startsWith("[PDF") ? msg.body : undefined;
+                                return (
+                                  <WhatsAppDocumentCard
+                                    src={msg.mediaUrl}
+                                    filename={msg.mediaFilename}
+                                    size={msg.mediaSize}
+                                    caption={caption}
+                                    isOutbound={isOutbound}
+                                  />
+                                );
+                              }
 
-                            if (isDoc) {
-                              const caption = msg.body && !msg.body.startsWith("[Documento") && !msg.body.startsWith("[PDF") ? msg.body : undefined;
-                              return (
-                                <WhatsAppDocumentCard
-                                  src={msg.mediaUrl}
-                                  filename={msg.mediaFilename}
-                                  size={msg.mediaSize}
-                                  caption={caption}
-                                  isOutbound={isOutbound}
-                                />
-                              );
-                            }
+                              return <FormattedWhatsAppBody text={msg.body} amount={msg.transaction?.amount} />;
+                            })()}
 
-                            return <FormattedWhatsAppBody text={msg.body} amount={msg.transaction?.amount} />;
-                          })()}
+                            {/* Embedded Linked Transaction Card with Quick Mark-Paid Button */}
+                            {msg.transaction && (
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  padding: "8px 10px",
+                                  borderRadius: 8,
+                                  background: "rgba(0,0,0,0.3)",
+                                  border: "1px solid rgba(255,255,255,0.08)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  flexWrap: "wrap",
+                                  gap: 8,
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 600, color: "#ccc" }}>
+                                    {msg.transaction.description || "Fatura / Cobrança"}
+                                  </div>
+                                  <div style={{ fontSize: 10, color: "#888" }}>
+                                    Venc: {new Date(msg.transaction.dueDate).toLocaleDateString("pt-BR")}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ textAlign: "right" }}>
+                                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#c4a3ff" }}>
+                                      {formatCents(msg.transaction.amount)}
+                                    </div>
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        color: msg.transaction.status === "paid" ? "hsl(152 65% 55%)" : "hsl(0 70% 65%)",
+                                        fontWeight: 600,
+                                        textTransform: "uppercase",
+                                      }}
+                                    >
+                                      {msg.transaction.status === "paid" ? "Pago" : "Pendente"}
+                                    </span>
+                                  </div>
 
-                          {/* Embedded Linked Transaction Card with Quick Mark-Paid Button */}
-                          {msg.transaction && (
+                                  {msg.transaction.status !== "paid" && (
+                                    <button
+                                      onClick={() => handleMarkPaid(msg.transaction!.id)}
+                                      disabled={Boolean(isMarkingPaid)}
+                                      title="Marcar como recebido e enviar recibo de quitação"
+                                      style={{
+                                        padding: "5px 9px",
+                                        borderRadius: 6,
+                                        background: "hsl(152 65% 45% / 0.2)",
+                                        border: "1px solid hsl(152 65% 45% / 0.5)",
+                                        color: "hsl(152 65% 60%)",
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      {isMarkingPaid === msg.transaction.id ? "..." : "Dar Baixa"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Bubble Footer: Time + Status ticks */}
                             <div
                               style={{
-                                marginTop: 10,
-                                padding: "8px 12px",
-                                borderRadius: 8,
-                                background: "rgba(0,0,0,0.3)",
-                                border: "1px solid rgba(255,255,255,0.08)",
                                 display: "flex",
                                 alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: 10,
+                                justifyContent: "flex-end",
+                                gap: 4,
+                                marginTop: 4,
+                                fontSize: 10,
+                                color: "#8a8a93",
                               }}
                             >
-                              <div>
-                                <div style={{ fontSize: 11, fontWeight: 600, color: "#ccc" }}>
-                                  {msg.transaction.description || "Fatura / Cobrança"}
-                                </div>
-                                <div style={{ fontSize: 10, color: "#888" }}>
-                                  Vencimento: {new Date(msg.transaction.dueDate).toLocaleDateString("pt-BR")}
-                                </div>
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <div style={{ textAlign: "right" }}>
-                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#c4a3ff" }}>
-                                    {formatCents(msg.transaction.amount)}
-                                  </div>
-                                  <span
-                                    style={{
-                                      fontSize: 9,
-                                      color: msg.transaction.status === "paid" ? "hsl(152 65% 55%)" : "hsl(0 70% 65%)",
-                                      fontWeight: 600,
-                                      textTransform: "uppercase",
-                                    }}
-                                  >
-                                    {msg.transaction.status === "paid" ? "Pago" : "Pendente"}
-                                  </span>
-                                </div>
-
-                                {msg.transaction.status !== "paid" && (
-                                  <button
-                                    onClick={() => handleMarkPaid(msg.transaction!.id)}
-                                    disabled={Boolean(isMarkingPaid)}
-                                    title="Marcar como recebido e enviar recibo de quitação"
-                                    style={{
-                                      padding: "4px 8px",
-                                      borderRadius: 6,
-                                      background: "hsl(152 65% 45% / 0.2)",
-                                      border: "1px solid hsl(152 65% 45% / 0.5)",
-                                      color: "hsl(152 65% 60%)",
-                                      fontSize: 10,
-                                      fontWeight: 700,
-                                      cursor: "pointer",
-                                    }}
-                                  >
-                                    {isMarkingPaid === msg.transaction.id ? "Baixando..." : "Dar Baixa"}
-                                  </button>
-                                )}
-                              </div>
+                              <span>{formatTime(msg.sentAt || msg.createdAt)}</span>
+                              {isOutbound && (
+                                <CheckCheck size={13} color={msg.status === "sent" ? "hsl(152 65% 55%)" : "#888"} />
+                              )}
                             </div>
-                          )}
-
-                          {/* Bubble Footer: Time + Status ticks */}
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "flex-end",
-                              gap: 4,
-                              marginTop: 6,
-                              fontSize: 10,
-                              color: "#777",
-                            }}
-                          >
-                            <span>{formatTime(msg.sentAt || msg.createdAt)}</span>
-                            {isOutbound && (
-                              <CheckCheck size={13} color={msg.status === "sent" ? "hsl(152 65% 55%)" : "#888"} />
-                            )}
                           </div>
-                        </div>
-                      </motion.div>
+                        </motion.div>
+                      </div>
                     );
                   })
                 )}
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input Bar & Dynamic Quick Replies */}
+              {/* ─── Chat Input Bar & Quick Replies (WhatsApp Mobile Pill + Circular Send on Mobile) ─── */}
               <div
                 style={{
-                  padding: isMobile ? "8px 10px max(10px, env(safe-area-inset-bottom))" : "12px 20px 16px",
-                  background: "#16161a",
-                  borderTop: "1px solid #27272e",
+                  padding: isMobile
+                    ? "6px 8px calc(env(safe-area-inset-bottom, 0px) + 8px)"
+                    : "12px 20px 16px",
+                  background: isMobile ? "#121217" : "#16161a",
+                  borderTop: "1px solid #25252e",
                   display: "flex",
                   flexDirection: "column",
-                  gap: 10,
+                  gap: isMobile ? 6 : 10,
+                  flexShrink: 0,
                 }}
               >
                 {/* Quick Reply Pills */}
-                <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
-                  {[
-                    "👋 Olá! Segue o lembrete da sua fatura.",
-                    "🔑 Segue a nossa chave Pix para pagamento:",
-                    "📄 Pode nos enviar o comprovante por aqui?",
-                    "🤝 Conseguimos negociar um novo prazo caso precise.",
-                    "✅ Pagamento confirmado com sucesso! Muito obrigado.",
-                  ].map((phrase, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSendMessage(phrase)}
-                      disabled={isSending}
-                      style={{
-                        padding: "5px 12px",
-                        borderRadius: 14,
-                        background: "#22222a",
-                        border: "1px solid #2f2f3c",
-                        color: "#aaa",
-                        fontSize: 11,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                        flexShrink: 0,
-                        transition: "all 0.15s ease",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.color = "#c4a3ff";
-                        e.currentTarget.style.borderColor = "hsl(265 85% 62% / 0.4)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = "#aaa";
-                        e.currentTarget.style.borderColor = "#2f2f3c";
-                      }}
-                    >
-                      {phrase}
-                    </button>
-                  ))}
-                </div>
+                {(!isMobile || showMobileQuickReplies) && (
+                  <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
+                    {[
+                      { text: "Olá! Segue o lembrete da sua fatura.", icon: <Bell size={12} color="#c4a3ff" /> },
+                      { text: "Segue a nossa chave Pix para pagamento:", icon: <QrCode size={12} color="#c4a3ff" /> },
+                      { text: "Pode nos enviar o comprovante por aqui?", icon: <FileText size={12} color="#c4a3ff" /> },
+                      { text: "Conseguimos negociar um novo prazo caso precise.", icon: <Calendar size={12} color="#c4a3ff" /> },
+                      { text: "Pagamento confirmado com sucesso! Muito obrigado.", icon: <CheckCircle2 size={12} color="hsl(152 65% 55%)" /> },
+                    ].map((item, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSendMessage(item.text)}
+                        disabled={isSending}
+                        style={{
+                          padding: isMobile ? "5px 10px" : "5px 12px",
+                          borderRadius: 14,
+                          background: "#1e1e26",
+                          border: "1px solid #2d2d3a",
+                          color: "#b4b4be",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                          flexShrink: 0,
+                          transition: "all 0.15s ease",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        {item.icon}
+                        {item.text}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* Selected Attachment Preview Card */}
                 {selectedAttachment && (
@@ -2663,7 +3427,7 @@ export function MonitoramentoPage() {
                       alignItems: "center",
                       justifyContent: "space-between",
                       padding: "8px 12px",
-                      borderRadius: 10,
+                      borderRadius: 12,
                       background: "rgba(255,255,255,0.05)",
                       border: "1px solid hsl(265 85% 62% / 0.4)",
                     }}
@@ -2710,134 +3474,345 @@ export function MonitoramentoPage() {
                         alignItems: "center",
                         justifyContent: "center",
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = "#f87171")}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "#aaa")}
                     >
                       <X size={16} />
                     </button>
                   </div>
                 )}
 
-                {/* Main Input Textarea & Send button */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    gap: isMobile ? 6 : 10,
-                    background: "#1d1d24",
-                    border: "1px solid #31313e",
-                    borderRadius: 12,
-                    padding: "8px 12px",
-                  }}
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleSelectAttachment}
-                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
-                    style={{ display: "none" }}
-                  />
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleSelectAttachment}
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip"
+                  style={{ display: "none" }}
+                />
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isSending}
-                    title="Anexar foto, vídeo, áudio, PDF ou documento"
+                {isMobile ? (
+                  /* ─── WhatsApp Mobile Pill Input Row + Circular Floating Send Button ─── */
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "flex-end",
+                        gap: 6,
+                        background: "#1e1e26",
+                        border: "1px solid #2e2e3c",
+                        borderRadius: 24,
+                        padding: "6px 10px",
+                        minHeight: 44,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setShowMobileQuickReplies(!showMobileQuickReplies)}
+                        title="Respostas rápidas"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: "50%",
+                          background: showMobileQuickReplies ? "hsl(265 85% 62% / 0.22)" : "transparent",
+                          border: "none",
+                          color: showMobileQuickReplies ? "#c4a3ff" : "#8a8a93",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          flexShrink: 0,
+                          padding: 0,
+                        }}
+                      >
+                        <Sparkles size={17} />
+                      </button>
+
+                      <textarea
+                        ref={textareaRef}
+                        rows={1}
+                        placeholder={selectedAttachment ? "Adicione uma legenda..." : "Mensagem"}
+                        value={messageInput}
+                        onChange={(e) => {
+                          setMessageInput(e.target.value);
+                          e.currentTarget.style.height = "auto";
+                          e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 100)}px`;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          background: "transparent",
+                          border: "none",
+                          outline: "none",
+                          color: "#fafafa",
+                          fontSize: 16,
+                          resize: "none",
+                          lineHeight: 1.35,
+                          maxHeight: 100,
+                          padding: "4px 2px",
+                          margin: 0,
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isSending}
+                        title="Anexar arquivo ou mídia"
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: "50%",
+                          background: selectedAttachment ? "hsl(265 85% 62% / 0.25)" : "transparent",
+                          border: "none",
+                          color: selectedAttachment ? "#c4a3ff" : "#8a8a93",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          flexShrink: 0,
+                          padding: 0,
+                        }}
+                      >
+                        <Paperclip size={18} />
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => handleSendMessage()}
+                      disabled={(!messageInput.trim() && !selectedAttachment) || isSending}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        background:
+                          messageInput.trim() || selectedAttachment
+                            ? "linear-gradient(135deg, hsl(265 85% 62%), hsl(152 65% 45%))"
+                            : "hsl(265 85% 62% / 0.35)",
+                        border: "none",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: (messageInput.trim() || selectedAttachment) && !isSending ? "pointer" : "default",
+                        boxShadow:
+                          messageInput.trim() || selectedAttachment
+                            ? "0 4px 16px hsl(265 85% 62% / 0.45)"
+                            : "none",
+                        transition: "all 0.15s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isSending ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} style={{ marginLeft: 2 }} />}
+                    </button>
+                  </div>
+                ) : (
+                  /* ─── Desktop Input Box ─── */
+                  <div
                     style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 8,
-                      background: selectedAttachment ? "hsl(265 85% 62% / 0.25)" : "transparent",
-                      border: selectedAttachment ? "1px solid hsl(265 85% 62% / 0.5)" : "none",
-                      color: selectedAttachment ? "#c4a3ff" : "#888",
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      transition: "all 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!selectedAttachment) e.currentTarget.style.color = "#c4a3ff";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!selectedAttachment) e.currentTarget.style.color = "#888";
+                      alignItems: "flex-end",
+                      gap: 10,
+                      background: "#1d1d24",
+                      border: "1px solid #31313e",
+                      borderRadius: 12,
+                      padding: "8px 12px",
                     }}
                   >
-                    <Paperclip size={18} />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSending}
+                      title="Anexar foto, vídeo, áudio, PDF ou documento"
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 8,
+                        background: selectedAttachment ? "hsl(265 85% 62% / 0.25)" : "transparent",
+                        border: selectedAttachment ? "1px solid hsl(265 85% 62% / 0.5)" : "none",
+                        color: selectedAttachment ? "#c4a3ff" : "#888",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <Paperclip size={18} />
+                    </button>
 
-                  <textarea
-                    rows={2}
-                    placeholder={selectedAttachment ? "Adicione uma legenda..." : "Digite uma mensagem (Nexus enviará via WhatsApp)..."}
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      background: "transparent",
-                      border: "none",
-                      outline: "none",
-                      color: "#fafafa",
-                      fontSize: isMobile ? 16 : 13,
-                      resize: "none",
-                      lineHeight: 1.4,
-                    }}
-                  />
+                    <textarea
+                      rows={2}
+                      placeholder={selectedAttachment ? "Adicione uma legenda..." : "Digite uma mensagem (Nexus enviará via WhatsApp)..."}
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        color: "#fafafa",
+                        fontSize: 13,
+                        resize: "none",
+                        lineHeight: 1.4,
+                      }}
+                    />
 
-                  <button
-                    onClick={() => handleSendMessage()}
-                    disabled={(!messageInput.trim() && !selectedAttachment) || isSending}
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 10,
-                      background: (messageInput.trim() || selectedAttachment)
-                        ? "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 50%))"
-                        : "#282832",
-                      border: "none",
-                      color: (messageInput.trim() || selectedAttachment) ? "#fff" : "#666",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: (messageInput.trim() || selectedAttachment) && !isSending ? "pointer" : "not-allowed",
-                      boxShadow: (messageInput.trim() || selectedAttachment) ? "0 0 16px hsl(265 85% 62% / 0.4)" : "none",
-                      transition: "all 0.15s ease",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {isSending ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
-                  </button>
-                </div>
+                    <button
+                      onClick={() => handleSendMessage()}
+                      disabled={(!messageInput.trim() && !selectedAttachment) || isSending}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 10,
+                        background:
+                          messageInput.trim() || selectedAttachment
+                            ? "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 50%))"
+                            : "#282832",
+                        border: "none",
+                        color: messageInput.trim() || selectedAttachment ? "#fff" : "#666",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: (messageInput.trim() || selectedAttachment) && !isSending ? "pointer" : "not-allowed",
+                        boxShadow: messageInput.trim() || selectedAttachment ? "0 0 16px hsl(265 85% 62% / 0.4)" : "none",
+                        transition: "all 0.15s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isSending ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}
         </div>
 
-        {/* ─── Right Drawer: Painel 360° do Cliente ─── */}
+        {/* ─── Mobile Bottom Sheet: Invoice Selector ("Cobrar via Nexus") ─── */}
+        <AnimatePresence>
+          {isMobile && showInvoiceSelector && selectedTarget && (
+            <div
+              onClick={() => setShowInvoiceSelector(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.72)",
+                backdropFilter: "blur(6px)",
+                zIndex: 10015,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+              }}
+            >
+              <motion.div
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ duration: 0.22 }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: "#181820",
+                  borderTop: "1px solid #2e2e3d",
+                  borderTopLeftRadius: 20,
+                  borderTopRightRadius: 20,
+                  padding: "16px 16px calc(env(safe-area-inset-bottom, 0px) + 20px)",
+                  maxHeight: "75vh",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ width: 38, height: 4, borderRadius: 2, background: "#3a3a48", margin: "0 auto 4px" }} />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>Disparar Cobrança Pix</div>
+                    <div style={{ fontSize: 12, color: "#8a8a93" }}>
+                      Escolha qual fatura o Nexus deve cobrar agora no WhatsApp:
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowInvoiceSelector(false)}
+                    style={{ background: "transparent", border: "none", color: "#888", padding: 4, cursor: "pointer" }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+                  {openTransactions.map((tx) => {
+                    const isOverdue = new Date(tx.dueDate) < new Date();
+                    return (
+                      <div
+                        key={tx.id}
+                        onClick={() => handleTriggerBilling(tx.id)}
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 12,
+                          background: "#22222e",
+                          border: isOverdue ? "1px solid hsl(0 70% 58% / 0.4)" : "1px solid #323244",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#fff" }}>
+                            {tx.description || "Fatura"}
+                          </div>
+                          <div style={{ fontSize: 11.5, color: isOverdue ? "#f87171" : "#9ca3af", marginTop: 2 }}>
+                            Vencimento: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
+                            {isOverdue ? " (Em atraso)" : ""}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#c4a3ff" }}>
+                            {formatCents(tx.amount)}
+                          </div>
+                          <div style={{ fontSize: 11, color: "hsl(152 65% 55%)", fontWeight: 700, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <Zap size={12} /> Enviar Pix
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* ─── Right Drawer: Painel 360° do Cliente ("Dados do Contato" on Mobile) ─── */}
         <AnimatePresence>
           {showClientDrawer && selectedTarget && (
             <motion.div
               initial={isMobile ? { x: "100%", opacity: 0 } : { width: 0, opacity: 0 }}
               animate={isMobile ? { x: 0, opacity: 1 } : { width: 340, opacity: 1 }}
               exit={isMobile ? { x: "100%", opacity: 0 } : { width: 0, opacity: 0 }}
-              transition={{ duration: 0.25 }}
+              transition={{ duration: 0.24 }}
               style={
                 isMobile
                   ? {
                       position: "fixed",
                       inset: 0,
-                      zIndex: 9999,
-                      background: "#16161b",
+                      zIndex: 10020,
+                      background: "#111116",
                       display: "flex",
                       flexDirection: "column",
-                      height: "100%",
-                      width: "100%",
+                      height: "100dvh",
+                      width: "100vw",
                       overflow: "hidden",
                     }
                   : {
@@ -2854,36 +3829,67 @@ export function MonitoramentoPage() {
               {/* Drawer Header */}
               <div
                 style={{
-                  padding: "16px 20px",
+                  padding: isMobile ? "12px 16px" : "16px 20px",
+                  paddingTop: isMobile ? "calc(env(safe-area-inset-top, 0px) + 12px)" : "16px",
+                  background: isMobile ? "#16161d" : undefined,
                   borderBottom: "1px solid #252530",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {isMobile && (
+                    <button
+                      onClick={() => setShowClientDrawer(false)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#e4e4e7",
+                        cursor: "pointer",
+                        padding: 4,
+                        marginLeft: -4,
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <ArrowLeft size={20} />
+                    </button>
+                  )}
                   {activeConversation?.isPartner ? (
                     <>
                       <UserCheck size={16} color="#c4a3ff" />
-                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Sócio</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>Dados do Sócio</span>
                     </>
                   ) : (
                     <>
                       <SlidersHorizontal size={16} color="#c4a3ff" />
-                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Raio-X do Cliente</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>
+                        {isMobile ? "Dados do Cliente (360°)" : "Raio-X do Cliente"}
+                      </span>
                     </>
                   )}
                 </div>
                 <button
                   onClick={() => setShowClientDrawer(false)}
-                  style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer" }}
+                  style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", padding: 4 }}
                 >
                   <X size={18} />
                 </button>
               </div>
 
               {/* Drawer Content */}
-              <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: "auto",
+                  WebkitOverflowScrolling: "touch",
+                  padding: "16px 20px calc(env(safe-area-inset-bottom, 0px) + 24px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                }}
+              >
                 {activeConversation?.isPartner ? (
                   <>
                     {/* Partner Profile Card */}
@@ -2891,7 +3897,7 @@ export function MonitoramentoPage() {
                       style={{
                         padding: 14,
                         background: "#1c1c24",
-                        borderRadius: 10,
+                        borderRadius: 12,
                         border: "1px solid #2b2b38",
                       }}
                     >
@@ -2900,11 +3906,11 @@ export function MonitoramentoPage() {
                           name={activeConversation.clientName}
                           photoUrl={activeConversation.photoUrl}
                           isPartner={true}
-                          size={46}
+                          size={48}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {activeConversation.clientName}
                             </div>
                             <span
@@ -2935,21 +3941,21 @@ export function MonitoramentoPage() {
 
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span style={{ fontSize: 11, color: "#888" }}>Status no Grupo</span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: "hsl(152 65% 55%)" }}>
-                          ✓ Ativo no Teltech Group
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "hsl(152 65% 55%)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <Check size={12} /> Ativo no Teltech Group
                         </span>
                       </div>
                     </div>
 
                     {/* Partner Financial Summary */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                      <div style={{ padding: 12, background: "#1c1c24", borderRadius: 10, border: "1px solid #2b2b38" }}>
                         <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Retiradas / Saídas</div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
                           {formatCents(allTransactions.filter((t) => t.type === "outflow").reduce((a, b) => a + b.amount, 0))}
                         </div>
                       </div>
-                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                      <div style={{ padding: 12, background: "#1c1c24", borderRadius: 10, border: "1px solid #2b2b38" }}>
                         <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Movimentações</div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
                           {allTransactions.length} registro(s)
@@ -2976,7 +3982,7 @@ export function MonitoramentoPage() {
                                 key={tx.id}
                                 style={{
                                   padding: "10px 12px",
-                                  borderRadius: 8,
+                                  borderRadius: 10,
                                   background: "#1c1c24",
                                   border: "1px solid #2b2b38",
                                 }}
@@ -3023,7 +4029,7 @@ export function MonitoramentoPage() {
                       style={{
                         padding: 14,
                         background: "#1c1c24",
-                        borderRadius: 10,
+                        borderRadius: 12,
                         border: "1px solid #2b2b38",
                       }}
                     >
@@ -3032,10 +4038,10 @@ export function MonitoramentoPage() {
                           name={activeConversation?.clientName || "Cliente"}
                           photoUrl={activeConversation?.photoUrl}
                           isPartner={false}
-                          size={46}
+                          size={48}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {activeConversation?.clientName}
                           </div>
                           <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
@@ -3049,37 +4055,42 @@ export function MonitoramentoPage() {
                         </div>
                       </div>
 
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: 11, color: "#888" }}>WhatsApp Opt-in</span>
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #272734", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, color: "#9ca3af" }}>Consentimento WhatsApp (Opt-in)</span>
                         <button
                           onClick={handleToggleOptIn}
+                          disabled={isTogglingOptIn}
                           style={{
-                            padding: "3px 8px",
-                            borderRadius: 6,
+                            padding: "4px 10px",
+                            borderRadius: 8,
                             background: activeConversation?.optIn ? "hsl(152 65% 45% / 0.2)" : "#2a2a36",
-                            border: "none",
-                            color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#888",
-                            fontSize: 10,
+                            border: activeConversation?.optIn ? "1px solid hsl(152 65% 45% / 0.4)" : "1px solid #3a3a48",
+                            color: activeConversation?.optIn ? "hsl(152 65% 55%)" : "#9ca3af",
+                            fontSize: 11,
                             fontWeight: 700,
                             cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
                           }}
                         >
-                          {activeConversation?.optIn ? "Ativo" : "Inativo"}
+                          {activeConversation?.optIn && <Check size={12} />}
+                          {activeConversation?.optIn ? "Opt-in Ativo" : "Sem Opt-in"}
                         </button>
                       </div>
                     </div>
 
                     {/* Financial Summary */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                      <div style={{ padding: 12, background: "#1c1c24", borderRadius: 10, border: "1px solid #2b2b38" }}>
                         <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Total Aberto</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#c4a3ff", marginTop: 2 }}>
                           {formatCents(allTransactions.filter((t) => t.status === "pending").reduce((a, b) => a + b.amount, 0))}
                         </div>
                       </div>
-                      <div style={{ padding: 10, background: "#1c1c24", borderRadius: 8, border: "1px solid #2b2b38" }}>
+                      <div style={{ padding: 12, background: "#1c1c24", borderRadius: 10, border: "1px solid #2b2b38" }}>
                         <div style={{ fontSize: 10, color: "#888", textTransform: "uppercase", fontWeight: 700 }}>Em Atraso</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "hsl(0 70% 65%)", marginTop: 2 }}>
                           {formatCents(allTransactions.filter((t) => t.status === "pending" && new Date(t.dueDate) < new Date()).reduce((a, b) => a + b.amount, 0))}
                         </div>
                       </div>
@@ -3105,8 +4116,8 @@ export function MonitoramentoPage() {
                               <div
                                 key={tx.id}
                                 style={{
-                                  padding: "10px 12px",
-                                  borderRadius: 8,
+                                  padding: "12px 14px",
+                                  borderRadius: 10,
                                   background: isPaid ? "#171f1a" : "#1c1c24",
                                   border: isPaid
                                     ? "1px solid hsl(152 65% 45% / 0.3)"
@@ -3117,21 +4128,21 @@ export function MonitoramentoPage() {
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                                   <div>
-                                    <div style={{ fontSize: 12, fontWeight: 600, color: "#eee" }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#eee" }}>
                                       {tx.description || "Fatura"}
                                     </div>
-                                    <div style={{ fontSize: 10, color: isOverdue ? "#ff7b7b" : "#888", marginTop: 2 }}>
+                                    <div style={{ fontSize: 11, color: isOverdue ? "#ff7b7b" : "#888", marginTop: 2 }}>
                                       Vencimento: {new Date(tx.dueDate).toLocaleDateString("pt-BR")}
                                     </div>
                                   </div>
                                   <div style={{ textAlign: "right" }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: isPaid ? "hsl(152 65% 55%)" : "#c4a3ff" }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: isPaid ? "hsl(152 65% 55%)" : "#c4a3ff" }}>
                                       {formatCents(tx.amount)}
                                     </div>
                                     <span
                                       style={{
                                         fontSize: 9,
-                                        padding: "1px 5px",
+                                        padding: "1px 6px",
                                         borderRadius: 4,
                                         background: isPaid ? "hsl(152 65% 45% / 0.2)" : isOverdue ? "hsl(0 70% 58% / 0.2)" : "#282835",
                                         color: isPaid ? "hsl(152 65% 60%)" : isOverdue ? "hsl(0 70% 65%)" : "#aaa",
@@ -3146,24 +4157,31 @@ export function MonitoramentoPage() {
 
                                 {/* Actions for Pending Invoices */}
                                 {!isPaid && (
-                                  <div style={{ display: "flex", gap: 6, marginTop: 10, paddingTop: 8, borderTop: "1px solid #282836" }}>
+                                  <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid #282836" }}>
                                     <button
-                                      onClick={() => handleTriggerBilling(tx.id)}
+                                      onClick={() => {
+                                        handleTriggerBilling(tx.id);
+                                        if (isMobile) setShowClientDrawer(false);
+                                      }}
                                       disabled={isTriggeringBilling}
                                       title="Dispara cobrança com código Pix no WhatsApp"
                                       style={{
                                         flex: 1,
-                                        padding: "5px 8px",
-                                        borderRadius: 6,
+                                        padding: "7px 10px",
+                                        borderRadius: 8,
                                         background: "linear-gradient(135deg, hsl(265 85% 62%), hsl(265 85% 52%))",
                                         border: "none",
                                         color: "#fff",
-                                        fontSize: 10,
+                                        fontSize: 11,
                                         fontWeight: 700,
                                         cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: 5,
                                       }}
                                     >
-                                      ⚡ Cobrar Pix
+                                      <Zap size={13} /> Cobrar Pix
                                     </button>
                                     <button
                                       onClick={() => handleMarkPaid(tx.id)}
@@ -3171,17 +4189,22 @@ export function MonitoramentoPage() {
                                       title="Registra quitação e envia recibo automático"
                                       style={{
                                         flex: 1,
-                                        padding: "5px 8px",
-                                        borderRadius: 6,
+                                        padding: "7px 10px",
+                                        borderRadius: 8,
                                         background: "hsl(152 65% 45% / 0.2)",
                                         border: "1px solid hsl(152 65% 45% / 0.4)",
                                         color: "hsl(152 65% 60%)",
-                                        fontSize: 10,
+                                        fontSize: 11,
                                         fontWeight: 700,
                                         cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: 5,
                                       }}
                                     >
-                                      {isMarkingPaid === tx.id ? "Baixando..." : "✅ Dar Baixa"}
+                                      <CheckCircle2 size={13} />
+                                      {isMarkingPaid === tx.id ? "Baixando..." : "Dar Baixa"}
                                     </button>
                                   </div>
                                 )}
@@ -3211,7 +4234,7 @@ export function MonitoramentoPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 100,
+              zIndex: 10030,
               padding: 20,
             }}
           >
@@ -3257,7 +4280,7 @@ export function MonitoramentoPage() {
                     <img src={stats.status.qr} alt="QR Code WhatsApp" style={{ width: 220, height: 220, display: "block" }} />
                   </div>
                   <p style={{ fontSize: 12, color: "#aaa", marginTop: 12 }}>
-                    Abra o WhatsApp no celular ➔ Aparelhos Conectados ➔ Conectar Aparelho e aponte para o código.
+                    Abra o WhatsApp no celular <ChevronRight size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Aparelhos Conectados <ChevronRight size={12} style={{ display: "inline", verticalAlign: "middle" }} /> Conectar Aparelho e aponte para o código.
                   </p>
                 </div>
               ) : (
@@ -3309,7 +4332,7 @@ export function MonitoramentoPage() {
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 200,
+              zIndex: 10040,
               padding: 24,
             }}
           >
@@ -3404,7 +4427,7 @@ export function MonitoramentoPage() {
             style={{
               position: "fixed",
               inset: 0,
-              zIndex: 10000,
+              zIndex: 10050,
               background: "rgba(0, 0, 0, 0.75)",
               backdropFilter: "blur(6px)",
               display: "flex",

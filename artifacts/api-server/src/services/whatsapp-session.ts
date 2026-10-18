@@ -267,35 +267,35 @@ export function extractMessageText(rawMessage: any): string | null {
     return message.listResponseMessage.title.trim();
   }
   if (typeof message.imageMessage?.caption === "string" && message.imageMessage.caption.trim()) {
-    return `📷 [Imagem]: ${message.imageMessage.caption.trim()}`;
+    return `[Imagem]: ${message.imageMessage.caption.trim()}`;
   }
   if (message.imageMessage) {
-    return "📷 [Imagem / Foto]";
+    return "[Imagem / Foto]";
   }
   if (typeof message.documentMessage?.caption === "string" && message.documentMessage.caption.trim()) {
     const fn = message.documentMessage.fileName || "Documento";
-    return `📄 [Documento: ${fn}] ${message.documentMessage.caption.trim()}`;
+    return `[Documento: ${fn}] ${message.documentMessage.caption.trim()}`;
   }
   if (message.documentMessage) {
     const filename = message.documentMessage.fileName || "Documento";
-    return `📄 [Documento: ${filename}]`;
+    return `[Documento: ${filename}]`;
   }
   if (message.audioMessage) {
     const sec = message.audioMessage.seconds ? ` (${message.audioMessage.seconds}s)` : "";
-    return `🎵 [Mensagem de Áudio${sec}]`;
+    return `[Mensagem de Áudio${sec}]`;
   }
   if (message.videoMessage) {
     const caption = message.videoMessage.caption ? `: ${message.videoMessage.caption.trim()}` : "";
-    return `🎥 [Vídeo${caption}]`;
+    return `[Vídeo${caption}]`;
   }
   if (message.stickerMessage) {
-    return "💟 [Figurinha]";
+    return "[Figurinha]";
   }
   if (message.contactMessage) {
-    return "👤 [Contato]";
+    return "[Contato]";
   }
   if (message.locationMessage) {
-    return "📍 [Localização]";
+    return "[Localização]";
   }
   return null;
 }
@@ -574,10 +574,10 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         let previewText = text?.trim() || "";
         if (!previewText && mediaResult.mediaType) {
           const mediaNames: Record<string, string> = {
-            audio: "Mensagem de áudio 🎙️",
-            image: "Foto enviada 📷",
-            video: "Vídeo enviado 🎥",
-            document: mediaResult.mediaFilename ? `Documento: ${mediaResult.mediaFilename} 📄` : "Documento / PDF 📄",
+            audio: "Mensagem de áudio",
+            image: "Foto enviada",
+            video: "Vídeo enviado",
+            document: mediaResult.mediaFilename ? `Documento: ${mediaResult.mediaFilename}` : "Documento / PDF",
           };
           previewText = mediaNames[mediaResult.mediaType] || "Arquivo de mídia recebido";
         }
@@ -1111,10 +1111,10 @@ export async function sendManualMediaMessage(
 
   let body = media.caption || "";
   if (!body) {
-    if (media.mediaType === "image") body = "📷 [Imagem / Foto]";
-    else if (media.mediaType === "audio") body = "🎵 [Mensagem de Áudio]";
-    else if (media.mediaType === "video") body = "🎥 [Vídeo]";
-    else body = `📄 [Documento: ${media.filename || "arquivo"}]`;
+    if (media.mediaType === "image") body = "[Imagem / Foto]";
+    else if (media.mediaType === "audio") body = "[Mensagem de Áudio]";
+    else if (media.mediaType === "video") body = "[Vídeo]";
+    else body = `[Documento: ${media.filename || "arquivo"}]`;
   }
 
   const [created] = await db.insert(whatsappMessagesTable).values({

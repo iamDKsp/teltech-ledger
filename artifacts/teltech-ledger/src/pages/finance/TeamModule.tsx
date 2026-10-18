@@ -271,7 +271,7 @@ export function TeamModule({
         toast.success(`Folha fechada! ${res.createdTransactionsCount} lançamento(s) gerado(s) no Livro Caixa.`);
         if (res.promotedMembers?.length > 0) {
           res.promotedMembers.forEach((p: any) => {
-            toast.success(`🔥 Level Up: ${p.name} bateu 3 meses seguidos e subiu para o Nível ${p.newLevel}!`);
+            toast.success(`Level Up: ${p.name} bateu 3 meses seguidos e subiu para o Nível ${p.newLevel}!`);
           });
         }
         setPayrollModalOpen(false);
@@ -898,7 +898,7 @@ export function TeamModule({
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "right", color: fin.bonusEarned > 0 ? "#10B981" : "#52525b", fontWeight: fin.bonusEarned > 0 ? 700 : 400 }}>
                         {brl(fin.bonusEarned)}
-                        {met.targetAchieved && <span style={{ fontSize: 9, marginLeft: 4, color: "#10B981" }}>✓</span>}
+                        {met.targetAchieved && <Check size={11} style={{ display: "inline", marginLeft: 4, color: "#10B981", verticalAlign: "middle" }} />}
                       </td>
                       <td style={{ padding: "12px 14px", textAlign: "right", color: fin.projectCommission > 0 ? "#10B981" : "#52525b" }}>
                         {brl(fin.projectCommission)}

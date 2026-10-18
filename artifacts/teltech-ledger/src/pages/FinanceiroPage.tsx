@@ -5286,8 +5286,8 @@ function CockpitView({
                               {item.clientName || item.description}
                             </span>
                             {item.clientPhone && (
-                              <span style={{ fontSize: 11, color: "#25D366", fontWeight: 600 }}>
-                                📱 {item.clientPhone}
+                              <span style={{ fontSize: 11, color: "#25D366", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <MessageSquare size={11} /> {item.clientPhone}
                               </span>
                             )}
                           </div>

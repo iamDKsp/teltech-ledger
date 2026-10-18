@@ -720,11 +720,12 @@ export function StrategicGoalsModule({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {[
-            { id: "gradual", label: "🐢 Conservador (Pé no chão)", hint: "Começa com 3 PDVs e cresce gradual" },
-            { id: "simulation", label: "⚡ Equilibrado (6 PDV + Shark)", hint: "O modelo da simulação estratégica" },
-            { id: "pdvFocus", label: "🔥 Foco no Giro do PDV", hint: "Explora o alto volume do comércio local" },
+            { id: "gradual", label: "Conservador (Pé no chão)", icon: ShieldCheck, hint: "Começa com 3 PDVs e cresce gradual" },
+            { id: "simulation", label: "Equilibrado (6 PDV + Shark)", icon: Zap, hint: "O modelo da simulação estratégica" },
+            { id: "pdvFocus", label: "Foco no Giro do PDV", icon: TrendingUp, hint: "Explora o alto volume do comércio local" },
           ].map((ps) => {
             const isSel = activePreset === ps.id;
+            const IconComp = ps.icon;
             return (
               <button
                 key={ps.id}
@@ -739,8 +740,12 @@ export function StrategicGoalsModule({
                   fontSize: 12,
                   fontWeight: isSel ? 700 : 500,
                   cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
+                <IconComp size={13} />
                 {ps.label}
               </button>
             );

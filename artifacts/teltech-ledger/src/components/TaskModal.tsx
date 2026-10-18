@@ -232,7 +232,9 @@ export function TaskModal({ task: initialTask, colId: initialColId, onClose, onS
     
     if (!initialLoadDone.current) return;
     patchTask({
-      [key === "colId" ? "columnId" : key]: val && key === "dueDate" ? new Date(val).toISOString() : val
+      [key === "colId" ? "columnId" : key]: key === "dueDate"
+        ? (val ? new Date(val + "T12:00:00").toISOString() : null)
+        : val
     });
   };
 

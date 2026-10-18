@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Plus, Trash2, Repeat2, Receipt, AlertTriangle, ChevronDown, Layers, Sparkles, Pause, Play, Ban } from "lucide-react";
+import { Plus, Trash2, Repeat2, Receipt, AlertTriangle, ChevronDown, Layers, Sparkles, Pause, Play, Ban, Check } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "../../lib/api";
 import { Drawer, Select, Checkbox, DateInput, drawerBtn, confirmDialog } from "../../components/finance-ui";
@@ -169,7 +169,7 @@ function SectionCard({ active, onToggle, icon, title, subtitle, children }: {
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
       >
         <span style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${active ? "#8B5CF6" : "#555"}`, background: active ? "#8B5CF6" : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 800 }}>
-          {active ? "✓" : ""}
+          {active ? <Check size={12} strokeWidth={3} /> : null}
         </span>
         <span style={{ color: active ? "#A78BFA" : "#888", display: "inline-flex" }}>{icon}</span>
         <span style={{ display: "flex", flexDirection: "column" }}>

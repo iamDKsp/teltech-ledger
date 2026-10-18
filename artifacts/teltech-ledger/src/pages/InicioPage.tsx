@@ -41,6 +41,9 @@ interface DashboardData {
     date: string;
   };
   todaysTasks: any[];
+  allPendingTasks?: any[];
+  todaysStrictCount?: number;
+  showingFallbackTasks?: boolean;
   overdueTasksCount: number;
   completedTodayCount: number;
   totalActiveProjectsCount: number;
@@ -63,6 +66,7 @@ export function InicioPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [vencimentoFilter, setVencimentoFilter] = useState<"todos" | "overdue" | "today" | "upcoming">("todos");
+  const [showAllTasks, setShowAllTasks] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -133,6 +137,28 @@ export function InicioPage() {
       default: return "Normal";
     }
   };
+
+  const todayDateKey = format(new Date(), "yyyy-MM-dd");
+  const formatTaskDueInfo = (task: any) => {
+    if (!task.dueDate) {
+      return { label: "Sem prazo", color: "#71717a" };
+    }
+    const dateKey = new Date(task.dueDate).toISOString().slice(0, 10);
+    const parsedDate = new Date(dateKey + "T12:00:00");
+    const shortDate = format(parsedDate, "dd 'de' MMM", { locale: ptBR });
+
+    if (dateKey === todayDateKey) {
+      return { label: "Hoje", color: "#f59e0b" };
+    }
+    if (dateKey < todayDateKey) {
+      return { label: `Atrasada • ${shortDate}`, color: "#ef4444" };
+    }
+    return { label: shortDate, color: "#a1a1aa" };
+  };
+
+  const displayedTasks = showAllTasks && data.allPendingTasks
+    ? data.allPendingTasks
+    : data.todaysTasks;
 
   return (
     <div className="responsive-page-pad" style={{
@@ -747,55 +773,130 @@ export function InicioPage() {
           flexDirection: "column",
           gap: "16px"
         }}>
-          <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "600", color: "#fafafa" }}>Tarefas de Hoje</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "600", color: "#fafafa" }}>Tarefas de Hoje</h2>
+                {data.showingFallbackTasks && (
+                  <span style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    backgroundColor: "rgba(124, 90, 194, 0.16)",
+                    color: "#c4b5fd",
+                    border: "1px solid rgba(124, 90, 194, 0.3)"
+                  }}>
+                    Próximas por vencimento
+                  </span>
+                )}
+              </div>
+              {data.showingFallbackTasks && (
+                <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#888" }}>
+                  Nenhuma tarefa agendada para hoje — exibindo pendentes da mais próxima de vencer até a mais distante.
+                </p>
+              )}
+            </div>
+
+            {(data.todaysStrictCount || 0) > 0 && (data.allPendingTasks?.length || 0) > (data.todaysStrictCount || 0) && (
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => setShowAllTasks(false)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    border: !showAllTasks ? "1px solid #7C5AC2" : "1px solid rgba(255,255,255,0.08)",
+                    background: !showAllTasks ? "rgba(124,90,194,0.2)" : "rgba(255,255,255,0.04)",
+                    color: !showAllTasks ? "#fff" : "#aaa",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer"
+                  }}
+                >
+                  Hoje ({data.todaysStrictCount})
+                </button>
+                <button
+                  onClick={() => setShowAllTasks(true)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    border: showAllTasks ? "1px solid #7C5AC2" : "1px solid rgba(255,255,255,0.08)",
+                    background: showAllTasks ? "rgba(124,90,194,0.2)" : "rgba(255,255,255,0.04)",
+                    color: showAllTasks ? "#fff" : "#aaa",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer"
+                  }}
+                >
+                  Todas ({data.allPendingTasks?.length})
+                </button>
+              </div>
+            )}
+          </div>
           
           <div style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "auto" }}>
-            {data.todaysTasks.length === 0 ? (
+            {displayedTasks.length === 0 ? (
               <div style={{ textAlign: "center", color: "#888", padding: "32px" }}>
                 <p>Nenhuma tarefa pendente para hoje. Bom trabalho!</p>
               </div>
             ) : (
-              data.todaysTasks.map(task => (
-                <div key={task.id} style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "16px",
-                  backgroundColor: "#232326",
-                  border: "1px solid #313136",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  transition: "all 0.2s"
-                }}
-                onMouseOver={(e) => e.currentTarget.style.borderColor = "#4a4a52"}
-                onMouseOut={(e) => e.currentTarget.style.borderColor = "#313136"}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div style={{ width: "12px", height: "12px", borderRadius: "50%", backgroundColor: task.projectColor || "#7C5AC2" }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <span style={{ fontSize: "15px", fontWeight: "500", color: "#e0e0e0" }}>{task.title}</span>
-                      <span style={{ fontSize: "13px", color: "#888" }}>{task.projectName}</span>
+              displayedTasks.map(task => {
+                const dueInfo = formatTaskDueInfo(task);
+                return (
+                  <div
+                    key={task.id}
+                    onClick={() => {
+                      if (task.projectId) {
+                        navigate(`/projetos/${task.projectId}/quadros`);
+                      } else {
+                        navigate("/minhas-tarefas");
+                      }
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "16px",
+                      backgroundColor: "#232326",
+                      border: "1px solid #313136",
+                      borderRadius: "8px",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      gap: "12px",
+                      flexWrap: "wrap"
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.borderColor = "#4a4a52"}
+                    onMouseOut={(e) => e.currentTarget.style.borderColor = "#313136"}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+                      <div style={{ width: "12px", height: "12px", borderRadius: "50%", backgroundColor: task.projectColor || "#7C5AC2", flexShrink: 0 }} />
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0 }}>
+                        <span style={{ fontSize: "15px", fontWeight: "500", color: "#e0e0e0" }}>{task.title}</span>
+                        <span style={{ fontSize: "13px", color: "#888" }}>
+                          {task.projectName}{task.columnTitle ? ` • ${task.columnTitle}` : ""}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+                      <span style={{
+                        fontSize: "12px",
+                        padding: "4px 8px",
+                        borderRadius: "12px",
+                        backgroundColor: `${getPriorityColor(task.priority)}22`,
+                        color: getPriorityColor(task.priority),
+                        fontWeight: "500"
+                      }}>
+                        {getPriorityLabel(task.priority)}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", color: dueInfo.color, fontSize: "13px", fontWeight: task.urgencyGroup === "today" || task.urgencyGroup === "overdue" ? 600 : 400 }}>
+                        <Clock size={14} />
+                        <span>{dueInfo.label}</span>
+                      </div>
                     </div>
                   </div>
-                  
-                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <span style={{
-                      fontSize: "12px",
-                      padding: "4px 8px",
-                      borderRadius: "12px",
-                      backgroundColor: `${getPriorityColor(task.priority)}22`,
-                      color: getPriorityColor(task.priority),
-                      fontWeight: "500"
-                    }}>
-                      {getPriorityLabel(task.priority)}
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#a1a1aa", fontSize: "13px" }}>
-                      <Clock size={14} />
-                      <span>{format(new Date(task.dueDate), "HH:mm")}</span>
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
