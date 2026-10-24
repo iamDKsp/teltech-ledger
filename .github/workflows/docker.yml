@@ -37,6 +37,8 @@ jobs:
           file: ./Dockerfile.api
           push: true
           tags: ghcr.io/${{ steps.repo_owner.outputs.owner }}/teltech-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
 
       - name: Build and push Web Image
         uses: docker/build-push-action@v5
@@ -45,3 +47,5 @@ jobs:
           file: ./Dockerfile.web
           push: true
           tags: ghcr.io/${{ steps.repo_owner.outputs.owner }}/teltech-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

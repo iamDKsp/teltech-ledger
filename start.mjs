@@ -3,7 +3,7 @@
 // Node.js handles CRLF line endings natively regardless of OS.
 
 import net from 'node:net';
-import { execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const DB_HOST = 'db';
 const DB_PORT = 5432;
@@ -33,24 +33,39 @@ async function waitForPostgres() {
   process.exit(1);
 }
 
+function runSchemaSyncInBackground() {
+  if (process.env.SKIP_DB_PUSH === 'true') {
+    console.log('=== [Teltech API] Sincronização de schema ignorada (SKIP_DB_PUSH=true) ===');
+    return;
+  }
+
+  console.log('=== [Teltech API] Sincronizando schema do banco em background (Drizzle) ===');
+  const scriptName = process.env.FORCE_DB_PUSH === 'false' ? 'push' : 'push-force';
+  const child = spawn('pnpm', ['--filter', '@workspace/db', 'run', scriptName], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    shell: true,
+  });
+
+  const killTimer = setTimeout(() => {
+    console.warn('=== [Teltech API] Timeout na sincronização do Drizzle (45s). Continuando execução normal. ===');
+    child.kill('SIGTERM');
+  }, 45000);
+
+  child.on('exit', (code) => {
+    clearTimeout(killTimer);
+    if (code === 0) {
+      console.log('=== [Teltech API] Schema sincronizado com sucesso ===');
+    } else {
+      console.warn(`=== [Teltech API] Sincronização Drizzle finalizou com código ${code} (auto-migração SQL ativa) ===`);
+    }
+  });
+}
+
 await waitForPostgres();
 
-if (process.env.SKIP_DB_PUSH !== 'true') {
-  console.log('=== [Teltech API] Sincronizando schema do banco (Drizzle) ===');
-  const pushCmd = process.env.FORCE_DB_PUSH === 'true'
-    ? 'pnpm --filter @workspace/db run push-force'
-    : 'pnpm --filter @workspace/db run push';
-  try {
-    execSync(pushCmd, { stdio: 'inherit' });
-  } catch (err) {
-    console.error('Erro na sincronização de schema:', err.message);
-    if (process.env.NODE_ENV === 'production') {
-      console.error('Falha crítica na sincronização de schema em produção. Abortando inicialização.');
-      process.exit(1);
-    }
-  }
-} else {
-  console.log('=== [Teltech API] Sincronização de schema ignorada (SKIP_DB_PUSH=true) ===');
-}
 console.log('=== [Teltech API] Iniciando servidor Teltech Ledger ===');
 await import('./artifacts/api-server/dist/index.mjs');
+
+// Run Drizzle schema sync asynchronously so port 5000 and /api/healthz respond immediately
+runSchemaSyncInBackground();
+

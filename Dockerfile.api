@@ -12,14 +12,24 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Copy workspace files with clean lockfile (no @replit/*, no teltech-mobile)
+# Copy root workspace manifests first to maximize Docker layer caching
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+COPY lib/api-client-react/package.json ./lib/api-client-react/package.json
+COPY lib/api-spec/package.json ./lib/api-spec/package.json
+COPY lib/api-zod/package.json ./lib/api-zod/package.json
+COPY lib/db/package.json ./lib/db/package.json
+COPY scripts/package.json ./scripts/package.json
+COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
+COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
+COPY artifacts/teltech-ledger/package.json ./artifacts/teltech-ledger/package.json
+
+# Install dependencies using frozen lockfile (cached unless lockfile/package.json changes)
+RUN pnpm install --frozen-lockfile
+
+# Copy source files
 COPY lib/ ./lib/
 COPY scripts/ ./scripts/
-COPY artifacts/ ./artifacts/
-
-# Install dependencies using frozen lockfile for reproducibility
-RUN pnpm install --frozen-lockfile
+COPY artifacts/api-server/ ./artifacts/api-server/
 
 # Build api-server
 RUN pnpm --filter @workspace/api-server run build

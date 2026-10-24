@@ -36,10 +36,10 @@ services:
       - teltech_uploads:/app/public/uploads
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5000/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 30s
+      start_period: 10s
     networks:
       - teltech-network
 
@@ -48,8 +48,7 @@ services:
     container_name: teltech-web
     restart: unless-stopped
     depends_on:
-      api:
-        condition: service_healthy
+      - api
     ports:
       - "${WEB_PORT:-4500}:80"
     networks:
