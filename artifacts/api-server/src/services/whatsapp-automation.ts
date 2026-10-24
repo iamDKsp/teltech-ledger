@@ -663,6 +663,7 @@ async function processNextMessage(): Promise<void> {
 
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let workerTimer: ReturnType<typeof setInterval> | null = null;
+let sessionWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 let schedulerBusy = false;
 async function scheduleTick(): Promise<void> {
   if (schedulerBusy) return;
@@ -679,14 +680,32 @@ export function triggerImmediateWorker(): void {
 }
 
 export async function startWhatsAppAutomation(): Promise<void> {
-  if (schedulerTimer || workerTimer) return;
-  await restoreWhatsAppSessions();
+  if (schedulerTimer || workerTimer || sessionWatchdogTimer) return;
+  try {
+    await restoreWhatsAppSessions();
+  } catch (error) {
+    logger.warn({ err: error }, "Initial WhatsApp session restore failed; watchdog will retry");
+  }
+  // Quick follow-up restore after 5s in case DB schema sync was still finishing at boot
+  const bootRetry = setTimeout(() => {
+    void restoreWhatsAppSessions().catch((error) =>
+      logger.warn({ err: error }, "Boot retry WhatsApp session restore failed")
+    );
+  }, 5_000);
+  bootRetry.unref?.();
+
+  sessionWatchdogTimer = setInterval(() => {
+    void restoreWhatsAppSessions().catch((error) =>
+      logger.error({ err: error }, "WhatsApp session watchdog failed")
+    );
+  }, 15_000);
   schedulerTimer = setInterval(() => {
     void scheduleTick().catch((error) => logger.error({ err: error }, "WhatsApp scheduler failed"));
   }, 60_000);
   workerTimer = setInterval(() => {
     void processNextMessage().catch((error) => logger.error({ err: error }, "WhatsApp outbox worker failed"));
   }, 5_000);
+  sessionWatchdogTimer.unref?.();
   schedulerTimer.unref?.();
   workerTimer.unref?.();
   void scheduleTick().catch((error) => logger.error({ err: error }, "WhatsApp initial scheduler failed"));
@@ -694,8 +713,10 @@ export async function startWhatsAppAutomation(): Promise<void> {
 }
 
 export async function stopWhatsAppAutomation(): Promise<void> {
+  if (sessionWatchdogTimer) clearInterval(sessionWatchdogTimer);
   if (schedulerTimer) clearInterval(schedulerTimer);
   if (workerTimer) clearInterval(workerTimer);
+  sessionWatchdogTimer = null;
   schedulerTimer = null;
   workerTimer = null;
   await stopWhatsAppSessions();

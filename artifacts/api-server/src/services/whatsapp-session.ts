@@ -16,7 +16,9 @@ import QRCode from "qrcode";
 import { logger } from "../lib/logger";
 import {
   clearWhatsAppAuth,
+  extractPhoneFromCreds,
   isWhatsAppEncryptionConfigured,
+  readStoredWhatsAppCredsInfo,
   useEncryptedDbAuthState,
 } from "./whatsapp-auth";
 import { sendPushNotificationToWorkspace } from "./push-notification";
@@ -31,6 +33,7 @@ type Session = {
   lastError: string | null;
   reconnectAttempt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  connectTimeoutTimer: ReturnType<typeof setTimeout> | null;
   stopped: boolean;
   flushCreds: () => Promise<void>;
 };
@@ -616,15 +619,24 @@ function disconnectedReason(error: unknown): number | undefined {
   return (error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
 }
 
-function scheduleReconnect(workspaceId: string, session: Session): void {
+function scheduleReconnect(workspaceId: string, session: Session, immediate = false): void {
   if (session.stopped || sessions.get(workspaceId) !== session) return;
-  const delay = Math.min(300_000, 5_000 * 2 ** Math.min(session.reconnectAttempt, 6));
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
+  const delay = immediate
+    ? 500
+    : Math.min(25_000, 1_500 * 2 ** Math.min(session.reconnectAttempt, 4));
   session.reconnectAttempt += 1;
   session.reconnectTimer = setTimeout(() => {
+    session.reconnectTimer = null;
     if (sessions.get(workspaceId) !== session || session.stopped) return;
-    sessions.delete(workspaceId);
     void connectWhatsApp(workspaceId).catch((error) => {
-      logger.error({ err: error, workspaceId }, "WhatsApp reconnect failed");
+      logger.error({ err: error, workspaceId }, "WhatsApp reconnect failed; scheduling retry");
+      if (sessions.get(workspaceId) === session && !session.stopped) {
+        scheduleReconnect(workspaceId, session, false);
+      }
     });
   }, delay);
   session.reconnectTimer.unref?.();
@@ -634,11 +646,27 @@ async function createSocket(workspaceId: string): Promise<void> {
   await finalizing.get(workspaceId);
   if (!isWhatsAppEncryptionConfigured()) throw new Error("WHATSAPP_SESSION_KEY não configurada ou inválida");
   const existing = sessions.get(workspaceId);
-  if (existing && ["connecting", "qr", "connected"].includes(existing.status)) return;
-  if (existing?.reconnectTimer) clearTimeout(existing.reconnectTimer);
-  await existing?.socket.end(undefined).catch(() => undefined);
+  if (existing && !existing.stopped && ["connecting", "qr", "connected"].includes(existing.status)) return;
+
+  const previousAttempt = existing?.reconnectAttempt ?? 0;
+  const previousPhone = existing?.phone ?? null;
+
+  if (existing) {
+    existing.stopped = true;
+    if (existing.reconnectTimer) {
+      clearTimeout(existing.reconnectTimer);
+      existing.reconnectTimer = null;
+    }
+    if (existing.connectTimeoutTimer) {
+      clearTimeout(existing.connectTimeoutTimer);
+      existing.connectTimeoutTimer = null;
+    }
+    await existing.socket.end(undefined).catch(() => undefined);
+    await existing.flushCreds().catch(() => undefined);
+  }
 
   const { state, saveCreds } = await useEncryptedDbAuthState(workspaceId);
+  const initialPhone = extractPhoneFromCreds(state.creds) ?? previousPhone;
   const socket = makeWASocket({
     auth: state,
     logger: baileysLogger,
@@ -650,18 +678,39 @@ async function createSocket(workspaceId: string): Promise<void> {
     socket,
     status: "connecting",
     qr: null,
-    phone: null,
+    phone: initialPhone,
     connectedAt: null,
     lastError: null,
-    reconnectAttempt: existing?.reconnectAttempt ?? 0,
+    reconnectAttempt: previousAttempt,
     reconnectTimer: null,
+    connectTimeoutTimer: null,
     stopped: false,
     flushCreds: saveCreds,
   };
   sessions.set(workspaceId, session);
 
-  socket.ev.on("creds.update", () => {
+  // Watchdog: if the socket stays stuck in "connecting" for > 40s, force a clean reconnect
+  session.connectTimeoutTimer = setTimeout(() => {
+    session.connectTimeoutTimer = null;
     if (sessions.get(workspaceId) !== session || session.stopped) return;
+    if (session.status === "connecting") {
+      logger.warn({ workspaceId }, "WhatsApp connection handshake timed out; forcing reconnect");
+      session.status = "disconnected";
+      void socket.end(undefined).catch(() => undefined);
+      scheduleReconnect(workspaceId, session, false);
+    }
+  }, 40_000);
+  session.connectTimeoutTimer.unref?.();
+
+  socket.ev.on("creds.update", (update) => {
+    if (update && typeof update === "object") {
+      Object.assign(state.creds, update);
+    }
+    const updatedPhone = extractPhoneFromCreds(state.creds);
+    if (updatedPhone) {
+      session.phone = updatedPhone;
+    }
+    if (session.status === "logged_out") return;
     void saveCreds().catch((error) => {
       session.lastError = "Falha ao persistir sessão";
       logger.error({ err: error, workspaceId }, "WhatsApp credentials persistence failed");
@@ -681,6 +730,10 @@ async function createSocket(workspaceId: string): Promise<void> {
   socket.ev.on("connection.update", (update) => {
     if (sessions.get(workspaceId) !== session || session.stopped) return;
     if (update.qr) {
+      if (session.connectTimeoutTimer) {
+        clearTimeout(session.connectTimeoutTimer);
+        session.connectTimeoutTimer = null;
+      }
       session.status = "qr";
       const qr = update.qr;
       void QRCode.toDataURL(qr, { margin: 1, width: 320 }).then((dataUrl) => {
@@ -690,27 +743,49 @@ async function createSocket(workspaceId: string): Promise<void> {
         logger.error({ err: error, workspaceId }, "WhatsApp QR rendering failed");
       });
     }
+    if (update.isNewLogin) {
+      session.qr = null;
+      session.status = "connecting";
+      const pairedPhone = extractPhoneFromCreds(state.creds);
+      if (pairedPhone) session.phone = pairedPhone;
+    }
     if (update.connection === "open") {
+      if (session.connectTimeoutTimer) {
+        clearTimeout(session.connectTimeoutTimer);
+        session.connectTimeoutTimer = null;
+      }
       session.status = "connected";
       session.qr = null;
-      session.phone = socket.user?.id?.split(":")[0]?.split("@")[0] ?? null;
+      session.phone =
+        socket.user?.id?.split(":")[0]?.split("@")[0] ??
+        extractPhoneFromCreds(state.creds) ??
+        session.phone;
       session.connectedAt = Date.now();
       session.lastError = null;
       session.reconnectAttempt = 0;
-      logger.info({ workspaceId }, "WhatsApp connected");
+      void saveCreds().catch((error) => {
+        logger.error({ err: error, workspaceId }, "WhatsApp credentials save on open failed");
+      });
+      logger.info({ workspaceId, phone: session.phone }, "WhatsApp connected");
     } else if (update.connection === "close") {
+      if (session.connectTimeoutTimer) {
+        clearTimeout(session.connectTimeoutTimer);
+        session.connectTimeoutTimer = null;
+      }
       session.status = "disconnected";
       session.qr = null;
       session.connectedAt = null;
       const reason = disconnectedReason(update.lastDisconnect?.error);
-      session.lastError = reason ? `Conexão encerrada (${reason})` : "Conexão encerrada";
-      if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.badSession) {
+      const isRevoked =
+        reason === DisconnectReason.loggedOut ||
+        reason === DisconnectReason.multideviceMismatch ||
+        reason === DisconnectReason.forbidden;
+
+      if (isRevoked) {
+        session.lastError = reason ? `Sessão desconectada pelo aparelho (${reason})` : "Sessão encerrada";
         session.status = "logged_out";
         session.stopped = true;
         const cleanup = (async () => {
-          await session.flushCreds().catch((error) => {
-            logger.error({ err: error, workspaceId }, "WhatsApp credential flush failed");
-          });
           await clearWhatsAppAuth(workspaceId);
         })();
         finalizing.set(workspaceId, cleanup);
@@ -720,7 +795,11 @@ async function createSocket(workspaceId: string): Promise<void> {
           if (finalizing.get(workspaceId) === cleanup) finalizing.delete(workspaceId);
         });
       } else {
-        scheduleReconnect(workspaceId, session);
+        if (reason !== DisconnectReason.restartRequired) {
+          session.lastError = reason ? `Reconectando sessão (${reason})…` : null;
+        }
+        const immediate = reason === DisconnectReason.restartRequired;
+        scheduleReconnect(workspaceId, session, immediate);
       }
       logger.warn({ workspaceId, reason }, "WhatsApp disconnected");
     }
@@ -744,6 +823,7 @@ export async function disconnectWhatsApp(workspaceId: string): Promise<void> {
   if (session) {
     session.stopped = true;
     if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+    if (session.connectTimeoutTimer) clearTimeout(session.connectTimeoutTimer);
     sessions.delete(workspaceId);
     try {
       await Promise.race([
@@ -772,20 +852,42 @@ export async function getWhatsAppStatus(workspaceId: string): Promise<{
   lastError: string | null;
 }> {
   const configured = isWhatsAppEncryptionConfigured();
-  const session = sessions.get(workspaceId);
-  const [stored] = await db.select({ credsCiphertext: whatsappConnectionsTable.credsCiphertext })
-    .from(whatsappConnectionsTable).where(eq(whatsappConnectionsTable.workspaceId, workspaceId)).limit(1);
+  const stored = await readStoredWhatsAppCredsInfo(workspaceId);
+  let session = sessions.get(workspaceId);
+
+  const isActivelyConnectingOrConnected =
+    session && !session.stopped && ["connecting", "qr", "connected"].includes(session.status);
+
+  // Auto-connect whenever a paired session is found in "disconnected" or missing state
+  if (configured && stored.paired && !isActivelyConnectingOrConnected && session?.status !== "logged_out") {
+    if (!connecting.has(workspaceId) && !finalizing.has(workspaceId)) {
+      if (session?.reconnectTimer) {
+        clearTimeout(session.reconnectTimer);
+        session.reconnectTimer = null;
+      }
+      void connectWhatsApp(workspaceId).catch((error) => {
+        logger.error({ err: error, workspaceId }, "WhatsApp auto-connect from status check failed");
+      });
+    }
+    session = sessions.get(workspaceId);
+  }
+
+  const effectiveStatus: "connecting" | "qr" | "connected" | "disconnected" =
+    session && ["connecting", "qr", "connected"].includes(session.status)
+      ? (session.status as "connecting" | "qr" | "connected")
+      : (configured && stored.paired && (connecting.has(workspaceId) || session?.reconnectTimer != null))
+      ? "connecting"
+      : "disconnected";
+
   return {
-    status: session && ["connecting", "qr", "connected"].includes(session.status)
-      ? session.status as "connecting" | "qr" | "connected"
-      : "disconnected",
+    status: effectiveStatus,
     connected: session?.status === "connected",
     configured,
-    paired: Boolean(stored?.credsCiphertext),
+    paired: stored.paired,
     qr: session?.qr ?? null,
-    phone: session?.phone ?? null,
+    phone: session?.phone ?? stored.phone ?? null,
     connectedAt: session?.connectedAt ? new Date(session.connectedAt).toISOString() : null,
-    lastError: session?.lastError ?? null,
+    lastError: session?.status === "connected" ? null : (session?.lastError ?? null),
   };
 }
 
@@ -795,12 +897,38 @@ function connectedSession(workspaceId: string): Session {
   return session;
 }
 
+async function ensureConnectedSession(workspaceId: string, timeoutMs = 12_000): Promise<Session> {
+  const current = sessions.get(workspaceId);
+  if (current?.status === "connected") return current;
+
+  const stored = await readStoredWhatsAppCredsInfo(workspaceId);
+  if (!stored.paired && current?.status !== "connecting") {
+    throw new Error("WhatsApp não conectado");
+  }
+
+  if (!connecting.has(workspaceId) && current?.status !== "connecting") {
+    void connectWhatsApp(workspaceId).catch((err) => {
+      logger.warn({ err, workspaceId }, "WhatsApp on-demand auto-connect failed");
+    });
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const s = sessions.get(workspaceId);
+    if (s?.status === "connected") return s;
+    if (s?.status === "logged_out" || s?.status === "qr") break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  return connectedSession(workspaceId);
+}
+
 function stableMessageId(messageId: string): string {
   return messageId.replace(/-/g, "").toUpperCase();
 }
 
 export async function sendWhatsAppText(workspaceId: string, recipient: string, body: string, messageId: string): Promise<string | null> {
-  const session = connectedSession(workspaceId);
+  const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
   const result = await session.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: body }, {
@@ -815,7 +943,7 @@ export async function checkWhatsAppNumber(workspaceId: string, recipient: string
   exists: boolean;
   jid: string | null;
 }> {
-  const session = connectedSession(workspaceId);
+  const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
   const [result] = (await session.socket.onWhatsApp(phone)) ?? [];
@@ -935,7 +1063,7 @@ export async function sendWhatsAppMessage(
   messageId: string,
   jid?: string | null,
 ): Promise<SendOutcome> {
-  const session = connectedSession(workspaceId);
+  const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
   const target = jid ?? (await resolveDestinationJid(session, phone));
@@ -968,6 +1096,17 @@ export async function restoreWhatsAppSessions(): Promise<void> {
     .from(whatsappConnectionsTable)
     .where(isNotNull(whatsappConnectionsTable.credsCiphertext));
   for (const row of rows) {
+    const existing = sessions.get(row.workspaceId);
+    const isActive = existing && !existing.stopped && ["connecting", "qr", "connected"].includes(existing.status);
+    if (isActive || connecting.has(row.workspaceId) || finalizing.has(row.workspaceId)) {
+      continue;
+    }
+    const stored = await readStoredWhatsAppCredsInfo(row.workspaceId);
+    if (!stored.paired) continue;
+    if (existing?.reconnectTimer) {
+      clearTimeout(existing.reconnectTimer);
+      existing.reconnectTimer = null;
+    }
     void connectWhatsApp(row.workspaceId).catch((error) => {
       logger.error({ err: error, workspaceId: row.workspaceId }, "WhatsApp session restore failed");
     });
@@ -979,6 +1118,7 @@ export async function stopWhatsAppSessions(): Promise<void> {
   for (const session of sessions.values()) {
     session.stopped = true;
     if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+    if (session.connectTimeoutTimer) clearTimeout(session.connectTimeoutTimer);
     pending.push(session.socket.end(undefined)
       .catch(() => undefined)
       .then(() => session.flushCreds().catch(() => undefined)));
@@ -993,7 +1133,7 @@ export async function sendManualTextMessage(
   text: string,
   options?: { clientId?: string | null; transactionId?: string | null; senderName?: string }
 ): Promise<typeof whatsappMessagesTable.$inferSelect> {
-  const session = connectedSession(workspaceId);
+  const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
 
@@ -1046,7 +1186,7 @@ export async function sendManualMediaMessage(
   },
   options?: { clientId?: string | null; transactionId?: string | null; senderName?: string }
 ): Promise<typeof whatsappMessagesTable.$inferSelect> {
-  const session = connectedSession(workspaceId);
+  const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
 

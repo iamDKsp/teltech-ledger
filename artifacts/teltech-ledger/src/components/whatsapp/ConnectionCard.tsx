@@ -88,9 +88,12 @@ export function ConnectionCard({
                     {formatPhone(connection.phone)}
                   </span>
                   {connected && since && <span className="text-xs">conectado {since}</span>}
+                  {!connected && connection.paired && (
+                    <span className="text-xs text-primary">reconectando automaticamente…</span>
+                  )}
                 </>
               ) : connection.paired && !connected ? (
-                "Aparelho pareado. Aguardando a conexão."
+                "Aparelho pareado. Reconectando automaticamente…"
               ) : (
                 copy.detail
               )}

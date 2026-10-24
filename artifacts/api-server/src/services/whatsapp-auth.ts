@@ -54,6 +54,42 @@ function decrypt(workspaceId: string, label: string, ciphertext: string): any {
   return JSON.parse(plaintext.toString("utf8"), BufferJSON.reviver);
 }
 
+export function extractPhoneFromCreds(creds: any): string | null {
+  const rawId = typeof creds?.me?.id === "string" ? creds.me.id : null;
+  if (!rawId) return null;
+  const phone = rawId.split(":")[0]?.split("@")[0]?.trim() || null;
+  return phone;
+}
+
+export function isCredsPaired(creds: any): boolean {
+  return Boolean(extractPhoneFromCreds(creds) || creds?.account || creds?.registered);
+}
+
+export async function readStoredWhatsAppCredsInfo(workspaceId: string): Promise<{
+  hasRecord: boolean;
+  paired: boolean;
+  phone: string | null;
+}> {
+  if (!isWhatsAppEncryptionConfigured()) {
+    return { hasRecord: false, paired: false, phone: null };
+  }
+  try {
+    const [saved] = await db.select({ credsCiphertext: whatsappConnectionsTable.credsCiphertext })
+      .from(whatsappConnectionsTable)
+      .where(eq(whatsappConnectionsTable.workspaceId, workspaceId))
+      .limit(1);
+    if (!saved?.credsCiphertext) {
+      return { hasRecord: false, paired: false, phone: null };
+    }
+    const creds = decrypt(workspaceId, "creds", saved.credsCiphertext);
+    const phone = extractPhoneFromCreds(creds);
+    const paired = isCredsPaired(creds);
+    return { hasRecord: true, paired, phone };
+  } catch {
+    return { hasRecord: false, paired: false, phone: null };
+  }
+}
+
 // Baileys updates Signal keys during sends and receives. Each set call is fully
 // committed before it resolves, so a process restart can restore the session.
 export async function useEncryptedDbAuthState(workspaceId: string): Promise<{
@@ -65,8 +101,16 @@ export async function useEncryptedDbAuthState(workspaceId: string): Promise<{
     .from(whatsappConnectionsTable)
     .where(eq(whatsappConnectionsTable.workspaceId, workspaceId))
     .limit(1);
-  const creds = saved?.credsCiphertext
-    ? decrypt(workspaceId, "creds", saved.credsCiphertext)
+  let decryptedCreds: any = null;
+  if (saved?.credsCiphertext) {
+    try {
+      decryptedCreds = decrypt(workspaceId, "creds", saved.credsCiphertext);
+    } catch {
+      decryptedCreds = null;
+    }
+  }
+  const creds = decryptedCreds && isCredsPaired(decryptedCreds)
+    ? decryptedCreds
     : initAuthCreds();
 
   const state: AuthenticationState = {

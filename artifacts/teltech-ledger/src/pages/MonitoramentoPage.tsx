@@ -1490,7 +1490,11 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
     try {
       const res = await API.post<{ ok: boolean; status: any }>("/whatsapp/monitoring/reconnect");
       if (res?.ok) {
-        toast.success("Reconexão solicitada! Escaneie o QR Code.");
+        toast.success(
+          res.status?.paired
+            ? "Reconectando sessão pareada automaticamente..."
+            : "Reconexão solicitada! Escaneie o QR Code.",
+        );
         await fetchStats();
       }
     } catch (err: any) {
@@ -1499,6 +1503,15 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
       setIsReconnecting(false);
     }
   };
+
+  // Auto-reconexão caso o aparelho já esteja pareado mas desconectado
+  useEffect(() => {
+    if (stats?.status.paired && stats?.status.status === "disconnected" && !isReconnecting) {
+      API.post<{ ok: boolean; status: any }>("/whatsapp/monitoring/reconnect")
+        .then(() => fetchStats())
+        .catch(() => {});
+    }
+  }, [stats?.status.paired, stats?.status.status, isReconnecting, fetchStats]);
 
   // Inicialização e checagem de suporte a Web Push
   useEffect(() => {
@@ -1662,6 +1675,28 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "hsl(152 65% 50%)", boxShadow: "0 0 8px hsl(152 65% 50%)" }} />
                     Online {stats.status.phone ? `(${formatPhoneDisplay(stats.status.phone)})` : ""}
                   </div>
+                ) : stats?.status.paired || stats?.status.status === "connecting" ? (
+                  <button
+                    onClick={() => setShowReconnectModal(true)}
+                    title="Sessão pareada reconectando automaticamente"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      background: "hsl(265 85% 62% / 0.15)",
+                      border: "1px solid hsl(265 85% 62% / 0.4)",
+                      color: "#c4a3ff",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <RefreshCw size={11} className="animate-spin" />
+                    Reconectando {stats?.status.phone ? `(${formatPhoneDisplay(stats.status.phone)})` : "..."}
+                  </button>
                 ) : (
                   <button
                     onClick={() => setShowReconnectModal(true)}
@@ -1960,11 +1995,21 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
                       gap: 5,
                       padding: "3px 8px",
                       borderRadius: 14,
-                      background: stats?.status.connected ? "hsl(152 65% 45% / 0.14)" : "hsl(0 70% 58% / 0.18)",
+                      background: stats?.status.connected
+                        ? "hsl(152 65% 45% / 0.14)"
+                        : stats?.status.paired || stats?.status.status === "connecting"
+                        ? "hsl(265 85% 62% / 0.18)"
+                        : "hsl(0 70% 58% / 0.18)",
                       border: stats?.status.connected
                         ? "1px solid hsl(152 65% 45% / 0.35)"
+                        : stats?.status.paired || stats?.status.status === "connecting"
+                        ? "1px solid hsl(265 85% 62% / 0.45)"
                         : "1px solid hsl(0 70% 58% / 0.45)",
-                      color: stats?.status.connected ? "hsl(152 65% 58%)" : "hsl(0 70% 68%)",
+                      color: stats?.status.connected
+                        ? "hsl(152 65% 58%)"
+                        : stats?.status.paired || stats?.status.status === "connecting"
+                        ? "#c4a3ff"
+                        : "hsl(0 70% 68%)",
                       fontSize: 10,
                       fontWeight: 700,
                       cursor: "pointer",
@@ -1976,11 +2021,19 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
                         width: 6,
                         height: 6,
                         borderRadius: "50%",
-                        background: stats?.status.connected ? "hsl(152 65% 50%)" : "hsl(0 70% 58%)",
+                        background: stats?.status.connected
+                          ? "hsl(152 65% 50%)"
+                          : stats?.status.paired || stats?.status.status === "connecting"
+                          ? "#c4a3ff"
+                          : "hsl(0 70% 58%)",
                         boxShadow: stats?.status.connected ? "0 0 6px hsl(152 65% 50%)" : "none",
                       }}
                     />
-                    {stats?.status.connected ? "Online" : "Conectar"}
+                    {stats?.status.connected
+                      ? "Online"
+                      : stats?.status.paired || stats?.status.status === "connecting"
+                      ? "Reconectando"
+                      : "Conectar"}
                   </button>
                 </div>
 
@@ -4286,9 +4339,15 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
               ) : (
                 <div style={{ padding: "20px 0" }}>
                   <Bot size={44} color="#c4a3ff" style={{ margin: "0 auto 12px" }} />
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#eee" }}>WhatsApp está desconectado</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#eee" }}>
+                    {stats?.status.paired
+                      ? "Reconectando sessão pareada..."
+                      : "WhatsApp está desconectado"}
+                  </div>
                   <p style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                    Clique no botão abaixo para gerar um novo QR Code de conexão.
+                    {stats?.status.paired
+                      ? "Seu aparelho já está pareado. O sistema está restabelecendo a conexão automaticamente."
+                      : "Clique no botão abaixo para gerar um novo QR Code de conexão."}
                   </p>
                   <button
                     onClick={handleReconnectWhatsApp}
@@ -4308,8 +4367,12 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
                       gap: 6,
                     }}
                   >
-                    <RefreshCw size={14} className={isReconnecting ? "animate-spin" : ""} />
-                    {isReconnecting ? "Solicitando..." : "Gerar QR Code Agora"}
+                    <RefreshCw size={14} className={isReconnecting || stats?.status.status === "connecting" ? "animate-spin" : ""} />
+                    {isReconnecting
+                      ? "Solicitando..."
+                      : stats?.status.paired
+                        ? "Reconectar Agora"
+                        : "Gerar QR Code Agora"}
                   </button>
                 </div>
               )}

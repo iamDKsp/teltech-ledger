@@ -107,13 +107,28 @@ export function WhatsAppSettingsPanel() {
     void loadAll();
   }, [loadAll]);
 
-  // Enquanto conecta, confere a cada 5 s; conectado, confere a cada 30 s para perceber quedas.
+  // Enquanto conecta ou reconecta sessão pareada, confere a cada 3 s; conectado/desconectado, a cada 15 s.
   useEffect(() => {
-    const waiting = connection.status === "connecting" || connection.status === "qr";
-    if (!waiting && connection.status !== "connected") return;
-    const interval = window.setInterval(() => void loadStatus().catch(() => undefined), waiting ? 5000 : 30000);
+    const waiting =
+      connection.status === "connecting" ||
+      connection.status === "qr" ||
+      (Boolean(connection.paired) && connection.status === "disconnected");
+    const interval = window.setInterval(() => void loadStatus().catch(() => undefined), waiting ? 3000 : 15000);
     return () => window.clearInterval(interval);
-  }, [connection.status, loadStatus]);
+  }, [connection.status, connection.paired, loadStatus]);
+
+  // Se o aparelho já estiver pareado mas desconectado, dispara reconexão automática silenciosa
+  useEffect(() => {
+    if (loading || busy !== null) return;
+    if (connection.paired && connection.status === "disconnected" && connection.configured !== false) {
+      void API.post<WhatsAppStatus>("/whatsapp/connect", {})
+        .then((next) => {
+          if (next) setConnection(next);
+          return loadStatus();
+        })
+        .catch(() => undefined);
+    }
+  }, [connection.paired, connection.status, connection.configured, loading, busy, loadStatus]);
 
   useEffect(() => {
     if (tab !== "history") return;
@@ -132,9 +147,16 @@ export function WhatsAppSettingsPanel() {
     setBusy("connect");
     setError(null);
     try {
-      await API.post("/whatsapp/connect", {});
+      const next = await API.post<WhatsAppStatus>("/whatsapp/connect", {});
+      if (next) setConnection(next);
       await loadStatus();
-      toast.success("Conexão iniciada. Leia o QR com o WhatsApp da empresa.");
+      toast.success(
+        next?.connected
+          ? "WhatsApp conectado com sucesso!"
+          : next?.paired
+          ? "Reconectando aparelho pareado…"
+          : "Conexão iniciada. Leia o QR com o WhatsApp da empresa."
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a conexão.");
     } finally {
