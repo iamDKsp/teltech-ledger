@@ -36,6 +36,12 @@ import {
   type BillingKind,
   type InternalRecipient,
 } from "./whatsapp-compose";
+import {
+  ensureDemoLeadsSchema,
+  enqueueDueLeadCadenceMessages,
+  onLeadCadenceMessageSent,
+  revalidateLeadCadenceMessage,
+} from "./lead-cadence";
 
 const MAX_DAILY_MESSAGES_PER_WORKSPACE = 100;
 const MAX_ATTEMPTS = 5;
@@ -135,7 +141,25 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
   if (!recipient) return { ok: false, reason: "Telefone do cliente inválido" };
   const settings = await loadSettings(db, workspaceId);
   if (!settings?.pixKey?.trim()) return { ok: false, reason: "Configure a chave Pix antes de enviar cobranças" };
-  const dedupeKey = `${workspaceId}:manual:${transactionId}:${saoPauloNow().date}`;
+
+  // Verifica se já existe uma cobrança manual em fila/processamento para esta parcela
+  const [inFlight] = await db.select().from(whatsappMessagesTable)
+    .where(and(
+      eq(whatsappMessagesTable.workspaceId, workspaceId),
+      eq(whatsappMessagesTable.transactionId, transactionId),
+      eq(whatsappMessagesTable.kind, "manual_billing"),
+      inArray(whatsappMessagesTable.status, ["queued", "processing"]),
+    ))
+    .limit(1);
+
+  if (inFlight) {
+    await processNextMessage().catch((error) => logger.error({ err: error }, "WhatsApp immediate outbox worker failed"));
+    const [updated] = await db.select().from(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.id, inFlight.id)).limit(1);
+    return { ok: true, message: updated ?? inFlight, created: false };
+  }
+
+  const dedupeKey = `${workspaceId}:manual:${transactionId}:${Date.now()}`;
   const [inserted] = await db.insert(whatsappMessagesTable).values({
     workspaceId,
     transactionId,
@@ -145,18 +169,15 @@ export async function enqueueManualBilling(workspaceId: string, transactionId: s
     recipient,
     body: storedBody(composeBilling("manual_billing", transaction, client, settings)),
   }).onConflictDoNothing().returning();
-  const message = inserted ?? (await db.select().from(whatsappMessagesTable)
-    .where(eq(whatsappMessagesTable.dedupeKey, dedupeKey)).limit(1))[0];
-  if (!inserted && message && ["failed", "skipped", "sent"].includes(message.status)) {
-    const reason = message.status === "sent"
-      ? "Cobrança já enviada hoje para esta parcela"
-      : "Tentativa anterior não foi enviada; revise o histórico e tente novamente amanhã";
-    return { ok: false, reason, conflict: true, message };
-  }
+
   if (inserted) {
-    triggerImmediateWorker();
+    await processNextMessage().catch((error) => logger.error({ err: error }, "WhatsApp immediate outbox worker failed"));
+    const [updated] = await db.select().from(whatsappMessagesTable)
+      .where(eq(whatsappMessagesTable.id, inserted.id)).limit(1);
+    return { ok: true, message: updated ?? inserted, created: true };
   }
-  return { ok: true, message, created: Boolean(inserted) };
+
+  return { ok: false, reason: "Não foi possível registrar a cobrança manual" };
 }
 
 /** Puts a failed or skipped message back in the outbox (it is revalidated before sending). */
@@ -515,6 +536,11 @@ function plain(recipient: string, body: string): Validated {
 }
 
 async function revalidate(message: typeof whatsappMessagesTable.$inferSelect): Promise<Validated> {
+  if (["lead_cadence", "lead_reaccess", "lead_manual_step"].includes(message.kind)) {
+    const res = await revalidateLeadCadenceMessage(message);
+    if ("skip" in res) return res;
+    return plain(res.recipient, res.body);
+  }
   if (message.kind === "withdrawal_alert" || message.kind === "payment_alert") {
     const isWithdrawal = message.kind === "withdrawal_alert";
     if (!message.transactionId) return { skip: isWithdrawal ? "Retirada removida" : "Pagamento removido" };
@@ -649,6 +675,11 @@ async function processNextMessage(): Promise<void> {
         lastError: outcome.fallbackReason ? `Botão de Pix indisponível; enviado como texto (${outcome.fallbackReason})`.slice(0, 500) : null,
         updatedAt: new Date(),
       }).where(eq(whatsappMessagesTable.id, message.id));
+      if (["lead_cadence", "lead_reaccess", "lead_manual_step"].includes(message.kind)) {
+        await onLeadCadenceMessageSent(message).catch((err) =>
+          logger.error({ err, messageId: message.id }, "Failed to advance lead cadence after send"),
+        );
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Falha desconhecida";
       const disconnected = reason === "WhatsApp não conectado";
@@ -670,6 +701,10 @@ async function scheduleTick(): Promise<void> {
   schedulerBusy = true;
   try {
     await enqueueDailyBilling();
+    const enqueuedLeads = await enqueueDueLeadCadenceMessages();
+    if (enqueuedLeads > 0) {
+      triggerImmediateWorker();
+    }
   } finally {
     schedulerBusy = false;
   }
@@ -681,6 +716,7 @@ export function triggerImmediateWorker(): void {
 
 export async function startWhatsAppAutomation(): Promise<void> {
   if (schedulerTimer || workerTimer || sessionWatchdogTimer) return;
+  await ensureDemoLeadsSchema();
   try {
     await restoreWhatsAppSessions();
   } catch (error) {

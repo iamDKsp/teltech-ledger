@@ -5,8 +5,9 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import path from "path";
 import { createInboundWebhookRouter } from "./routes/inbound-webhooks";
-import { readWebhookIntegrations } from "./services/inbound-webhook-contract";
+import { loadActiveWebhookIntegrations } from "./services/webhook-config-store";
 import { processInboundWebhook } from "./services/inbound-webhook";
+import { summarizeDemoLeadsForIntegration } from "./services/lead-cadence";
 
 const app: Express = express();
 
@@ -33,7 +34,11 @@ app.use(
   }),
 );
 app.use(cors());
-app.use("/api/webhooks/inbound", createInboundWebhookRouter({ integrations: readWebhookIntegrations, process: processInboundWebhook }));
+app.use("/api/webhooks/inbound", createInboundWebhookRouter({
+  integrations: loadActiveWebhookIntegrations,
+  process: processInboundWebhook,
+  summarizeLeads: summarizeDemoLeadsForIntegration,
+}));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 app.use("/api", router);

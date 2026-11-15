@@ -222,7 +222,7 @@ function formatDateDivider(iso: string | null | undefined): string {
 
 function cleanPreviewText(raw: string | null | undefined): string {
   if (!raw) return "";
-  const pixRegex = /(000201[0-9]{2}[0-9A-Za-z.+_\-]{30,})/;
+  const pixRegex = /(000201[^\r\n]*?6304[0-9A-Fa-f]{4})/;
   let cleaned = raw
     .replace(pixRegex, "")
     .replace(/Pix Copia e Cola:?/gi, "")
@@ -294,8 +294,8 @@ function kindBadge(kind: string): { label: string; color: string } {
  * and isolate Pix Copia e Cola codes into an interactive card.
  */
 function FormattedWhatsAppBody({ text, amount }: { text: string; amount?: number | null }) {
-  // Regex to extract Brazilian BR Code Pix: starts with 000201...
-  const pixRegex = /(000201[0-9]{2}[0-9A-Za-z.+_\-]{30,})/;
+  // Regex to extract complete Brazilian BR Code Pix: starts with 000201 and ends with CRC16 6304XXXX
+  const pixRegex = /(000201[^\r\n]*?6304[0-9A-Fa-f]{4})/;
   const match = text.match(pixRegex);
   const pixCode = match ? match[1] : null;
 
@@ -1127,7 +1127,13 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
   const [selectedClient, setSelectedClient] = useState<any>(null);
   const [selectedPartner, setSelectedPartner] = useState<any>(null);
 
-  const [search, setSearch] = useState("");
+  const initialQueryPhone = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("phone");
+    return raw ? raw.replace(/\D/g, "") : null;
+  }, []);
+
+  const [search, setSearch] = useState(() => initialQueryPhone || "");
   const [filter, setFilter] = useState<"all" | "partners" | "clients" | "replied" | "waiting" | "overdue">("all");
   const [messageInput, setMessageInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -1338,17 +1344,28 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
     return () => clearInterval(interval);
   }, [fetchStats, fetchConversations, selectedTarget, fetchMessages]);
 
-  // Selecionar primeira conversa automaticamente APENAS no Desktop na carga inicial
+  // Selecionar conversa via ?phone= ou primeira conversa automaticamente no Desktop
   useEffect(() => {
-    if (isMobile) return;
     if (!selectedTarget && conversations.length > 0 && !hasAutoSelectedRef.current) {
+      if (initialQueryPhone) {
+        const matched = conversations.find((c) => {
+          const digits = (c.phone || "").replace(/\D/g, "");
+          return Boolean(digits && (digits === initialQueryPhone || digits.endsWith(initialQueryPhone) || initialQueryPhone.endsWith(digits)));
+        });
+        if (matched) {
+          hasAutoSelectedRef.current = true;
+          setSelectedTarget(matched.id);
+          return;
+        }
+      }
+      if (isMobile) return;
       const firstWithMessages = conversations.find((c) => c.totalMessages > 0) || conversations[0];
       if (firstWithMessages) {
         hasAutoSelectedRef.current = true;
         setSelectedTarget(firstWithMessages.id);
       }
     }
-  }, [conversations, selectedTarget, isMobile]);
+  }, [conversations, selectedTarget, isMobile, initialQueryPhone]);
 
   // Quando o target muda, busca mensagens
   useEffect(() => {
@@ -1417,23 +1434,23 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
     }
   };
 
-  // Disparo imediato de cobrança pelo Nexus
-  const handleTriggerBilling = async (transactionId: string) => {
+  // Disparo imediato de cobrança ou envio direto de Pix pelo Nexus
+  const handleTriggerBilling = async (transactionId?: string | null) => {
     if (!selectedTarget || isTriggeringBilling) return;
     setIsTriggeringBilling(true);
     try {
       const res = await API.post(`/whatsapp/monitoring/conversations/${selectedTarget}/send-pix`, {
-        transactionId,
+        transactionId: transactionId ?? null,
       });
       if (res?.ok) {
-        toast.success("Cobrança e Pix disparados por Nexus!");
+        toast.success(transactionId ? "Cobrança e Pix disparados por Nexus!" : "Chave Pix e Copia e Cola enviados no WhatsApp!");
         setShowInvoiceSelector(false);
         await fetchMessages(selectedTarget, true);
         await fetchConversations(false);
         await fetchStats();
       }
     } catch (err: any) {
-      toast.error(err.message || "Falha ao disparar cobrança");
+      toast.error(err.message || "Falha ao disparar cobrança Pix");
     } finally {
       setIsTriggeringBilling(false);
     }
@@ -3439,16 +3456,16 @@ export function MonitoramentoPage({ onOpenMobileMenu }: { onOpenMobileMenu?: () 
                 {(!isMobile || showMobileQuickReplies) && (
                   <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none" }}>
                     {[
-                      { text: "Olá! Segue o lembrete da sua fatura.", icon: <Bell size={12} color="#c4a3ff" /> },
-                      { text: "Segue a nossa chave Pix para pagamento:", icon: <QrCode size={12} color="#c4a3ff" /> },
-                      { text: "Pode nos enviar o comprovante por aqui?", icon: <FileText size={12} color="#c4a3ff" /> },
-                      { text: "Conseguimos negociar um novo prazo caso precise.", icon: <Calendar size={12} color="#c4a3ff" /> },
-                      { text: "Pagamento confirmado com sucesso! Muito obrigado.", icon: <CheckCircle2 size={12} color="hsl(152 65% 55%)" /> },
+                      { text: "Olá! Segue o lembrete da sua fatura.", icon: <Bell size={12} color="#c4a3ff" />, isPix: false },
+                      { text: "Enviar Chave Pix e Copia e Cola", icon: <QrCode size={12} color="#c4a3ff" />, isPix: true },
+                      { text: "Pode nos enviar o comprovante por aqui?", icon: <FileText size={12} color="#c4a3ff" />, isPix: false },
+                      { text: "Conseguimos negociar um novo prazo caso precise.", icon: <Calendar size={12} color="#c4a3ff" />, isPix: false },
+                      { text: "Pagamento confirmado com sucesso! Muito obrigado.", icon: <CheckCircle2 size={12} color="hsl(152 65% 55%)" />, isPix: false },
                     ].map((item, i) => (
                       <button
                         key={i}
-                        onClick={() => handleSendMessage(item.text)}
-                        disabled={isSending}
+                        onClick={() => item.isPix ? handleTriggerBilling(openTransactions[0]?.id ?? null) : handleSendMessage(item.text)}
+                        disabled={isSending || isTriggeringBilling}
                         style={{
                           padding: isMobile ? "5px 10px" : "5px 12px",
                           borderRadius: 14,

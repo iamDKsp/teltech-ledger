@@ -3,7 +3,8 @@ import {
   financialTransactionsTable, financialAuditLogsTable, inboundWebhookEntitiesTable, inboundWebhookEventsTable,
 } from "@workspace/db";
 import { and, eq, gte, sql } from "drizzle-orm";
-import { enqueuePaymentReceipt } from "./whatsapp-automation";
+import { enqueuePaymentReceipt, triggerImmediateWorker } from "./whatsapp-automation";
+import { enqueueDueLeadCadenceMessages, markMatchingLeadsConverted, upsertDemoLeadFromWebhook } from "./lead-cadence";
 import { parseDay } from "./sales-schedule";
 import { ClientPhotoFiles, validatePhotoUrl, type PhotoStorageOptions } from "./client-photo";
 import {
@@ -23,6 +24,7 @@ export interface WebhookResult extends Record<string, unknown> {
 export async function processInboundWebhook(config: WebhookIntegration, event: InboundWebhook, bodyHash: string, photoOptions?: PhotoStorageOptions): Promise<WebhookResult> {
   const files = new ClientPhotoFiles(photoOptions);
   let committed = false;
+  let postCommitCadenceDelayMs: number | null = null;
   try {
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`set local lock_timeout = '5s'`);
@@ -40,7 +42,7 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
     const [project] = await tx.select({ id: projectsTable.id }).from(projectsTable)
       .where(and(eq(projectsTable.id, config.projectId), eq(projectsTable.workspaceId, config.workspaceId))).limit(1);
     if (!project) throw new WebhookError(503, "project_not_configured", "Produto/projeto da integração não pertence ao workspace configurado.");
-    if (config.accountId) {
+    if (config.accountId && event.eventType !== "lead.demo_accessed") {
       const [account] = await tx.select({ id: financialAccountsTable.id }).from(financialAccountsTable)
         .where(and(eq(financialAccountsTable.id, config.accountId), eq(financialAccountsTable.workspaceId, config.workspaceId), eq(financialAccountsTable.isActive, true))).limit(1);
       if (!account) throw new WebhookError(503, "account_not_configured", "Conta de recebimento da integração inválida ou inativa.");
@@ -61,6 +63,17 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
       const outcome = outcomes.includes("applied") ? "applied"
         : outcomes.includes("stale") ? "stale" : "unchanged";
       result = { eventId: event.eventId, outcome, clientId: client.id, saleItemId: base.id, invoices, ...(client.photo ? { photo: client.photo } : {}) };
+    } else if (event.eventType === "lead.demo_accessed") {
+      const lead = await upsertDemoLeadFromWebhook(tx, config, event.data, (delayMs) => {
+        postCommitCadenceDelayMs = delayMs;
+      });
+      result = {
+        eventId: event.eventId,
+        outcome: lead.outcome,
+        demoLeadId: lead.id,
+        cadenceStatus: lead.cadenceStatus,
+        nextStepAt: lead.nextStepAt,
+      };
     } else {
       const invoice = await sync.invoice(event.data.baseExternalId, event.data.invoice);
       result = { eventId: event.eventId, outcome: invoice.outcome, transactionId: invoice.id };
@@ -72,6 +85,16 @@ export async function processInboundWebhook(config: WebhookIntegration, event: I
     return result;
   });
   committed = true;
+  if (postCommitCadenceDelayMs !== null && postCommitCadenceDelayMs <= 5 * 60_000) {
+    const timer = setTimeout(() => {
+      void enqueueDueLeadCadenceMessages()
+        .then((n) => {
+          if (n > 0) triggerImmediateWorker();
+        })
+        .catch(() => undefined);
+    }, Math.max(500, postCommitCadenceDelayMs + 250));
+    timer.unref?.();
+  }
   return result;
   } finally { await files.finish(committed); }
 }
@@ -146,6 +169,9 @@ class WebhookSync {
       : await this.tx.insert(clientsTable).values({ ...fields, workspaceId: this.config.workspaceId, projectId: this.config.projectId }).returning();
     await this.saveEntity("client", externalId, client.id, version, hash);
     await this.audit("webhook_client_upsert", externalId, null, { clientId: client.id, version, linkedExisting: Boolean(existing && !link) });
+    if (client.status === "active" && client.phone) {
+      await markMatchingLeadsConverted(this.tx, this.config.workspaceId, client.phone, client.id);
+    }
     const photo = incomingPhoto === undefined ? undefined : await this.photo(client, incomingPhoto);
     return { id: client.id, outcome: "applied" as const, ...(photo ? { photo } : {}) };
   }

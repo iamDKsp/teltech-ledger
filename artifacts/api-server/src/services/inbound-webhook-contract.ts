@@ -58,6 +58,19 @@ export const webhookInvoiceSchema = z.object({
   if (v.status !== "paid" && v.paidAt) ctx.addIssue({ code: "custom", path: ["paidAt"], message: "paidAt deve ser null se não estiver paga" });
 });
 
+export const webhookDemoLeadSchema = z.object({
+  externalId: id,
+  version,
+  name: z.string().trim().min(1).max(200),
+  phone: z.string().trim().min(8).max(40),
+  email: z.string().email().max(254).nullable().default(null),
+  accessCount: z.number().int().min(1).max(1_000_000).default(1),
+  isFirstAccess: z.boolean().default(true),
+  previousAccessAt: instant.nullable().default(null),
+  sourceLabel: nullableText(120),
+  notes: nullableText(2000),
+}).strict();
+
 const envelope = { schemaVersion: z.literal(1), eventId: id, occurredAt: instant };
 export const inboundWebhookSchema = z.discriminatedUnion("eventType", [
   z.object({ ...envelope, eventType: z.literal("client.upsert"), data: webhookClientSchema }).strict(),
@@ -70,12 +83,14 @@ export const inboundWebhookSchema = z.discriminatedUnion("eventType", [
     baseExternalId: id,
     invoice: webhookInvoiceSchema,
   }).strict() }).strict(),
+  z.object({ ...envelope, eventType: z.literal("lead.demo_accessed"), data: webhookDemoLeadSchema }).strict(),
 ]);
 
 export type InboundWebhook = z.infer<typeof inboundWebhookSchema>;
 export type WebhookClient = z.infer<typeof webhookClientSchema>;
 export type WebhookBase = z.infer<typeof webhookBaseSchema>;
 export type WebhookInvoice = z.infer<typeof webhookInvoiceSchema>;
+export type WebhookDemoLead = z.infer<typeof webhookDemoLeadSchema>;
 
 const integrationSchema = z.object({
   source: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,59}$/),

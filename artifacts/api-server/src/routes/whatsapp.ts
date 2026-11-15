@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import multer from "multer";
@@ -6,6 +7,7 @@ import {
   db,
   pool,
   clientsTable,
+  demoLeadsTable,
   financialTransactionsTable,
   usersTable,
   workspaceMembersTable,
@@ -17,7 +19,8 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, requireRole, requireWorkspace, type AuthenticatedRequest } from "../middlewares/auth";
 import { enqueueManualBilling, requeueMessage, triggerImmediateWorker } from "../services/whatsapp-automation";
-import { callName, composePreview, composeReceipt, storedBody } from "../services/whatsapp-compose";
+import { ensureDemoLeadsSchema } from "../services/lead-cadence";
+import { callName, composeDirectPixMessage, composePreview, composeReceipt, storedBody } from "../services/whatsapp-compose";
 import {
   canonicalBrazilianPhone,
   checkWhatsAppNumber,
@@ -29,6 +32,7 @@ import {
   phonesMatch,
   sendManualTextMessage,
   sendManualMediaMessage,
+  sendWhatsAppMessage,
 } from "../services/whatsapp-session";
 import { sendTestMessage, TestSendError } from "../services/whatsapp-test";
 import {
@@ -39,7 +43,7 @@ import {
   unknownVariables,
   type TemplateKind,
 } from "../services/whatsapp-templates";
-import { detectPixKeyType, normalizePixKey, PIX_KEY_TYPE_LABEL } from "../lib/pix";
+import { detectPixKeyType, generatePixPayload, normalizePixKey, PIX_KEY_TYPE_LABEL, type PixKeyType } from "../lib/pix";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -49,7 +53,7 @@ const mediaUpload = multer({
   limits: { fileSize: 64 * 1024 * 1024 }, // 64MB max
 });
 
-// Auto-ensure WhatsApp media columns exist in PostgreSQL using raw pool query
+// Auto-ensure WhatsApp media & demo cadence columns exist in PostgreSQL using raw pool query
 void pool.query(`
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
@@ -57,6 +61,8 @@ void pool.query(`
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
   ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS demo_lead_id UUID;
+  ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS cadence_step INTEGER;
   CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_media_type ON whatsapp_messages (media_type);
 `).catch((err) => logger.warn({ err: err?.message }, "WhatsApp media columns migration check warning"));
 const ADMIN_ROLES = ["owner", "admin", "ceo", "cto", "cmo", "member"];
@@ -101,7 +107,7 @@ const defaultSettings = {
   pixKeyType: "auto" as (typeof PIX_KEY_TYPES)[number],
   pixMerchantName: "",
   pixMerchantCity: "",
-  pixDeliveryMode: "text" as "text" | "native",
+  pixDeliveryMode: "native" as "text" | "native",
   withdrawalAlertsEnabled: false,
   expenseAlertsEnabled: true,
   movementAlertsEnabled: true,
@@ -701,15 +707,37 @@ router.post("/messages/manual-billing", async (req, res) => {
   }
 });
 
-// Exposed for the settings screen: tells which key type was detected while typing.
+// Exposed for the settings screen: tells which key type was detected while typing and generates a valid BR Code preview.
 router.post("/pix/detect", (req, res) => {
-  const parsed = z.object({ key: z.string().max(200) }).strict().safeParse(req.body);
+  const parsed = z.object({
+    key: z.string().max(200),
+    keyType: z.enum(PIX_KEY_TYPES).optional(),
+    merchantName: z.string().max(40).optional(),
+    merchantCity: z.string().max(25).optional(),
+    amountCents: z.number().int().min(0).optional(),
+  }).strict().safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Chave inválida" });
     return;
   }
   const type = detectPixKeyType(parsed.data.key);
-  res.json({ type, label: type ? PIX_KEY_TYPE_LABEL[type] : null });
+  const resolved = normalizePixKey(parsed.data.key, (parsed.data.keyType ?? "auto") as PixKeyType | "auto");
+  const finalType = resolved?.type ?? type;
+  const code = resolved
+    ? generatePixPayload({
+        pixKey: resolved.key,
+        pixKeyType: resolved.type,
+        merchantName: parsed.data.merchantName || undefined,
+        merchantCity: parsed.data.merchantCity || undefined,
+        amountCents: parsed.data.amountCents,
+      })
+    : null;
+  res.json({
+    type: finalType,
+    label: finalType ? PIX_KEY_TYPE_LABEL[finalType] : null,
+    normalizedKey: resolved?.key ?? null,
+    code,
+  });
 });
 
 // ─── Monitoring & Cobranças Chat Module ───────────────────────────────────────
@@ -815,8 +843,8 @@ router.get("/monitoring/conversations", async (req, res) => {
       // best-effort cleanup
     }
 
-    // 1. Fetch Clients, Internal Partners/Contacts, and Workspace Members (Founders/Team)
-    const [allClients, allContacts, allMembers] = await Promise.all([
+    // 1. Fetch Clients, Internal Partners/Contacts, Workspace Members, and Demo Leads
+    const [allClients, allContacts, allMembers, allDemoLeads] = await Promise.all([
       db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId)),
       db.select().from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId)),
       db.select({
@@ -830,11 +858,15 @@ router.get("/monitoring/conversations", async (req, res) => {
       .from(usersTable)
       .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
       .where(eq(workspaceMembersTable.workspaceId, wsId)),
+      ensureDemoLeadsSchema()
+        .then(() => db.select().from(demoLeadsTable).where(eq(demoLeadsTable.workspaceId, wsId)))
+        .catch(() => [] as (typeof demoLeadsTable.$inferSelect)[]),
     ]);
 
     const clientMap = new Map(allClients.map(c => [c.id, c]));
     const contactMap = new Map(allContacts.map(c => [c.id, c]));
     const memberMap = new Map(allMembers.map(m => [m.id, m]));
+    const demoLeadMap = new Map(allDemoLeads.map(l => [l.id, l]));
 
     // Phone matcher helper across partners, team members, and clients
     const resolveContactByPhone = (rawPhone: string | null | undefined) => {
@@ -884,6 +916,20 @@ router.get("/monitoring/conversations", async (req, res) => {
           client: matchedClient,
         };
       }
+      // 4. Demo Leads
+      const matchedLead = allDemoLeads.find(l => phonesMatch(l.phone, rawPhone));
+      if (matchedLead) {
+        return {
+          type: "lead" as const,
+          id: matchedLead.id,
+          name: matchedLead.name,
+          nickname: null,
+          roleLabel: `Lead Demo • ${matchedLead.sourceLabel || "PDV Lojista"}`,
+          phone: matchedLead.phone,
+          isPartner: false,
+          lead: matchedLead,
+        };
+      }
       return null;
     };
 
@@ -906,6 +952,8 @@ router.get("/monitoring/conversations", async (req, res) => {
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS demo_lead_id UUID;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS cadence_step INTEGER;
         `);
         rawMessages = await db.select().from(whatsappMessagesTable)
           .where(eq(whatsappMessagesTable.workspaceId, wsId))
@@ -972,6 +1020,9 @@ router.get("/monitoring/conversations", async (req, res) => {
       let key: string;
       if (msg.clientId && clientMap.has(msg.clientId)) {
         key = `client:${msg.clientId}`;
+      } else if (msg.demoLeadId && demoLeadMap.has(msg.demoLeadId)) {
+        const contactInfo = resolveContactByPhone(rawTargetPhone);
+        key = contactInfo?.type === "client" ? `client:${contactInfo.id}` : `lead:${msg.demoLeadId}`;
       } else {
         const contactInfo = resolveContactByPhone(rawTargetPhone);
         if (contactInfo) {
@@ -999,6 +1050,16 @@ router.get("/monitoring/conversations", async (req, res) => {
       }
     }
 
+    // Include demo leads when searching (e.g. deep-linking via ?phone= from Funil Demo)
+    if (search) {
+      for (const lead of allDemoLeads) {
+        const key = `lead:${lead.id}`;
+        if (!conversationGroups.has(key)) {
+          conversationGroups.set(key, []);
+        }
+      }
+    }
+
     // Include registered partners in the list so they are always visible/accessible
     for (const contact of allContacts) {
       const key = `partner:${contact.id}`;
@@ -1012,6 +1073,7 @@ router.get("/monitoring/conversations", async (req, res) => {
 
     for (const [key, msgs] of conversationGroups.entries()) {
       let client: typeof allClients[0] | null = null;
+      let demoLead: typeof allDemoLeads[0] | null = null;
       let partnerContact: typeof allContacts[0] | null = null;
       let memberUser: typeof allMembers[0] | null = null;
       let targetPhone: string = "";
@@ -1021,6 +1083,10 @@ router.get("/monitoring/conversations", async (req, res) => {
         const cId = key.replace("client:", "");
         client = clientMap.get(cId) ?? null;
         targetPhone = client?.phone ? (canonicalBrazilianPhone(client.phone) || normalizeWhatsAppPhone(client.phone) || client.phone) : "";
+      } else if (key.startsWith("lead:")) {
+        const lId = key.replace("lead:", "");
+        demoLead = demoLeadMap.get(lId) ?? null;
+        targetPhone = demoLead?.phone ? (canonicalBrazilianPhone(demoLead.phone) || normalizeWhatsAppPhone(demoLead.phone) || demoLead.phone) : "";
       } else if (key.startsWith("partner:")) {
         const pId = key.replace("partner:", "");
         partnerContact = contactMap.get(pId) ?? null;
@@ -1039,6 +1105,8 @@ router.get("/monitoring/conversations", async (req, res) => {
           if (!partnerContact) memberUser = memberMap.get(resolved.id) ?? null;
         } else if (resolved?.type === "client") {
           client = clientMap.get(resolved.id) ?? null;
+        } else if (resolved?.type === "lead") {
+          demoLead = demoLeadMap.get(resolved.id) ?? null;
         }
       }
 
@@ -1058,6 +1126,9 @@ router.get("/monitoring/conversations", async (req, res) => {
       } else if (client) {
         displayName = client.name;
         roleLabel = "Cliente";
+      } else if (demoLead) {
+        displayName = demoLead.name;
+        roleLabel = `Lead Demo • ${demoLead.sourceLabel || "PDV Lojista"}`;
       } else {
         // Unknown contact: only use lastMessage.senderName if INBOUND (sent by client) and NOT Operator or Nexus
         if (
@@ -1179,7 +1250,7 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
     let phone = normalizeWhatsAppPhone(cleanTarget);
     const targetCanon = canonicalBrazilianPhone(cleanTarget);
 
-    const [allClients, allContacts, allMembers] = await Promise.all([
+      const [allClients, allContacts, allMembers, allDemoLeads] = await Promise.all([
       db.select().from(clientsTable).where(eq(clientsTable.workspaceId, wsId)),
       db.select().from(whatsappContactsTable).where(eq(whatsappContactsTable.workspaceId, wsId)),
       db.select({
@@ -1192,11 +1263,19 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
       .from(usersTable)
       .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
       .where(eq(workspaceMembersTable.workspaceId, wsId)),
+      ensureDemoLeadsSchema()
+        .then(() => db.select().from(demoLeadsTable).where(eq(demoLeadsTable.workspaceId, wsId)))
+        .catch(() => [] as (typeof demoLeadsTable.$inferSelect)[]),
     ]);
+
+    let demoLead: (typeof demoLeadsTable.$inferSelect) | null = null;
 
     if (isUuid) {
       client = allClients.find(c => c.id === cleanTarget) ?? null;
       if (!client) {
+        demoLead = allDemoLeads.find(l => l.id === cleanTarget) ?? null;
+      }
+      if (!client && !demoLead) {
         const foundContact = allContacts.find(c => c.id === cleanTarget);
         if (foundContact) {
           partner = {
@@ -1254,11 +1333,14 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
           };
         } else {
           client = allClients.find(c => phonesMatch(c.phone, cleanTarget)) ?? null;
+          if (!client) {
+            demoLead = allDemoLeads.find(l => phonesMatch(l.phone, cleanTarget)) ?? null;
+          }
         }
       }
     }
 
-    const contactPhone = partner?.phone || client?.phone || cleanTarget;
+    const contactPhone = partner?.phone || client?.phone || demoLead?.phone || cleanTarget;
     if (contactPhone) {
       phone = normalizeWhatsAppPhone(contactPhone);
     }
@@ -1279,6 +1361,9 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
     const conditions = [];
     if (client) {
       conditions.push(eq(whatsappMessagesTable.clientId, client.id));
+    }
+    if (demoLead) {
+      conditions.push(eq(whatsappMessagesTable.demoLeadId, demoLead.id));
     }
     for (const p of phoneSet) {
       conditions.push(eq(whatsappMessagesTable.recipient, p));
@@ -1315,6 +1400,8 @@ router.get("/monitoring/conversations/:target/messages", async (req, res) => {
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_filename TEXT;
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_size INTEGER;
           ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS media_duration INTEGER;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS demo_lead_id UUID;
+          ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS cadence_step INTEGER;
         `);
         messages = await db.select({
           message: whatsappMessagesTable,
@@ -1635,26 +1722,67 @@ router.get("/monitoring/media/:messageId", async (req, res) => {
 
 router.post("/monitoring/conversations/:target/send-pix", async (req, res) => {
   const wsId = workspaceId(req);
+  const target = String(req.params.target);
   const parsed = z.object({
-    transactionId: z.string().uuid(),
+    transactionId: z.string().uuid().optional().nullable(),
+    amountCents: z.number().int().min(0).optional(),
   }).safeParse(req.body);
 
   if (!parsed.success) {
-    res.status(400).json({ error: "transactionId é obrigatório" });
+    res.status(400).json({ error: "Parâmetros inválidos para envio de Pix" });
     return;
   }
 
   try {
-    const result = await enqueueManualBilling(wsId, parsed.data.transactionId);
-    if (!result.ok) {
-      res.status(result.conflict ? 409 : 422).json({ error: result.reason });
+    if (parsed.data.transactionId) {
+      const result = await enqueueManualBilling(wsId, parsed.data.transactionId);
+      if (!result.ok) {
+        res.status(result.conflict ? 409 : 422).json({ error: result.reason });
+        return;
+      }
+      triggerImmediateWorker();
+      res.json({ ok: true, message: result.message });
       return;
     }
-    triggerImmediateWorker();
-    res.json({ ok: true, message: result.message });
+
+    const { clientId, destinationPhone } = await resolveTargetDestination(wsId, target);
+    if (!destinationPhone) {
+      res.status(400).json({ error: "Número de telefone de destino inválido ou contato sem telefone cadastrado" });
+      return;
+    }
+
+    const settings = await readSettings(wsId);
+    const composed = composeDirectPixMessage(settings, { amountCents: parsed.data.amountCents });
+    if (!composed) {
+      res.status(422).json({ error: "Configure a chave Pix nas configurações antes de enviar o Pix" });
+      return;
+    }
+
+    const messageId = randomUUID();
+    const outcome = await sendWhatsAppMessage(wsId, destinationPhone, composed, messageId);
+    const body = storedBody(composed);
+    const [created] = await db.insert(whatsappMessagesTable).values({
+      id: messageId,
+      workspaceId: wsId,
+      clientId,
+      transactionId: null,
+      dedupeKey: `outbound:${wsId}:${outcome.waMessageId ?? messageId}`,
+      kind: "manual_billing",
+      recipient: destinationPhone,
+      senderName: settings?.assistantName?.trim() || "Nexus",
+      direction: "outbound",
+      body,
+      status: "sent",
+      isRead: true,
+      sentAt: new Date(),
+      waMessageId: outcome.waMessageId,
+    }).onConflictDoNothing().returning();
+
+    res.json({ ok: true, message: created, pixCode: composed.pix?.code ?? null });
   } catch (error) {
     logger.error({ err: error, workspaceId: wsId }, "Monitoring send Pix failed");
-    res.status(500).json({ error: "Falha ao enviar Pix para o cliente" });
+    const msg = error instanceof Error ? error.message : "Falha ao enviar Pix para o cliente";
+    res.status(msg === "WhatsApp não conectado" ? 409 : 500).json({ error: msg });
   }
 });
 

@@ -5,6 +5,7 @@ import express from "express";
 import { createInboundWebhookRouter } from "../routes/inbound-webhooks";
 import { inboundWebhookSchema, readWebhookIntegrations, webhookSignature, verifyWebhookSignature,
   compareEntityVersion, paidBalanceDelta, WebhookError, findExistingWebhookClient } from "../services/inbound-webhook-contract";
+import { buildDefaultCadenceSeeds, computeScheduledSendTime, renderLeadCadenceBody } from "../services/lead-cadence-rules";
 
 const secret = "test-secret-with-at-least-thirty-two-characters";
 const config = { source: "sistema-teste", name: "Teste", secret,
@@ -108,5 +109,69 @@ test("HTTP usa corpo bruto e não chama persistência com autenticação ou payl
     assert.equal(calls, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve()));
+  }
+});
+
+test("contrato aceita lead.demo_accessed, valida GET leads-summary assinado e agenda cadência comercial", async () => {
+  const demoPayload = {
+    ...envelope,
+    eventType: "lead.demo_accessed",
+    data: {
+      externalId: "lead-abc-123",
+      version: 1,
+      name: "Mariana Boutique",
+      phone: "11988887777",
+      accessCount: 1,
+      isFirstAccess: true,
+      sourceLabel: "PDV Lojista",
+    },
+  };
+  assert.equal(inboundWebhookSchema.safeParse(demoPayload).success, true);
+
+  const seeds = buildDefaultCadenceSeeds("pdv_lojista", "PDV Lojista");
+  assert.equal(seeds.filter((s) => s.stepKind === "sequence").length, 7);
+  assert.equal(seeds.filter((s) => s.stepKind === "reaccess").length, 1);
+
+  const rendered = renderLeadCadenceBody(
+    seeds[0].bodyTemplate,
+    { name: "Mariana Boutique", sourceLabel: "PDV Lojista", accessCount: 1 },
+    { companyName: "Teltech", assistantName: "Nexus" },
+    new Date("2026-10-10T14:00:00-03:00"),
+  );
+  assert.match(rendered, /Mariana/);
+  assert.match(rendered, /PDV Lojista/);
+
+  // 23:00 BRT + 2h -> 01:00 BRT -> deve empurrar para 09:05 BRT (12:05 UTC)
+  const lateNight = new Date("2026-10-10T23:00:00-03:00");
+  const scheduled = computeScheduledSendTime(lateNight, 120, true, 9, 20, 0);
+  assert.equal(scheduled.toISOString(), "2026-10-11T12:05:00.000Z");
+
+  const app = express();
+  app.use("/api/webhooks/inbound", createInboundWebhookRouter({
+    integrations: () => [config],
+    process: async (_config, event) => ({ eventId: event.eventId, outcome: "applied" }),
+    summarizeLeads: async (cfg) => ({ source: cfg.source, totalSteps: 7, leads: [{ externalId: "lead-1", sentCount: 3 }] }),
+  }));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const ts = String(Math.floor(Date.now() / 1000));
+    const sig = webhookSignature(secret, config.source, ts, Buffer.alloc(0));
+    const res = await fetch(`http://127.0.0.1:${port}/api/webhooks/inbound/${config.source}/leads-summary`, {
+      headers: { "x-leadger-timestamp": ts, "x-leadger-signature": sig },
+    });
+    assert.equal(res.status, 200);
+    const json = (await res.json()) as { ok: boolean; totalSteps: number; leads: Array<{ sentCount: number }> };
+    assert.equal(json.ok, true);
+    assert.equal(json.totalSteps, 7);
+    assert.equal(json.leads[0].sentCount, 3);
+
+    const bad = await fetch(`http://127.0.0.1:${port}/api/webhooks/inbound/${config.source}/leads-summary`, {
+      headers: { "x-leadger-timestamp": ts, "x-leadger-signature": "sha256=0000" },
+    });
+    assert.equal(bad.status, 401);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
   }
 });

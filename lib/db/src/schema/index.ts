@@ -815,7 +815,7 @@ export const whatsappSettingsTable = pgTable("whatsapp_settings", {
   pixKeyType: text("pix_key_type").notNull().default("auto"), // 'auto' | 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
   pixMerchantName: text("pix_merchant_name"),
   pixMerchantCity: text("pix_merchant_city"),
-  pixDeliveryMode: text("pix_delivery_mode").notNull().default("text"), // 'text' | 'native'
+  pixDeliveryMode: text("pix_delivery_mode").notNull().default("native"), // 'text' | 'native'
   // Assistant persona and message behaviour
   assistantName: text("assistant_name").notNull().default("Nexus"),
   companyName: text("company_name").notNull().default("Teltech"),
@@ -866,11 +866,78 @@ export const pushSubscriptionsTable = pgTable("push_subscriptions", {
 
 export type PushSubscriptionRow = typeof pushSubscriptionsTable.$inferSelect;
 
+// ─── Demo Leads & Multi-Product Cadence Engine ────────────────────────────────
+
+export const demoLeadsTable = pgTable("demo_leads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projectsTable.id, { onDelete: "set null" }),
+  source: text("source").notNull(),
+  sourceLabel: text("source_label").notNull().default("Sistema"),
+  externalId: text("external_id").notNull(),
+  name: text("name").notNull(),
+  phone: text("phone").notNull(),
+  email: text("email"),
+  accessCount: integer("access_count").notNull().default(1),
+  firstAccessAt: timestamp("first_access_at").notNull().defaultNow(),
+  lastAccessAt: timestamp("last_access_at").notNull().defaultNow(),
+  // 'active_cadence' | 'replied' | 'paused' | 'converted' | 'opted_out' | 'completed' | 'discarded'
+  status: text("status").notNull().default("active_cadence"),
+  pauseReason: text("pause_reason"),
+  currentStep: integer("current_step").notNull().default(0),
+  nextStepOrder: integer("next_step_order"),
+  nextStepAt: timestamp("next_step_at"),
+  sentCount: integer("sent_count").notNull().default(0),
+  lastSentAt: timestamp("last_sent_at"),
+  repliedAt: timestamp("replied_at"),
+  lastReaccessSentAt: timestamp("last_reaccess_sent_at"),
+  convertedClientId: uuid("converted_client_id").references(() => clientsTable.id, { onDelete: "set null" }),
+  notes: text("notes"),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("demo_leads_workspace_source_external_uq").on(table.workspaceId, table.source, table.externalId),
+]);
+
+export type DemoLead = typeof demoLeadsTable.$inferSelect;
+export type InsertDemoLead = typeof demoLeadsTable.$inferInsert;
+
+export const leadCadenceStepsTable = pgTable("lead_cadence_steps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  productLabel: text("product_label").notNull().default("PDV Lojista"),
+  stepKind: text("step_kind").notNull().default("sequence"), // 'sequence' | 'reaccess'
+  stepOrder: integer("step_order").notNull(),
+  title: text("title").notNull(),
+  delayMinutes: integer("delay_minutes").notNull().default(2),
+  respectBusinessHours: boolean("respect_business_hours").notNull().default(true),
+  businessStartHour: integer("business_start_hour").notNull().default(9),
+  businessEndHour: integer("business_end_hour").notNull().default(20),
+  bodyTemplate: text("body_template").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("lead_cadence_steps_workspace_source_kind_order_uq").on(
+    table.workspaceId,
+    table.source,
+    table.stepKind,
+    table.stepOrder,
+  ),
+]);
+
+export type LeadCadenceStep = typeof leadCadenceStepsTable.$inferSelect;
+export type InsertLeadCadenceStep = typeof leadCadenceStepsTable.$inferInsert;
+
 export const whatsappMessagesTable = pgTable("whatsapp_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspacesTable.id, { onDelete: "cascade" }),
   transactionId: uuid("transaction_id").references(() => financialTransactionsTable.id, { onDelete: "set null" }),
   clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
+  demoLeadId: uuid("demo_lead_id").references(() => demoLeadsTable.id, { onDelete: "set null" }),
+  cadenceStep: integer("cadence_step"),
   dedupeKey: text("dedupe_key").notNull().unique(),
   kind: text("kind").notNull(),
   recipient: text("recipient").notNull(),

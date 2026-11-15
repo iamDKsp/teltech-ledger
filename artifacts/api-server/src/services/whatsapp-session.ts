@@ -9,7 +9,7 @@ import makeWASocket, {
   downloadMediaMessage,
   downloadContentFromMessage,
 } from "@whiskeysockets/baileys";
-import { db, clientsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable, whatsappContactsTable, usersTable, workspaceMembersTable } from "@workspace/db";
+import { db, clientsTable, demoLeadsTable, financialTransactionsTable, whatsappConnectionsTable, whatsappMessagesTable, whatsappContactsTable, usersTable, workspaceMembersTable } from "@workspace/db";
 import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import pino from "pino";
 import QRCode from "qrcode";
@@ -22,6 +22,7 @@ import {
   useEncryptedDbAuthState,
 } from "./whatsapp-auth";
 import { sendPushNotificationToWorkspace } from "./push-notification";
+import { ensureDemoLeadsSchema, pauseLeadCadenceOnInteraction } from "./lead-cadence";
 
 type SessionStatus = "connecting" | "qr" | "connected" | "disconnected" | "logged_out" | "error";
 type Session = {
@@ -42,6 +43,16 @@ const sessions = new Map<string, Session>();
 const connecting = new Map<string, Promise<void>>();
 const finalizing = new Map<string, Promise<void>>();
 const baileysLogger = pino({ level: "error" });
+const systemSentMessageIds = new Set<string>();
+
+function rememberSystemSentId(id: string | null | undefined): void {
+  if (!id) return;
+  systemSentMessageIds.add(id);
+  if (systemSentMessageIds.size > 2000) {
+    const oldest = systemSentMessageIds.values().next().value;
+    if (oldest) systemSentMessageIds.delete(oldest);
+  }
+}
 
 /** Returns a normalized E.164 number without +. Brazilian local numbers get 55. */
 export function normalizeWhatsAppPhone(raw: string | null | undefined): string | null {
@@ -165,6 +176,7 @@ async function processOptOut(workspaceId: string, messages: any[]): Promise<void
     if (typeof text !== "string" || !isStopMessage(text)) continue;
     const sender = normalizeWhatsAppPhone(jid.split("@")[0]);
     if (!sender) continue;
+    await pauseLeadCadenceOnInteraction(workspaceId, sender, "opt_out").catch(() => undefined);
     const clients = await db.select({ id: clientsTable.id, phone: clientsTable.phone })
       .from(clientsTable)
       .where(and(eq(clientsTable.workspaceId, workspaceId), eq(clientsTable.whatsappOptIn, true)));
@@ -259,6 +271,9 @@ export function extractMessageText(rawMessage: any): string | null {
   }
   if (typeof message.extendedTextMessage?.text === "string" && message.extendedTextMessage.text.trim()) {
     return message.extendedTextMessage.text.trim();
+  }
+  if (typeof message.interactiveMessage?.body?.text === "string" && message.interactiveMessage.body.text.trim()) {
+    return message.interactiveMessage.body.text.trim();
   }
   if (typeof message.buttonsResponseMessage?.selectedDisplayText === "string") {
     return message.buttonsResponseMessage.selectedDisplayText.trim();
@@ -422,6 +437,9 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
 
     // If outbound, check if already recorded by sendManualTextMessage or queue to prevent duplicates
     if (isFromMe && item.key?.id) {
+      if (systemSentMessageIds.has(item.key.id)) {
+        continue;
+      }
       try {
         const [existing] = await db.select({ id: whatsappMessagesTable.id })
           .from(whatsappMessagesTable)
@@ -445,7 +463,7 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
     }
 
     try {
-      const [clients, contacts, members] = await Promise.all([
+      const [clients, contacts, members, demoLeads] = await Promise.all([
         db.select({
           id: clientsTable.id,
           name: clientsTable.name,
@@ -469,6 +487,16 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         }).from(usersTable)
           .innerJoin(workspaceMembersTable, eq(usersTable.id, workspaceMembersTable.userId))
           .where(eq(workspaceMembersTable.workspaceId, workspaceId)),
+        ensureDemoLeadsSchema()
+          .then(() =>
+            db.select({
+              id: demoLeadsTable.id,
+              name: demoLeadsTable.name,
+              phone: demoLeadsTable.phone,
+              sourceLabel: demoLeadsTable.sourceLabel,
+            }).from(demoLeadsTable).where(eq(demoLeadsTable.workspaceId, workspaceId)),
+          )
+          .catch(() => [] as Array<{ id: string; name: string; phone: string; sourceLabel: string }>),
       ]);
 
       const matchingContact = contacts.find(
@@ -481,6 +509,10 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
 
       const matchingClient = (!matchingContact && !matchingMember) ? clients.find(
         (c) => phonesMatch(c.phone, jidClean) || phonesMatch(c.phone, canonicalSender) || phonesMatch(c.phone, normalizedSender)
+      ) : null;
+
+      const matchingLead = (!matchingContact && !matchingMember && !matchingClient) ? demoLeads.find(
+        (l) => phonesMatch(l.phone, jidClean) || phonesMatch(l.phone, canonicalSender) || phonesMatch(l.phone, normalizedSender)
       ) : null;
 
       const isPartner = Boolean(matchingContact || matchingMember);
@@ -519,6 +551,7 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
         await db.insert(whatsappMessagesTable).values({
           workspaceId,
           clientId: matchingClient?.id ?? null,
+          demoLeadId: matchingLead?.id ?? null,
           transactionId,
           dedupeKey,
           kind: "manual_chat",
@@ -538,12 +571,18 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           sentAt,
           waMessageId: item.key?.id ?? null,
         }).onConflictDoNothing();
+        void pauseLeadCadenceOnInteraction(
+          workspaceId,
+          canonicalSender || normalizedSender || jidClean,
+          "operator_manual_chat",
+        ).catch(() => undefined);
       } else {
-        // Record inbound messages from client or partner
-        const resolvedSenderName = partnerName ?? matchingClient?.name ?? item.pushName ?? (isPartner ? "Sócio" : "Cliente");
+        // Record inbound messages from client, demo lead, or partner
+        const resolvedSenderName = partnerName ?? matchingClient?.name ?? matchingLead?.name ?? item.pushName ?? (isPartner ? "Sócio" : "Cliente");
         await db.insert(whatsappMessagesTable).values({
           workspaceId,
           clientId: matchingClient?.id ?? null,
+          demoLeadId: matchingLead?.id ?? null,
           transactionId,
           dedupeKey,
           kind: isPartner ? "partner_reply" : "client_reply",
@@ -563,6 +602,11 @@ async function processIncomingMessages(workspaceId: string, session: Session, me
           sentAt,
           waMessageId: item.key?.id ?? null,
         }).onConflictDoNothing();
+        void pauseLeadCadenceOnInteraction(
+          workspaceId,
+          canonicalSender || normalizedSender || jidClean,
+          "lead_replied",
+        ).catch(() => undefined);
 
         logger.info({
           workspaceId,
@@ -931,9 +975,12 @@ export async function sendWhatsAppText(workspaceId: string, recipient: string, b
   const session = await ensureConnectedSession(workspaceId);
   const phone = normalizeWhatsAppPhone(recipient);
   if (!phone) throw new Error("Telefone de destino inválido");
+  const id = stableMessageId(messageId);
+  rememberSystemSentId(id);
   const result = await session.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: body }, {
-    messageId: stableMessageId(messageId),
+    messageId: id,
   });
+  rememberSystemSentId(result?.key?.id);
   return result?.key?.id ?? null;
 }
 
@@ -985,75 +1032,104 @@ function withFooter(text: string, footer?: string): string {
 
 async function sendNativePix(session: Session, jid: string, message: OutboundMessage & { pix: PixAttachment }, messageId: string): Promise<string | null> {
   const { pix } = message;
-  const money = (value: number) => ({ value, offset: 100 });
-  const buttonParams = {
-    reference_id: pix.reference.slice(0, 35),
-    type: "digital-goods",
-    payment_configuration: "",
-    payment_type: "br",
-    currency: "BRL",
-    total_amount: money(pix.amountCents),
-    order: {
-      status: "pending",
-      subtotal: money(pix.amountCents),
-      tax: money(0),
-      items: [{
-        retailer_id: pix.reference.slice(0, 35),
-        name: pix.description.slice(0, 60) || "Pagamento",
-        amount: money(pix.amountCents),
-        quantity: 1,
-      }],
-    },
-    payment_settings: [{
-      type: "pix_dynamic_code",
-      pix_dynamic_code: {
-        code: pix.code,
-        merchant_name: pix.merchantName,
-        key: pix.key,
-        key_type: pix.keyType,
+  const amountFormatted = pix.amountCents > 0
+    ? (pix.amountCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+    : null;
+
+  const paymentInfoParams = {
+    payment_settings: [
+      {
+        type: "pix_static_code",
+        pix_static_code: {
+          merchant_name: pix.merchantName,
+          key: pix.key,
+          key_type: pix.keyType,
+          code: pix.code,
+        },
       },
-    }],
+    ],
   };
+
+  const ctaCopyParams = {
+    display_text: "Copiar Código Pix",
+    id: "pix_copy_code",
+    copy_code: pix.code,
+  };
+
+  const cardLines = [
+    ...(amountFormatted ? [`💰 *Valor*: ${amountFormatted}`] : []),
+    `👤 *Recebedor*: ${pix.merchantName}`,
+    `🔑 *Chave (${pix.keyType})*: ${pix.key}`,
+  ];
+
   const content = proto.Message.create({
-    viewOnceMessage: {
-      message: {
-        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-        interactiveMessage: proto.Message.InteractiveMessage.create({
-          body: { text: message.text },
-          ...(message.footer ? { footer: { text: message.footer } } : {}),
-          nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-            buttons: [{ name: "review_and_pay", buttonParamsJson: JSON.stringify(buttonParams) }],
-            messageParamsJson: "",
-          }),
-        }),
-      },
+    messageContextInfo: {
+      deviceListMetadata: {},
+      deviceListMetadataVersion: 2,
     },
+    interactiveMessage: proto.Message.InteractiveMessage.create({
+      header: proto.Message.InteractiveMessage.Header.create({
+        title: "Pagamento via Pix",
+        hasMediaAttachment: false,
+      }),
+      body: proto.Message.InteractiveMessage.Body.create({
+        text: cardLines.join("\n"),
+      }),
+      footer: proto.Message.InteractiveMessage.Footer.create({
+        text: "Toque no botão abaixo para copiar o Pix",
+      }),
+      nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+        buttons: [
+          {
+            name: "payment_info",
+            buttonParamsJson: JSON.stringify(paymentInfoParams),
+          },
+          {
+            name: "cta_copy",
+            buttonParamsJson: JSON.stringify(ctaCopyParams),
+          },
+        ],
+        messageParamsJson: "",
+        messageVersion: 1,
+      }),
+    }),
   });
+
   const userJid = session.socket.user?.id;
   if (!userJid) throw new Error("Sessão sem usuário");
   const generated = generateWAMessageFromContent(jid, content, { userJid, messageId });
+  const relayId = generated.key.id ?? messageId;
+  rememberSystemSentId(relayId);
+
   await session.socket.relayMessage(jid, generated.message!, {
-    messageId: generated.key.id!,
+    messageId: relayId,
     additionalNodes: [
       {
         tag: "biz",
         attrs: {},
-        content: [{
-          tag: "interactive",
-          attrs: { type: "native_flow", v: "1" },
-          content: [{ tag: "native_flow", attrs: { v: "9", name: "mixed" } }],
-        }],
+        content: [
+          {
+            tag: "interactive",
+            attrs: { type: "native_flow", v: "1" },
+            content: [
+              {
+                tag: "native_flow",
+                attrs: { v: "9", name: "payment_info" },
+              },
+            ],
+          },
+        ],
       },
-      { tag: "bot", attrs: { biz_bot: "1" } },
     ],
   });
-  return generated.key.id ?? null;
+  return relayId;
 }
 
 /**
  * Envia uma mensagem completa. Com Pix:
- *  - modo "native": tenta o botão de Pix do WhatsApp e, se falhar, cai para texto + código;
- *  - modo "text": envia o texto e, logo depois, só o código Copia e Cola (fácil de copiar).
+ *  - envia o texto principal da cobrança (com a chave Pix);
+ *  - envia o cartão interativo com botão de Pix do WhatsApp (payment_info + cta_copy);
+ *  - envia em seguida a mensagem limpa somente com o código Pix Copia e Cola (fácil de copiar com 1 toque em qualquer aparelho).
  * `jid` opcional permite usar o JID já confirmado por checkWhatsAppNumber.
  */
 export async function sendWhatsAppMessage(
@@ -1069,22 +1145,42 @@ export async function sendWhatsAppMessage(
   const target = jid ?? (await resolveDestinationJid(session, phone));
   const id = stableMessageId(messageId);
 
+  const text = withFooter(message.text, message.footer);
+  rememberSystemSentId(id);
+  const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
+  const primaryWaId = sent?.key?.id ?? id;
+  rememberSystemSentId(primaryWaId);
+
+  if (!message.pix) {
+    return { waMessageId: primaryWaId, mode: "plain" };
+  }
+
   let fallbackReason: string | undefined;
-  if (message.pix && message.pixMode === "native") {
+  let nativeSent = false;
+  if (message.pix.code) {
     try {
-      const waMessageId = await sendNativePix(session, target, { ...message, pix: message.pix }, id);
-      return { waMessageId, mode: "native" };
+      const btnId = `${id.slice(0, 28)}BTTN`;
+      rememberSystemSentId(btnId);
+      await sendNativePix(session, target, { ...message, pix: message.pix }, btnId);
+      nativeSent = true;
     } catch (error) {
       fallbackReason = error instanceof Error ? error.message : "Falha no botão de Pix";
-      logger.warn({ workspaceId, reason: fallbackReason }, "WhatsApp native Pix failed; falling back to text");
+      logger.warn({ workspaceId, reason: fallbackReason }, "WhatsApp native Pix failed; continuing with Copia e Cola code");
     }
   }
 
-  const text = withFooter(message.pix && message.pixMode === "native" ? (message.fallbackText ?? message.text) : message.text, message.footer);
-  const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
-  if (!message.pix) return { waMessageId: sent?.key?.id ?? null, mode: "plain" };
-  await session.socket.sendMessage(target, { text: message.pix.code }, { messageId: `${id.slice(0, 28)}C0DE` });
-  return { waMessageId: sent?.key?.id ?? null, mode: "text_with_code", fallbackReason };
+  if (message.pix.code) {
+    const codeId = `${id.slice(0, 28)}C0DE`;
+    rememberSystemSentId(codeId);
+    const codeSent = await session.socket.sendMessage(target, { text: message.pix.code }, { messageId: codeId });
+    rememberSystemSentId(codeSent?.key?.id);
+  }
+
+  return {
+    waMessageId: primaryWaId,
+    mode: nativeSent ? "native" : "text_with_code",
+    fallbackReason,
+  };
 }
 
 export async function restoreWhatsAppSessions(): Promise<void> {
@@ -1141,8 +1237,10 @@ export async function sendManualTextMessage(
   const id = stableMessageId(messageId);
   const target = await resolveDestinationJid(session, phone);
 
+  rememberSystemSentId(id);
   const sent = await session.socket.sendMessage(target, { text }, { messageId: id });
   const waMessageId = sent?.key?.id ?? id;
+  rememberSystemSentId(waMessageId);
 
   const dedupeKey = `outbound:${workspaceId}:${waMessageId}`;
 
@@ -1163,6 +1261,8 @@ export async function sendManualTextMessage(
     sentAt: new Date(),
     waMessageId,
   }).onConflictDoNothing().returning();
+
+  void pauseLeadCadenceOnInteraction(workspaceId, phone, "operator_manual_chat").catch(() => undefined);
 
   if (!created) {
     const [existing] = await db.select().from(whatsappMessagesTable)
@@ -1219,6 +1319,7 @@ export async function sendManualMediaMessage(
   const mediaUrl = `/uploads/whatsapp-media/${workspaceId}/${diskFilename}`;
 
   let sent: any;
+  rememberSystemSentId(id);
   if (media.mediaType === "image") {
     sent = await session.socket.sendMessage(target, {
       image: media.buffer,
@@ -1247,6 +1348,7 @@ export async function sendManualMediaMessage(
   }
 
   const waMessageId = sent?.key?.id ?? id;
+  rememberSystemSentId(waMessageId);
   const dedupeKey = `outbound:${workspaceId}:${waMessageId}`;
 
   let body = media.caption || "";
@@ -1279,6 +1381,8 @@ export async function sendManualMediaMessage(
     sentAt: new Date(),
     waMessageId,
   }).onConflictDoNothing().returning();
+
+  void pauseLeadCadenceOnInteraction(workspaceId, phone, "operator_manual_chat").catch(() => undefined);
 
   if (!created) {
     const [existing] = await db.select().from(whatsappMessagesTable)

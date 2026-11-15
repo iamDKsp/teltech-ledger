@@ -3,7 +3,8 @@ import { db, inboundWebhookEventsTable, inboundWebhookEntitiesTable, clientsTabl
 import { z } from "zod";
 import { and, eq, desc, sql } from "drizzle-orm";
 import { requireAuth, requireWorkspace, requireRole, type AuthenticatedRequest } from "../middlewares/auth";
-import { readWebhookIntegrations, WebhookError } from "../services/inbound-webhook-contract";
+import { WebhookError } from "../services/inbound-webhook-contract";
+import { loadActiveWebhookIntegrations, upsertDbWebhookIntegration } from "../services/webhook-config-store";
 
 const router = Router();
 router.use(requireAuth, requireWorkspace);
@@ -18,7 +19,7 @@ router.post("/:source/link", requireRole(["owner", "admin", "ceo", "cto"]), asyn
     const parsed = linkSchema.safeParse(req.body);
     if (!parsed.success) { res.status(422).json({ error: "invalid_link", message: "Informe o cliente, seu ID externo e, opcionalmente, a mensalidade e o ID da base juntos." }); return; }
     const workspaceId = (req as AuthenticatedRequest).user.workspaceId!;
-    const config = readWebhookIntegrations().find((c) => c.source === req.params.source && c.workspaceId === workspaceId);
+    const config = (await loadActiveWebhookIntegrations()).find((c) => c.source === req.params.source && c.workspaceId === workspaceId);
     if (!config) throw new WebhookError(404, "source_not_found", "Integração não encontrada neste workspace.");
     const input = parsed.data;
     await db.transaction(async (tx) => {
@@ -86,10 +87,33 @@ router.get("/revision", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/", requireRole(["owner", "admin", "ceo", "cto"]), async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as AuthenticatedRequest).user;
+    const workspaceId = authUser.workspaceId!;
+    const body = req.body ?? {};
+    const saved = await upsertDbWebhookIntegration({
+      workspaceId,
+      userId: authUser.userId,
+      source: String(body.source ?? ""),
+      name: String(body.name ?? ""),
+      secret: String(body.secret ?? ""),
+      projectId: body.projectId ? String(body.projectId) : null,
+      accountId: body.accountId ? String(body.accountId) : null,
+    });
+    res.status(200).json({ ok: true, integration: saved });
+  } catch (error) {
+    res.status(error instanceof WebhookError ? error.status : 500).json({
+      error: error instanceof WebhookError ? error.code : "save_integration_failed",
+      message: error instanceof WebhookError ? error.message : "Não foi possível salvar a integração de webhook.",
+    });
+  }
+});
+
 router.get("/", requireRole(["owner", "admin", "ceo", "cto"]), async (req: Request, res: Response) => {
   try {
     const workspaceId = (req as AuthenticatedRequest).user.workspaceId!;
-    const configs = readWebhookIntegrations().filter((i) => i.workspaceId === workspaceId);
+    const configs = (await loadActiveWebhookIntegrations()).filter((i) => i.workspaceId === workspaceId);
     const integrations = [];
     for (const config of configs) {
       const [lastEvent] = await db.select({ eventId: inboundWebhookEventsTable.eventId,
